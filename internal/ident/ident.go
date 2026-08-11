@@ -13,8 +13,8 @@ type Category int
 const (
 	Unmatched        Category = iota // def == nil
 	Keyed                            // len(KeyArgs()) > 0
-	KindedSingle                     // non-keyed, non-toggle, Kind set, single-occupancy
-	IdempotentSingle                 // idempotent && card in {ZeroToOne, One}
+	KindedSingle                     // non-keyed, non-toggle, non-EmptyOnRemove, Kind set, single-occupancy
+	IdempotentSingle                 // idempotent && card in {ZeroToOne, One}; KindedSingle wins when both apply
 	FullLine                         // everything else
 )
 
@@ -40,13 +40,14 @@ func SingleOccupancy(def *schema.Node) bool {
 	return def.Cardinality == schema.ZeroToOne || def.Cardinality == schema.One
 }
 
-// KindedSingleDef reports whether a definition pairs by Kind alone; toggle members keep flip semantics instead.
+// KindedSingleDef reports whether a definition pairs by Kind alone; toggle members keep flip semantics and EmptyOnRemove sections have no header negation to pair with.
 func KindedSingleDef(def *schema.Node) bool {
 	return len(def.KeyArgs) == 0 && def.KindName != "" &&
-		len(def.ToggleGroup) == 0 && SingleOccupancy(def)
+		len(def.ToggleGroup) == 0 && !def.EmptyOnRemove &&
+		SingleOccupancy(def)
 }
 
-// Ident pairs keyed nodes by Kind and key across sibling templates, and other nodes by definition; block bodies are excluded.
+// Ident pairs keyed nodes by Kind and key across sibling templates, Kind-marked single-occupancy nodes by Kind alone, and other nodes by definition; block bodies are excluded.
 type Ident struct {
 	Def  *schema.Node
 	Kind string
@@ -64,7 +65,7 @@ func Of(n *tree.Node) Ident {
 		}
 		return Ident{Def: n.Def, Key: KeyValue(n)}
 	case KindedSingle:
-		// The enclosing level is the identity, so variant spellings pair as one slot.
+		// Exclude the definition and value so sibling spellings of one Kind pair as one slot.
 		return Ident{Kind: n.Def.KindName}
 	case IdempotentSingle:
 		// Exclude the value so instances of the same slot pair.

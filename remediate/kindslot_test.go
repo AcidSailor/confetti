@@ -1,6 +1,7 @@
 package remediate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -295,4 +296,145 @@ func TestKindSlotIdempotentVariantReverseReplaces(t *testing.T) {
 		"router bgp 65000\n  no default-originate route-map RM\n"+
 			"  default-originate\n",
 		out)
+}
+
+func TestKindSlotProtectedRunningRefusesCrossDefReissue(t *testing.T) {
+	// A Kind-paired reissue destroys the running line, so Protect must refuse it exactly as it refuses a Replace.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
+	r.Child("default-originate route-map {{ m:word }}").
+		Card(schema.ZeroToOne).Kind("do").MarkIdempotent()
+	r.Child("default-originate").Card(schema.ZeroToOne).Kind("do").Protect()
+	out, d := rawDiff(t, s,
+		"router bgp 65000\n  default-originate\n",
+		"router bgp 65000\n  default-originate route-map RM\n")
+	assert.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "refusing to replace protected")
+	assert.Empty(t, out)
+}
+
+func TestKindSlotRunningCarriesBothSpellings(t *testing.T) {
+	// A device holding two spellings of one slot must have the unpaired one negated, not silently left live.
+	out, d := rawDiff(t, kindSlotSchema(),
+		"router bgp 65000\n  default-originate\n"+
+			"  default-originate route-map RM\n",
+		"router bgp 65000\n  default-originate\n")
+	assert.Equal(t,
+		"router bgp 65000\n  no default-originate route-map RM\n", out)
+	assert.Empty(t, d.String())
+}
+
+func TestKindSlotIntendedCarriesBothSpellings(t *testing.T) {
+	// Two intended spellings make the goal ambiguous, so only the first applies and the policy sets the severity.
+	s := kindSlotSchema()
+	res, d := Diff(
+		mustParse(t, s,
+			"router bgp 65000\n  default-originate route-map RM\n"),
+		mustParse(t, s, "router bgp 65000\n"+
+			"  default-originate route-map RM2\n  default-originate\n"),
+		diag.Policy{Strict: true},
+	)
+	assert.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "duplicate spelling")
+	// The stale line is negated once, not once per intended spelling.
+	assert.Equal(t,
+		"router bgp 65000\n  no default-originate route-map RM\n"+
+			"  default-originate route-map RM2\n",
+		render.Render(res.Tree))
+}
+
+func TestKindOnClearOnRemoveSectionKeepsExpandRemove(t *testing.T) {
+	// A Kind added for Ref resolution must not enrol an EmptyOnRemove section in slot pairing; it has no header negation.
+	build := func(kind bool) *schema.Schema {
+		s := schema.New()
+		testtypes.Fill(s.Registry)
+		v := s.Node("vlan database {{ n:word }}").
+			Card(schema.ZeroToOne).ClearOnRemove()
+		v.Child("vlan {{ id:vlan }}").Key("id")
+		if kind {
+			v.Kind("vdb")
+		}
+		return s
+	}
+	for _, kind := range []bool{false, true} {
+		out, d := rawDiff(t, build(kind),
+			"vlan database A\n  vlan 10\n", "vlan database B\n  vlan 10\n")
+		assert.Equal(t,
+			"vlan database A\n  no vlan 10\nvlan database B\n  vlan 10\n",
+			out, "kind=%v", kind)
+		assert.Empty(t, d.String(), "kind=%v", kind)
+	}
+}
+
+func TestSplitSlotStrictIsError(t *testing.T) {
+	// The split empties the slot on the device, so a strict policy must reject the plan instead of warning.
+	s := kindSlotSchema()
+	_, d := Diff(
+		mustParse(t, s, "router bgp 65000\n  local-as 65001\n"),
+		mustParse(t, s, "router bgp 65000\n  local-as 65002\n"),
+		diag.Policy{Strict: true},
+	)
+	assert.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "split single-occupancy slot")
+}
+
+func TestSplitSlotToggleSharingKindWithSiblingReported(t *testing.T) {
+	// A toggle member and a non-toggle sibling sharing a Kind are not a declared flip, so the split must be reported.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+	en := i.Child("logging enable").Card(schema.ZeroToOne).Kind("log")
+	i.Child("logging disable").Card(schema.ZeroToOne).Kind("log").Toggles(en)
+	i.Child("logging level {{ l:asn }}").Card(schema.ZeroToOne).Kind("log")
+	out, d := rawDiff(t, s,
+		"interface Ethernet1/1\n  logging enable\n",
+		"interface Ethernet1/1\n  logging level 3\n")
+	assert.Equal(t,
+		"interface Ethernet1/1\n  logging level 3\n  no logging enable\n", out)
+	assert.Contains(t, d.String(), "split single-occupancy slot")
+}
+
+func TestKindSlotReplaceEmitsRunningRefDiagnosticOnce(t *testing.T) {
+	// A Replace's removed subtree is its runSrc, so the ref walk must not visit it twice and double the diagnostic.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
+	for _, tmpl := range []string{"profile A", "profile B"} {
+		s.Node(tmpl).Card(schema.ZeroToOne).Kind("prof").
+			Child("trunk allowed {{ l:word }}").Card(schema.ZeroToOne).
+			List("l", "vlan").Ref("l", "vlan.id")
+	}
+	_, d := rawDiff(t, s, "profile A\n  trunk allowed 10-\n", "profile B\n")
+	assert.Equal(t, 1,
+		strings.Count(d.String(), "unresolvable list"), d.String())
+}
+
+func TestKindOnManyStaysIndependent(t *testing.T) {
+	// Multi-occupancy siblings sharing a Kind must not collapse to one slot, which would silently negate all but the first.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
+	r.Child("network {{ n:word }}").Card(schema.ZeroToN).Kind("net")
+	out, d := rawDiff(t, s,
+		"router bgp 65000\n  network A\n  network B\n",
+		"router bgp 65000\n  network A\n  network C\n")
+	assert.Equal(t,
+		"router bgp 65000\n  network C\n  no network B\n", out)
+	assert.Empty(t, d.String())
+}
+
+func TestKeyedSingleWithKindStaysKeyed(t *testing.T) {
+	// A keyed single-occupancy node keeps key identity; pairing it by Kind alone would merge unrelated keys.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
+	r.Child("peer {{ n:word }}").Card(schema.ZeroToOne).Kind("pk").Key("n")
+	cfg := mustParse(t, s, "router bgp 65000\n  peer A\n")
+	peer := cfg.Root.Children[0].Children[0]
+	assert.Equal(t, ident.Keyed, ident.CategoryOf(peer))
+	// Different keys are unrelated nodes, so the change is an add plus a remove, never a Replace.
+	out, _ := rawDiff(t, s,
+		"router bgp 65000\n  peer A\n", "router bgp 65000\n  peer B\n")
+	assert.Equal(t, "router bgp 65000\n  peer B\n  no peer A\n", out)
 }

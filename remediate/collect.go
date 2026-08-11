@@ -57,11 +57,18 @@ func (dv *differ) collect(
 	prefix pathKey,
 ) {
 	d := dv.d
-	runByIdent := indexByIdent(runParent.Children, d)
-	intByIdent := indexByIdent(intParent.Children, d)
+	runByIdent := indexByIdent(runParent.Children)
+	intByIdent := indexByIdent(intParent.Children)
 
 	var intents []createIntent
 	for _, ic := range intParent.Children {
+		// A second intended spelling of one slot makes the goal ambiguous, so report it instead of applying both.
+		if first := intByIdent[ident.Of(ic)]; first != ic {
+			d.AddAt(ic.Line, dv.p.Severity(),
+				"%s: duplicate spelling of %q; only the first is applied",
+				ic.Path(), first.Text)
+			continue
+		}
 		rc, ok := runByIdent[ident.Of(ic)]
 		switch {
 		case !ok:
@@ -69,7 +76,7 @@ func (dv *differ) collect(
 		case ic.Def != rc.Def && (ident.IsSection(ic) || ident.IsSection(rc)):
 			intents = append(intents,
 				createIntent{src: ic, run: rc, kind: ckReplace})
-		// A Kind-paired section header has no key, so a changed header value replaces the whole section instead of a Modify reissue.
+		// A non-idempotent Kind-paired section header has no key, so a changed header value replaces the whole section instead of a Modify reissue.
 		case ident.IsSection(ic) && ic.Text != rc.Text &&
 			!ic.Def.Idempotent &&
 			ident.CategoryOf(ic) == ident.KindedSingle:
@@ -98,15 +105,33 @@ func (dv *differ) collect(
 
 	var removes []*tree.Node
 	for _, rc := range runParent.Children {
+		if first := runByIdent[ident.Of(rc)]; first != rc {
+			// Two spellings of one Kind slot are two live device lines, so the unpaired one still needs negating.
+			if ident.CategoryOf(rc) == ident.KindedSingle &&
+				rc.Text != first.Text {
+				removes = append(removes, rc)
+				continue
+			}
+			// Any other duplicate repeats a line the device holds once, so negating it would delete the kept slot.
+			d.AddAt(rc.Line, diag.Warning,
+				"%s: duplicate of %q ignored by diff (first occurrence wins)",
+				rc.Path(), first.Text)
+			continue
+		}
 		if _, ok := intByIdent[ident.Of(rc)]; !ok {
 			removes = append(removes, rc)
 		}
 	}
 	removes, flips := dropToggles(intents, removes, d)
-	warnSplitSingles(intents, removes, d)
+	dv.checkSplitSingles(intents, removes)
 
 	for i, ci := range intents {
 		k := append(slices.Clone(prefix), levelKey{0, dv.order[ci.src.Def], i})
+		// A cross-definition Modify destroys the running line just as a Replace does, so both obey protection.
+		if (ci.kind == ckModify || ci.kind == ckListDelta) &&
+			ci.src.Def != ci.run.Def && dv.refuseProtected(ci) {
+			continue
+		}
 		switch ci.kind {
 		case ckAdd:
 			dv.ops = append(dv.ops, op{
@@ -154,14 +179,7 @@ func (dv *differ) collect(
 			child := append(slices.Clone(secs), ci.src)
 			dv.collect(ci.run, ci.src, child, k)
 		case ckReplace:
-			// Refuse replacement when either paired node or a running descendant is protected because replacement includes deletion.
-			p := protectedIn(ci.run)
-			if p == nil && ci.src.Def != nil && ci.src.Def.Protected {
-				p = ci.src
-			}
-			if p != nil {
-				d.Add(diag.Error, "%s: refusing to replace protected %q",
-					p.Path(), p.Text)
+			if dv.refuseProtected(ci) {
 				continue
 			}
 			// Refuse replacement of a running EmptyOnRemove section because it has no header negation form.
@@ -200,29 +218,44 @@ func (dv *differ) collect(
 	}
 }
 
-// warnSplitSingles flags an Add and a Remove that land on one single-occupancy slot because the split leaves the slot empty on the device.
-func warnSplitSingles(
+// refuseProtected reports the protected node an intent would destroy and returns true when the intent must be dropped.
+func (dv *differ) refuseProtected(ci createIntent) bool {
+	p := protectedIn(ci.run)
+	if p == nil && ci.src.Def != nil && ci.src.Def.Protected {
+		p = ci.src
+	}
+	if p == nil {
+		return false
+	}
+	dv.d.Add(diag.Error, "%s: refusing to replace protected %q",
+		p.Path(), p.Text)
+	return true
+}
+
+// checkSplitSingles reports an Add and a Remove that land on one single-occupancy slot because the split leaves the slot empty on the device.
+func (dv *differ) checkSplitSingles(
 	intents []createIntent,
 	removes []*tree.Node,
-	d *diag.Diagnostics,
 ) {
+	// An EmptyOnRemove section is excluded because expandRemove empties it instead of negating a header that could cancel the add.
+	pairable := func(def *schema.Node) bool {
+		return def != nil && len(def.KeyArgs) == 0 &&
+			!def.EmptyOnRemove && ident.SingleOccupancy(def)
+	}
 	for _, ci := range intents {
 		def := ci.src.Def
-		// Toggle members are excluded because the toggle machinery owns their add/remove pairs.
-		if ci.kind != ckAdd || def == nil || len(def.KeyArgs) > 0 ||
-			len(def.ToggleGroup) > 0 || !ident.SingleOccupancy(def) {
+		if ci.kind != ckAdd || !pairable(def) {
 			continue
 		}
 		for _, rc := range removes {
 			rdef := rc.Def
-			if rdef == nil || len(rdef.KeyArgs) > 0 ||
-				len(rdef.ToggleGroup) > 0 ||
-				!ident.SingleOccupancy(rdef) {
+			// Declared toggle partners are excluded because the device flip supersedes the removal.
+			if !pairable(rdef) || slices.Contains(def.ToggleGroup, rdef) {
 				continue
 			}
 			if rdef == def ||
 				(def.KindName != "" && rdef.KindName == def.KindName) {
-				d.AddAt(ci.src.Line, diag.Warning,
+				dv.d.AddAt(ci.src.Line, dv.p.Severity(),
 					"%s: add and remove split single-occupancy slot %q;"+
 						" give the definition a Kind or MarkIdempotent",
 					ci.src.Path(), rc.Text)

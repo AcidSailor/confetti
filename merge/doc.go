@@ -7,6 +7,8 @@
 //
 // Merge treats each non-keyed ZeroToOne definition as one slot per level,
 // regardless of value. Therefore, "router bgp 65000" and "router bgp 65001"
-// conflict. Remediate does not use this extension because it handles the same
-// difference as Remove and Add operations.
+// conflict. Remediate applies this pairing only where the schema marks a slot
+// with a Kind, because an unmarked pair can be genuinely independent
+// siblings; it handles the unmarked difference as Remove and Add operations
+// and reports the split.
 package merge

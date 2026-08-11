@@ -396,6 +396,34 @@ func TestMergeKindSlotStrictConflicts(t *testing.T) {
 		"router bgp 65000\n  default-originate route-map RM\n")
 	assert.True(t, d.HasErrors())
 	assert.Equal(t, "router bgp 65000\n  default-originate\n", got)
+	// The message must name the losing spelling, not merely report an error.
+	assert.Contains(t, d.String(), "conflicts")
+	assert.Contains(t, d.String(), "default-originate route-map RM")
+}
+
+func TestMergeKindSlotIdenticalSpellingIsSilent(t *testing.T) {
+	// One slot spelled the same way twice is not a conflict in either policy.
+	for _, strict := range []bool{true, false} {
+		got, d := mergeText(t, kindSlotSchema(), strict,
+			"router bgp 65000\n  default-originate\n",
+			"router bgp 65000\n  default-originate\n")
+		assert.Equal(t, "router bgp 65000\n  default-originate\n", got)
+		assert.Empty(t, d.String(), "strict=%v", strict)
+	}
+}
+
+func TestMergeToggleWithKindStillSharesOneSlot(t *testing.T) {
+	// mergeIdent excludes KindedSingle from the canonical-toggle slot rule, so declared partners must still collide.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+	en := i.Child("logging enable").Card(schema.ZeroToOne).Kind("log")
+	i.Child("logging disable").Card(schema.ZeroToOne).Kind("log").Toggles(en)
+	got, d := mergeText(t, s, false,
+		"interface Ethernet1/1\n  logging enable\n",
+		"interface Ethernet1/1\n  logging disable\n")
+	assert.Equal(t, "interface Ethernet1/1\n  logging disable\n", got)
+	assert.Contains(t, d.String(), "overrides")
 }
 
 func TestMergeKindSlotLenientWarnsOnOverride(t *testing.T) {

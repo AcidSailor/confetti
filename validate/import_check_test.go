@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -350,4 +351,55 @@ func TestImportCheckKindSlotSatisfiesRequiredOne(t *testing.T) {
 	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "missing required")
+}
+
+func TestImportCheckKindSpellingsAtDifferentLevelsAreFine(t *testing.T) {
+	// kindSeen is per level, so one spelling under each of two parents is a valid config, not a duplicate.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	v := s.Node("vrf {{ name:word }}").Card(schema.ZeroToN).Key("name")
+	v.Child("default-originate route-map {{ rmap:word }}").
+		Card(schema.ZeroToOne).Kind("default-originate")
+	v.Child("default-originate").
+		Card(schema.ZeroToOne).Kind("default-originate")
+
+	d := diag.New()
+	cfg := parse.Parse(
+		s,
+		"vrf RED\n  default-originate\n"+
+			"vrf BLUE\n  default-originate route-map RM\n",
+		diag.Policy{Strict: true},
+		d,
+	)
+	ImportCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestImportCheckThreeKindSpellingsReportEachExtra(t *testing.T) {
+	// Every spelling past the first is unreachable for pairing, so each one must be named.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
+	for _, tmpl := range []string{
+		"default-originate route-map {{ rmap:word }}",
+		"default-originate always",
+		"default-originate",
+	} {
+		r.Child(tmpl).Card(schema.ZeroToOne).Kind("default-originate")
+	}
+	d := diag.New()
+	cfg := parse.Parse(
+		s,
+		"router bgp 65000\n  default-originate\n  default-originate always\n"+
+			"  default-originate route-map RM\n",
+		diag.Policy{Strict: true},
+		d,
+	)
+	ImportCheck(cfg, d)
+	assert.Equal(
+		t,
+		2,
+		strings.Count(d.String(), "duplicate spelling"),
+		d.String(),
+	)
 }

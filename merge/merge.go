@@ -98,7 +98,7 @@ func (m *merger) level(outParent, partParent *tree.Node, part int) {
 	}
 }
 
-// mergeIdent gives each non-keyed ZeroToOne definition one slot per level, regardless of value.
+// mergeIdent gives each non-keyed ZeroToOne definition that ident.Of does not already pair by Kind one slot per level, regardless of value.
 func mergeIdent(n *tree.Node) ident.Ident {
 	def := n.Def
 	// Kind-paired spellings already share one slot through ident.Of.

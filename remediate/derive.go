@@ -164,7 +164,12 @@ func (dv *differ) deriveRefEdges() {
 			}
 		}
 		// A Remove op deletes o.src; every other action can retarget away from runSrc or a superseded toggle partner.
-		for _, src := range []*tree.Node{o.runSrc, removedSubtree(o)} {
+		// A Replace's removed subtree is its runSrc, so walking both would double every edge and diagnostic.
+		retargeted := []*tree.Node{o.runSrc}
+		if rm := removedSubtree(o); rm != o.runSrc {
+			retargeted = append(retargeted, rm)
+		}
+		for _, src := range retargeted {
 			if src == nil {
 				continue
 			}
@@ -383,14 +388,14 @@ func (dv *differ) deriveRequireEdges() {
 					"%s: requires a %q but the goal defines none",
 					opPath(o), rq.kind,
 				)
-			case graph.Remove:
-				addRemovalEdges(i, rq)
 			}
 		}
-		if o.flipRun == nil {
+		// Whatever an op deletes must lose its prerequisites after it: o.src for a Remove, o.runSrc for a Replace, o.flipRun for a toggle flip.
+		rm := removedSubtree(o)
+		if rm == nil {
 			continue
 		}
-		for _, rq := range requirementsOf(o.flipRun) {
+		for _, rq := range requirementsOf(rm) {
 			if validRequirement(rq) && !survivors[rq.kind] {
 				addRemovalEdges(i, rq)
 			}
