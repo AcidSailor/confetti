@@ -1,18 +1,13 @@
-// Package schema declares a platform grammar as a tree of node definitions,
-// each a line template with typed captures ("vlan {{ id:vlan }}"), plus the
-// metadata used by other packages: cardinality, Kind/Key identity,
-// cross-references (Ref), prerequisite Kinds (Requires), negation and reset
-// forms (NegateAs/NegateDefault/NegateFunc), raw-block capture
-// (BlockDelim/BlockUntil), toggle groups (Toggles), list-valued args
-// (List/ListDelta/ListKeywords/ListContinues), dual-form spellings
-// (Members/RespellAs), and Protected deletion constraints.
+// Package schema defines platform configuration grammars.
 //
-// MatchChild resolves a configuration line against candidate definitions at
-// one level. Declaration order resolves equal-specificity matches and is
-// therefore part of the schema behavior.
+// A grammar is a tree of line templates with typed captures and metadata for
+// identity, cardinality, relationships, alternate forms, and deletion rules.
 //
-// Builder misuse panics during schema construction. Mutual exclusions apply in
-// both method-call orders. Cross-definition checks, such as Ref or Requires
-// target existence, run during validation or Diff because schema construction
-// has no finalize step.
+// MatchChild matches a configuration line against definitions at one tree
+// level. Declaration order breaks ties between equally specific matches and
+// therefore affects schema behavior.
+//
+// Invalid builder calls panic during schema construction. Mutual exclusions
+// apply in both method-call orders. Validation and Diff check cross-definition
+// references because schema construction has no finalization step.
 package schema

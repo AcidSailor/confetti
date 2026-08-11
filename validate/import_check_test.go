@@ -26,17 +26,17 @@ func miniSchema() *schema.Schema {
 	return s
 }
 
-func TestPhaseABadValue(t *testing.T) {
+func TestImportCheckBadValue(t *testing.T) {
 	s := miniSchema()
 	d := diag.New()
 	cfg := parse.Parse(s, "vlan 9999\n", diag.Policy{Strict: true}, d)
 	require.False(t, d.HasErrors(), d.String())
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "out of range")
 }
 
-func TestPhaseABadIP(t *testing.T) {
+func TestImportCheckBadIP(t *testing.T) {
 	s := miniSchema()
 	d := diag.New()
 	cfg := parse.Parse(
@@ -45,11 +45,11 @@ func TestPhaseABadIP(t *testing.T) {
 		diag.Policy{Strict: true},
 		d,
 	)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 }
 
-func TestPhaseAGoodValuesClean(t *testing.T) {
+func TestImportCheckGoodValuesClean(t *testing.T) {
 	s := miniSchema()
 	d := diag.New()
 	cfg := parse.Parse(
@@ -59,11 +59,11 @@ func TestPhaseAGoodValuesClean(t *testing.T) {
 		diag.Policy{Strict: true},
 		d,
 	)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
-func TestPhaseADuplicateSingle(t *testing.T) {
+func TestImportCheckDuplicateSingle(t *testing.T) {
 	s := miniSchema()
 	d := diag.New()
 	cfg := parse.Parse(
@@ -72,23 +72,22 @@ func TestPhaseADuplicateSingle(t *testing.T) {
 		diag.Policy{Strict: true},
 		d,
 	)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "only one allowed")
 }
 
-func TestPhaseADuplicateKey(t *testing.T) {
+func TestImportCheckDuplicateKey(t *testing.T) {
 	s := miniSchema()
 	d := diag.New()
 	cfg := parse.Parse(s, "vlan 10\nvlan 10\n", diag.Policy{Strict: true}, d)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "duplicate")
 }
 
-func TestPhaseATwoInvalidArgsDeterministicOrder(t *testing.T) {
-	// Two invalid args on one line emit in sorted arg order (ip before mask),
-	// not map iteration order.
+func TestImportCheckTwoInvalidArgsDeterministicOrder(t *testing.T) {
+	// Invalid arguments produce diagnostics in sorted order.
 	s := miniSchema()
 	d := diag.New()
 	cfg := parse.Parse(
@@ -98,7 +97,7 @@ func TestPhaseATwoInvalidArgsDeterministicOrder(t *testing.T) {
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	require.Len(t, d.Items, 2)
 	assert.Contains(t, d.Items[0].Message, `invalid ip "10.0.0.300"`)
 	assert.Contains(t, d.Items[1].Message, `invalid mask "255.255.255.300"`)
@@ -108,11 +107,11 @@ func oneSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
-	iface.Child("mtu {{ n:uint }}").Card(schema.One) // exactly one required
+	iface.Child("mtu {{ n:uint }}").Card(schema.One)
 	return s
 }
 
-func TestPhaseARequiredOneMissing(t *testing.T) {
+func TestImportCheckRequiredOneMissing(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(
 		oneSchema(),
@@ -120,12 +119,12 @@ func TestPhaseARequiredOneMissing(t *testing.T) {
 		diag.Policy{Strict: true},
 		d,
 	)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "missing required")
 }
 
-func TestPhaseARequiredOnePresent(t *testing.T) {
+func TestImportCheckRequiredOnePresent(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(
 		oneSchema(),
@@ -133,11 +132,11 @@ func TestPhaseARequiredOnePresent(t *testing.T) {
 		diag.Policy{Strict: true},
 		d,
 	)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
-func TestPhaseAOneDuplicate(t *testing.T) {
+func TestImportCheckOneDuplicate(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(
 		oneSchema(),
@@ -145,14 +144,13 @@ func TestPhaseAOneDuplicate(t *testing.T) {
 		diag.Policy{Strict: true},
 		d,
 	)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "only one allowed")
 }
 
 func TestDuplicateKeyAcrossSiblingDefs(t *testing.T) {
-	// Two templates sharing Kind+Key are one key space: the same key via
-	// the named and name-less forms is a duplicate.
+	// Definitions with the same Kind and Key share one key space.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("vlan {{ id:vlan }} state {{ state:word }}").
@@ -163,19 +161,19 @@ func TestDuplicateKeyAcrossSiblingDefs(t *testing.T) {
 	cfg := parse.Parse(s,
 		"vlan 10 state enable\nvlan 10 name FOO state disable\n",
 		diag.Policy{Strict: true}, d)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "duplicate key")
 }
 
-func TestPhaseARequiredOneMissingAtRoot(t *testing.T) {
+func TestImportCheckRequiredOneMissingAtRoot(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("hostname {{ h:word }}").Card(schema.One)
 	d := diag.New()
 	cfg := parse.Parse(s, "", diag.Policy{Strict: true}, d)
 	require.False(t, d.HasErrors(), d.String())
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	require.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), `<root>: missing required`)
 }
@@ -189,7 +187,7 @@ func toggleSchema() *schema.Schema {
 	return s
 }
 
-func TestPhaseAToggleGroupViolation(t *testing.T) {
+func TestImportCheckToggleGroupViolation(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(
 		toggleSchema(),
@@ -198,7 +196,7 @@ func TestPhaseAToggleGroupViolation(t *testing.T) {
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	require.True(t, d.HasErrors())
 	assert.Contains(
 		t,
@@ -208,7 +206,7 @@ func TestPhaseAToggleGroupViolation(t *testing.T) {
 	assert.Equal(t, 3, d.Items[0].Line, "points at the second member")
 }
 
-func TestPhaseAToggleGroupSingleMemberClean(t *testing.T) {
+func TestImportCheckToggleGroupSingleMemberClean(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(
 		toggleSchema(),
@@ -216,18 +214,17 @@ func TestPhaseAToggleGroupSingleMemberClean(t *testing.T) {
 		diag.Policy{Strict: true},
 		d,
 	)
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
 func TestValidateSkipsNilDefNodes(t *testing.T) {
-	// Hand-built trees (and Merge output) can carry nodes no schema def ever
-	// matched; both phases must skip them without crashing or reporting.
+	// ImportCheck and CommitCheck ignore unmatched nodes in hand-built or merged trees.
 	s := miniSchema()
 	cfg := tree.NewConfig(s)
 	cfg.Root.AddChild(tree.NewNode("bogus unmatched line"))
 	d := diag.New()
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	CommitCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
@@ -239,7 +236,7 @@ func listSchema() *schema.Schema {
 	return s
 }
 
-func TestPhaseAListItemChecks(t *testing.T) {
+func TestImportCheckListItemChecks(t *testing.T) {
 	tests := []struct {
 		name, cfg, wantMsg string
 	}{
@@ -255,31 +252,31 @@ func TestPhaseAListItemChecks(t *testing.T) {
 			d := diag.New()
 			cfg := parse.Parse(s, tt.cfg, diag.Policy{Strict: true}, d)
 			require.False(t, d.HasErrors(), d.String())
-			PhaseA(cfg, d)
+			ImportCheck(cfg, d)
 			assert.True(t, d.HasErrors())
 			assert.Contains(t, d.String(), tt.wantMsg)
 		})
 	}
 }
 
-func TestPhaseAListGoodValuesClean(t *testing.T) {
+func TestImportCheckListGoodValuesClean(t *testing.T) {
 	s := listSchema()
 	d := diag.New()
 	cfg := parse.Parse(s, "allowed vlan 10,20-22,4094\n",
 		diag.Policy{Strict: true}, d)
 	require.False(t, d.HasErrors(), d.String())
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
-func TestPhaseADiagnosticsCarryLines(t *testing.T) {
+func TestImportCheckDiagnosticsCarryLines(t *testing.T) {
 	s := miniSchema()
 	d := diag.New()
 	cfg := parse.Parse(s,
 		"interface Ethernet1/1\nvlan 10\nvlan 9999\nvlan 10\n",
 		diag.Policy{Strict: true}, d)
 	require.False(t, d.HasErrors(), d.String())
-	PhaseA(cfg, d)
+	ImportCheck(cfg, d)
 	require.True(t, d.HasErrors())
 	byMsg := map[string]int{}
 	for _, it := range d.Items {

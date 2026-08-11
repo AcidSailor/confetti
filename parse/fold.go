@@ -87,7 +87,7 @@ func (lf *levelFold) foldContinuation(m *tree.Node) {
 	mls, bls := def.ListSpec, base.ListSpec
 	items, err := listval.Resolve(m.Fields[mls.Arg], mls.Sep, mls.Keywords())
 	if err != nil {
-		return // Leave the line for Phase A list validation.
+		return // Leave the malformed list for ImportCheck.
 	}
 
 	var slot *tree.Node
@@ -116,7 +116,7 @@ func (lf *levelFold) foldContinuation(m *tree.Node) {
 	bkw := bls.Keywords()
 	cur, err := listval.Resolve(slot.Fields[bls.Arg], bls.Sep, bkw)
 	if err != nil {
-		// Report the continuation because Phase A reports the malformed base at a different line.
+		// ImportCheck reports the malformed base at its source line.
 		d.AddAt(m.Line, diag.Warning,
 			"%s: continuation left unfolded: base list %q is malformed",
 			m.Path(), slot.Fields[bls.Arg])
@@ -220,7 +220,7 @@ func (lf *levelFold) foldOne(m *tree.Node, seen map[ident.Ident]*tree.Node) {
 	ls := def.ListSpec
 	items, err := listval.Resolve(m.Fields[ls.Arg], ls.Sep, ls.Keywords())
 	if err != nil {
-		return // Leave the line for Phase A list validation.
+		return // Leave the malformed list for ImportCheck.
 	}
 	var repl []*tree.Node
 	for _, it := range items {
@@ -248,7 +248,7 @@ func (lf *levelFold) foldOne(m *tree.Node, seen map[ident.Ident]*tree.Node) {
 		nn := tree.NewNode(text)
 		nn.Def, nn.Fields, nn.RealIndent = canon, fields, m.RealIndent
 		nn.Line = m.Line
-		// Deduplicate only when the existing identity agrees on all synthesized fields; Phase A handles conflicting duplicate keys.
+		// Keep conflicting duplicates for ImportCheck.
 		if ex, ok := seen[ident.Of(nn)]; ok &&
 			fieldsSubset(fields, ex.Fields) {
 			continue

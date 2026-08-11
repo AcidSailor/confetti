@@ -67,9 +67,7 @@ func TestDiffListNoDeltaFormsFallsBackToModify(t *testing.T) {
 }
 
 func TestDiffListMalformedFallsBackToModify(t *testing.T) {
-	// "30-20" parses (word matches) but does not Expand; Diff must never be
-	// worse than the whole-line modify it replaces. mustParse runs no PhaseA,
-	// so the malformed value legitimately reaches Diff.
+	// mustParse skips ImportCheck, so Diff must handle the malformed range with a whole-line modification.
 	out, _ := remediation(t,
 		"interface eth1\n  switchport trunk allowed vlan 30-20\n",
 		"interface eth1\n  switchport trunk allowed vlan 10\n")

@@ -777,6 +777,44 @@ func TestCommitCheckPerItemListRef(t *testing.T) {
 	assert.Contains(t, cc3.String(), `vlan "42" does not exist`)
 }
 
+func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
+	noUsersVlan := func(cfg *tree.Config, d *diag.Diagnostics) {
+		tree.Walk(cfg, func(n *tree.Node) {
+			if n.Fields["text"] == "USERS" {
+				d.AddAt(
+					n.Line,
+					diag.Error,
+					"%s: name USERS is reserved",
+					n.Path(),
+				)
+			}
+		})
+	}
+	e := confetti.New(alpha.Schema(),
+		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithCommitChecks(noUsersVlan))
+
+	bad, d := e.Import("vlan 10\n  name USERS\n")
+	require.False(t, d.HasErrors(), d.String())
+	good, d2 := e.Import("vlan 10\n  name GUESTS\n")
+	require.False(t, d2.HasErrors(), d2.String())
+
+	cc := e.CommitCheck(bad)
+	require.True(t, cc.HasErrors())
+	assert.Contains(t, cc.String(), "name USERS is reserved")
+	assert.False(t, e.CommitCheck(good).HasErrors())
+
+	// Remediate checks intended; Rollback checks running.
+	_, rd := e.Remediate(good, bad)
+	assert.Contains(t, rd.String(), "name USERS is reserved")
+	_, bd := e.Rollback(bad, good)
+	assert.Contains(t, bd.String(), "name USERS is reserved")
+
+	// Compare does not run commit checks.
+	_, cd := e.Compare(good, bad)
+	assert.NotContains(t, cd.String(), "name USERS is reserved")
+}
+
 func TestRemediatePerItemRefOrdersDelta(t *testing.T) {
 	e := confetti.New(refListSchema(),
 		confetti.WithPolicy(diag.Policy{Strict: true}))

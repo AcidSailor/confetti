@@ -14,8 +14,8 @@ import (
 	"github.com/acidsailor/confetti/value"
 )
 
-// PhaseA validates node values, cardinality, duplicate keys, toggle exclusions, and required nodes within each level.
-func PhaseA(cfg *tree.Config, d *diag.Diagnostics) {
+// ImportCheck validates node values, cardinality, duplicate keys, toggle exclusions, and required nodes within each level.
+func ImportCheck(cfg *tree.Config, d *diag.Diagnostics) {
 	reg := cfg.Schema.Registry
 	// Capture names are fixed per definition, so sort them once instead of per node.
 	argNames := map[*schema.Node][]string{}
@@ -121,7 +121,6 @@ func checkCardinality(
 		checkCardinality(c, def.Children, d)
 	}
 
-	// Report missing non-keyed nodes with cardinality One at this level.
 	for _, sn := range allowed {
 		if sn.Cardinality == schema.One && len(sn.KeyArgs) == 0 &&
 			count[sn] == 0 {
@@ -142,8 +141,8 @@ func parentPath(n *tree.Node) string {
 	return "<root>"
 }
 
-// anchoredCache stores anchored element patterns across imports.
-var anchoredCache sync.Map // Map pattern strings to compiled regular expressions.
+// anchoredCache stores compiled element patterns across imports.
+var anchoredCache sync.Map
 
 func anchored(pattern string) *regexp.Regexp {
 	if re, ok := anchoredCache.Load(pattern); ok {
@@ -155,7 +154,7 @@ func anchored(pattern string) *regexp.Regexp {
 	return re.(*regexp.Regexp)
 }
 
-// listItems splits a node's list argument, reporting a malformed list for either phase.
+// listItems parses a list and reports malformed syntax.
 func listItems(
 	n *tree.Node,
 	ls schema.ListStrategy,

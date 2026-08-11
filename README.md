@@ -66,6 +66,14 @@ iface.Child("switchport access vlan {{ vlan:vlan }}").
 A lenient `diag.Policy` downgrades unknown commands to warnings for existing
 configurations.
 
+Use `WithCommitChecks` for whole-tree rules that do not fit the schema. The
+validators run after the built-in check in `CommitCheck`, `Remediate`, and
+`Rollback`:
+
+```go
+e := confetti.New(mySchema, confetti.WithCommitChecks(checkPlatformRules))
+```
+
 See [example_test.go](example_test.go) for a runnable schema. The schemas in
 `internal/fixture/` cover additional features but model imaginary platforms and
 are not suitable for real devices. Define production platform schemas in

@@ -134,7 +134,7 @@ func TestIndexByIdentFirstWins(t *testing.T) {
 		t,
 		s,
 		"vlan 10\nvlan 10\n",
-	) // duplicate key (PhaseA would flag; here we just index)
+	) // ImportCheck is not run here, so the duplicate reaches the index.
 	d := diag.New()
 	idx := indexByIdent(cfg.Root.Children, d)
 	require.Len(t, idx, 1)

@@ -48,8 +48,6 @@ func TestCommitCheckResolvedRef(t *testing.T) {
 	assert.False(t, d.HasErrors(), d.String())
 }
 
-// multiRefSchema has two distinct cross-references (vlan + route-map) so a
-// single pass can surface more than one dangling-ref diagnostic.
 func multiRefSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -77,9 +75,7 @@ func TestCommitCheckCollectsMultiple(t *testing.T) {
 	assert.Contains(t, d.String(), `route-map "MISSING" does not exist`)
 }
 
-// TestCommitCheckMultiKeyRefResolves guards the route-map fix: a definition with
-// a composite (name, action, seq) key is still resolvable by a ref that targets
-// the name alone, and multiple sequences under one name are not a duplicate.
+// A reference can target one component of a composite key.
 func TestCommitCheckMultiKeyRefResolves(t *testing.T) {
 	d := diag.New()
 	in := "route-map FOO permit 10\nroute-map FOO permit 20\n" +
@@ -90,10 +86,7 @@ func TestCommitCheckMultiKeyRefResolves(t *testing.T) {
 	assert.False(t, d.HasErrors(), d.String())
 }
 
-// TestCommitCheckMalformedListReportsInvalidList guards the standalone-entry
-// contract: a ref on a malformed list arg reports the invalid list itself
-// (CommitCheck may run on trees Phase A never saw) and no bogus per-item
-// "does not exist" errors.
+// CommitCheck reports malformed lists directly because it can run without ImportCheck.
 func TestCommitCheckMalformedListReportsInvalidList(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -110,7 +103,6 @@ func TestCommitCheckMalformedListReportsInvalidList(t *testing.T) {
 	assert.NotContains(t, d.String(), "does not exist")
 }
 
-// requiresSchema requires an unkeyed "feature-bgp" instance before "router bgp".
 func requiresSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -146,8 +138,7 @@ func TestCommitCheckRequiresSatisfied(t *testing.T) {
 }
 
 func TestCommitCheckRequiresAbsentBothIsFine(t *testing.T) {
-	// The prerequisite is existential, not mandatory: no router bgp, no need
-	// for the feature.
+	// Requires is existential, not mandatory.
 	d := diag.New()
 	cfg := parse.Parse(requiresSchema(), "", diag.Policy{Strict: true}, d)
 	require.False(t, d.HasErrors(), d.String())

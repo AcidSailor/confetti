@@ -47,7 +47,7 @@ func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 		}
 		for _, ref := range def.Refs {
 			vals := []string{n.Fields[ref.FromArg]}
-			// Resolve each explicit list item and report malformed lists because CommitCheck can run without Phase A.
+			// Validate list syntax here because CommitCheck can run without ImportCheck.
 			if ls := def.ListSpec; ls.Arg == ref.FromArg {
 				items, ok := listItems(n, ls, d)
 				if !ok {

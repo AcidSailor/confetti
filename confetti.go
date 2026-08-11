@@ -17,12 +17,13 @@ import (
 
 // Engine ties a schema, a policy, and the import/export transform pipelines.
 type Engine struct {
-	schema     *schema.Schema
-	policy     diag.Policy
-	importText []transform.TextRule
-	exportText []transform.TextRule
-	importTree []transform.TreeTransform
-	exportTree []transform.TreeTransform
+	schema       *schema.Schema
+	policy       diag.Policy
+	importText   []transform.TextRule
+	exportText   []transform.TextRule
+	importTree   []transform.TreeTransform
+	exportTree   []transform.TreeTransform
+	commitChecks []func(*tree.Config, *diag.Diagnostics)
 }
 
 // Option configures an Engine.
@@ -53,6 +54,11 @@ func WithExportTree(ts ...transform.TreeTransform) Option {
 	return func(e *Engine) { e.exportTree = append(e.exportTree, ts...) }
 }
 
+// WithCommitChecks appends whole-tree validators after the built-in commit check.
+func WithCommitChecks(fns ...func(*tree.Config, *diag.Diagnostics)) Option {
+	return func(e *Engine) { e.commitChecks = append(e.commitChecks, fns...) }
+}
+
 // New constructs an Engine for the given schema.
 func New(s *schema.Schema, opts ...Option) *Engine {
 	e := &Engine{schema: s}
@@ -62,14 +68,14 @@ func New(s *schema.Schema, opts ...Option) *Engine {
 	return e
 }
 
-// Import applies text rules outside raw blocks, parses and folds the input, applies tree transforms, and runs Phase A validation.
+// Import transforms, parses, folds, and validates configuration text.
 func (e *Engine) Import(text string) (*tree.Config, *diag.Diagnostics) {
 	d := diag.New()
 	text = applyTextOutsideBlocks(e.schema, e.importText, text)
 	cfg := parse.Parse(e.schema, text, e.policy, d)
 	parse.Fold(cfg, d)
 	transform.ApplyTree(e.importTree, cfg)
-	validate.PhaseA(cfg, d)
+	validate.ImportCheck(cfg, d)
 	return cfg, d
 }
 
@@ -100,11 +106,18 @@ func applyTextOutsideBlocks(
 	return strings.Join(lines, "\n")
 }
 
-// CommitCheck runs Phase B referential integrity over an assembled tree.
+// CommitCheck runs built-in and registered checks against an assembled tree.
 func (e *Engine) CommitCheck(cfg *tree.Config) *diag.Diagnostics {
 	d := diag.New()
-	validate.CommitCheck(cfg, d)
+	e.commitCheck(cfg, d)
 	return d
+}
+
+func (e *Engine) commitCheck(cfg *tree.Config, d *diag.Diagnostics) {
+	validate.CommitCheck(cfg, d)
+	for _, fn := range e.commitChecks {
+		fn(cfg, d)
+	}
 }
 
 // Render applies tree transforms, renders canonical text, and applies text rules outside raw blocks.
@@ -121,7 +134,7 @@ func (e *Engine) Remediate(
 	running, intended *tree.Config,
 ) (*remediate.Result, *diag.Diagnostics) {
 	d := diag.New()
-	validate.CommitCheck(intended, d)
+	e.commitCheck(intended, d)
 	res, rd := remediate.Diff(running, intended, e.policy)
 	d.Merge(rd)
 	return res, d
@@ -132,7 +145,7 @@ func (e *Engine) Rollback(
 	running, intended *tree.Config,
 ) (*remediate.Result, *diag.Diagnostics) {
 	d := diag.New()
-	validate.CommitCheck(running, d)
+	e.commitCheck(running, d)
 	res, rd := remediate.Diff(intended, running, e.policy)
 	d.Merge(rd)
 	return res, d
