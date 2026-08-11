@@ -1,0 +1,11 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: acidsailor/go-scaffolds/.github/workflows/go-ci.yml@v1

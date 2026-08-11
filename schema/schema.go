@@ -1,0 +1,769 @@
+package schema
+
+import (
+	"slices"
+	"strings"
+	"sync/atomic"
+
+	"github.com/acidsailor/confetti/graph"
+	"github.com/acidsailor/confetti/internal/listval"
+	"github.com/acidsailor/confetti/value"
+)
+
+// Cardinality describes how many times a node may appear at its level.
+type Cardinality int
+
+const (
+	// ZeroToOne allows at most one instance at its level (the default).
+	ZeroToOne Cardinality = iota
+	// ZeroToN allows any number of instances at its level.
+	ZeroToN
+	// One requires exactly one instance at its level.
+	One
+)
+
+// Ref requires FromArg to equal TargetKey on a node of TargetKind.
+type Ref struct {
+	FromArg, TargetKind, TargetKey string
+}
+
+// NegateKind selects how a command line is negated.
+type NegateKind int
+
+const (
+	NegNoPrefix NegateKind = iota // Add or remove the "no " prefix.
+	NegDefault                    // Add the "default " prefix.
+	NegTemplate                   // Interpolate Template with captured fields.
+	NegFunc                       // Call Func for forms a template cannot express.
+)
+
+// NegateStrategy defines how removal converts captured fields and rendered text into a negated line.
+type NegateStrategy struct {
+	Kind     NegateKind
+	Template string
+	Func     func(fields map[string]string, rendered string) string
+}
+
+// BlockKind selects how a node captures a raw multi-line block.
+type BlockKind int
+
+const (
+	BlockNone  BlockKind = iota // ordinary node (zero value)
+	BlockDelim                  // terminator = the value of a named capture arg
+	BlockUntil                  // terminator = a fixed literal line
+)
+
+// BlockStrategy defines raw multi-line capture from an opener through a terminator.
+type BlockStrategy struct {
+	Kind       BlockKind
+	Arg        string // BlockDelim: capture arg holding the delimiter token
+	Terminator string // BlockUntil: literal line that closes the block
+}
+
+// Term returns the terminator for the captured block fields.
+func (b BlockStrategy) Term(fields map[string]string) string {
+	if b.Kind == BlockDelim {
+		return fields[b.Arg]
+	}
+	return b.Terminator
+}
+
+// ListStrategy defines an unordered typed set, separator, incremental templates, optional keywords, and their domain.
+type ListStrategy struct {
+	Arg, Elem           string
+	AddTmpl, RemoveTmpl string
+	Sep                 string
+	NoneWord, AllWord   string
+	ExceptWord, Domain  string
+}
+
+// Keywords returns the list keyword declarations in codec form.
+func (l ListStrategy) Keywords() listval.Keywords {
+	return listval.Keywords{
+		None:   l.NoneWord,
+		All:    l.AllWord,
+		Except: l.ExceptWord,
+		Domain: l.Domain,
+	}
+}
+
+// Schema is a grammar of the config tree.
+type Schema struct {
+	Registry   *value.Registry
+	Roots      []*Node
+	OrderHooks []func(*graph.Graph)
+	// NegationWord is the schema-wide negation word ("no" unless overridden by Negation).
+	NegationWord string
+}
+
+// New creates a Schema with a fresh value registry.
+func New() *Schema {
+	return &Schema{Registry: value.NewRegistry(), NegationWord: "no"}
+}
+
+// Node adds a new root node with the given template and returns it.
+func (s *Schema) Node(tmpl string) *Node {
+	n := s.newNode(tmpl)
+	s.Roots = append(s.Roots, n)
+	return n
+}
+
+// OrderHook registers a function that can modify derived remediation edges before scheduling.
+func (s *Schema) OrderHook(fn func(*graph.Graph)) *Schema {
+	s.OrderHooks = append(s.OrderHooks, fn)
+	return s
+}
+
+// Negation sets the non-empty schema-wide negation word used by the default strategy.
+func (s *Schema) Negation(word string) *Schema {
+	if word == "" {
+		panic("schema: Negation word must be non-empty")
+	}
+	s.NegationWord = word
+	return s
+}
+
+func (s *Schema) newNode(tmpl string) *Node {
+	spec, err := compileSpec(tmpl, s.Registry)
+	if err != nil {
+		panic(err) // Reject invalid schema definitions during construction.
+	}
+	return &Node{Schema: s, spec: spec, Template: tmpl}
+}
+
+// Node defines one command line plus its nested grammar; builder methods validate mutually exclusive declarations.
+type Node struct {
+	Schema           *Schema
+	Template         string // The original template used in diagnostics.
+	Cardinality      Cardinality
+	KindName         string
+	KeyArgs          []string
+	Children         []*Node
+	Refs             []Ref
+	RequiresKinds    []string
+	UniqueArgs       []string
+	Idempotent       bool
+	Negate           NegateStrategy
+	SectionExitToken string // The token emitted when this section closes.
+	Block            BlockStrategy
+	ListSpec         ListStrategy
+	ListContinuation *Node        // The base list slot that receives these items.
+	MembersKind      string       // The Kind enumerated by this list line.
+	Respell          *RespellSpec // The alternate-spelling rewrite.
+	ToggleGroup      []*Node      // All members of the declared toggle group.
+	Protected        bool
+	EmptyOnRemove    bool // Removal negates children and retains the header.
+
+	spec        *matchSpec
+	continuedBy bool  // Whether a continuation folds into this slot.
+	toggleCanon *Node // The canonical toggle member.
+
+	// matchOrder caches MatchChild ordering when this node leads the candidate slice.
+	matchOrder atomic.Pointer[matchOrderCache]
+}
+
+// mustAllowChildren panics when a declaration on this node already excludes child nodes.
+func (n *Node) mustAllowChildren() {
+	if n.Block.Kind != BlockNone {
+		panic("schema: block node cannot have children: " + n.Template)
+	}
+	if n.ListSpec.Arg != "" {
+		panic("schema: list node cannot have children: " + n.Template)
+	}
+	if n.Respell != nil {
+		panic("schema: RespellAs node cannot have children: " + n.Template)
+	}
+}
+
+// mustArg panics unless arg is a capture arg of this node's template.
+func (n *Node) mustArg(setter, arg string) {
+	if n.spec.ArgType(arg) == "" {
+		panic(
+			"schema: " + setter + " arg " + arg + " is not a capture arg of " + n.Template,
+		)
+	}
+}
+
+// mustTemplateArgs returns the placeholder names of tmpl and panics on any that this node does not capture.
+func (n *Node) mustTemplateArgs(setter, tmpl string) []string {
+	refs := templateRefs(tmpl)
+	for _, arg := range refs {
+		if n.spec.ArgType(arg) == "" {
+			panic("schema: " + setter + " template references " + arg +
+				", not a capture arg of " + n.Template)
+		}
+	}
+	return refs
+}
+
+// mustNegatable panics when EmptyOnRemove already excludes an explicit negation strategy.
+func (n *Node) mustNegatable() {
+	if n.EmptyOnRemove {
+		panic(
+			"schema: ClearOnRemove and NegateAs/NegateDefault/NegateFunc are mutually exclusive: " + n.Template,
+		)
+	}
+}
+
+// Child adds a child node with the given template and returns it.
+func (n *Node) Child(tmpl string) *Node {
+	n.mustAllowChildren()
+	c := n.Schema.newNode(tmpl)
+	n.Children = append(n.Children, c)
+	return c
+}
+
+// Adopt appends existing nodes as shared child grammar.
+func (n *Node) Adopt(children ...*Node) *Node {
+	n.mustAllowChildren()
+	for _, child := range children {
+		if child == nil {
+			panic("schema: cannot adopt a nil child: " + n.Template)
+		}
+		if child.Schema != n.Schema {
+			panic(
+				"schema: cannot adopt a child from another schema: " + n.Template,
+			)
+		}
+	}
+	n.Children = append(n.Children, children...)
+	return n
+}
+
+// Card sets node cardinality and rejects toggle members, which must remain non-keyed ZeroToOne nodes.
+func (n *Node) Card(c Cardinality) *Node {
+	if n.ToggleGroup != nil {
+		panic(
+			"schema: toggle member cardinality is fixed at ZeroToOne: " + n.Template,
+		)
+	}
+	n.Cardinality = c
+	return n
+}
+
+// Kind sets the semantic kind name for this node (used for Ref resolution).
+func (n *Node) Kind(k string) *Node { n.KindName = k; return n }
+
+// Key sets the arg names that form the identity key for this node.
+func (n *Node) Key(args ...string) *Node {
+	seen := make(map[string]bool, len(args))
+	for _, arg := range args {
+		n.mustArg("Key", arg)
+		if seen[arg] {
+			panic("schema: duplicate Key arg " + arg + ": " + n.Template)
+		}
+		seen[arg] = true
+	}
+	if n.ListSpec.Arg != "" && slices.Contains(args, n.ListSpec.Arg) {
+		panic(
+			"schema: List arg " + n.ListSpec.Arg + " may not be a key arg: " + n.Template,
+		)
+	}
+	if n.MembersKind != "" {
+		panic("schema: membership node may not be keyed: " + n.Template)
+	}
+	if n.ListContinuation != nil {
+		panic("schema: continuation node may not be keyed: " + n.Template)
+	}
+	if n.continuedBy {
+		panic("schema: ListContinues base may not be keyed: " + n.Template)
+	}
+	if n.ToggleGroup != nil {
+		panic("schema: toggle member may not be keyed: " + n.Template)
+	}
+	n.KeyArgs = args
+	return n
+}
+
+// Idempotent marks this node as idempotent (re-applying has no effect).
+func (n *Node) MarkIdempotent() *Node { n.Idempotent = true; return n }
+
+// Protected prevents automatic deletion in all policies and is mutually exclusive with EmptyOnRemove.
+func (n *Node) Protect() *Node {
+	if n.EmptyOnRemove {
+		panic(
+			"schema: Protect and ClearOnRemove are mutually exclusive: " + n.Template,
+		)
+	}
+	n.Protected = true
+	return n
+}
+
+// NegateAs sets a negation template and rejects references to uncaptured arguments.
+func (n *Node) NegateAs(tmpl string) *Node {
+	n.mustNegatable()
+	n.mustTemplateArgs("NegateAs", tmpl)
+	n.Negate = NegateStrategy{Kind: NegTemplate, Template: tmpl}
+	return n
+}
+
+// NegateFunc sets a non-nil negation function for forms that NegateAs cannot express.
+func (n *Node) NegateFunc(
+	fn func(fields map[string]string, rendered string) string,
+) *Node {
+	if fn == nil {
+		panic("schema: NegateFunc with nil func: " + n.Template)
+	}
+	n.mustNegatable()
+	n.Negate = NegateStrategy{Kind: NegFunc, Func: fn}
+	return n
+}
+
+// NegateDefault marks this node as negated with a "default " prefix.
+func (n *Node) NegateDefault() *Node {
+	n.mustNegatable()
+	n.Negate = NegateStrategy{Kind: NegDefault}
+	return n
+}
+
+// EmptyOnRemove retains an always-present section header and removes each child; it excludes explicit negation, blocks, lists, and Protected.
+func (n *Node) ClearOnRemove() *Node {
+	if n.Protected {
+		panic(
+			"schema: Protect and ClearOnRemove are mutually exclusive: " + n.Template,
+		)
+	}
+	if n.Negate.Kind != NegNoPrefix {
+		panic(
+			"schema: ClearOnRemove and NegateAs/NegateDefault/NegateFunc are mutually exclusive: " + n.Template,
+		)
+	}
+	if n.Block.Kind != BlockNone {
+		panic("schema: block node cannot be ClearOnRemove: " + n.Template)
+	}
+	if n.ListSpec.Arg != "" {
+		panic("schema: list node cannot be ClearOnRemove: " + n.Template)
+	}
+	n.EmptyOnRemove = true
+	return n
+}
+
+// SectionExit sets the token rendered at the section header's indentation when it closes.
+func (n *Node) SectionExit(
+	tok string,
+) *Node {
+	n.SectionExitToken = tok
+	return n
+}
+
+// Toggles declares mutually exclusive non-keyed ZeroToOne nodes and uses the first partner as the canonical member.
+func (n *Node) Toggles(partners ...*Node) *Node {
+	if len(partners) == 0 {
+		panic("schema: Toggles needs at least one partner: " + n.Template)
+	}
+	group := append([]*Node{n}, partners...)
+	seen := map[*Node]bool{}
+	for _, m := range group {
+		if m == nil || seen[m] {
+			panic(
+				"schema: Toggles members must be distinct nodes: " + n.Template,
+			)
+		}
+		seen[m] = true
+		if len(m.KeyArgs) > 0 || m.Cardinality != ZeroToOne {
+			panic(
+				"schema: toggle side must be a non-keyed ZeroToOne node: " + m.Template,
+			)
+		}
+		if m.ToggleGroup != nil {
+			panic("schema: node is already in a toggle group: " + m.Template)
+		}
+	}
+	for _, m := range group {
+		m.ToggleGroup = group
+		m.toggleCanon = partners[0]
+	}
+	return n
+}
+
+// BlockDelim opens a raw block terminated by a non-empty captured argument and excludes child nodes.
+func (n *Node) BlockDelim(arg string) *Node {
+	n.mustArg("BlockDelim", arg)
+	// Reject empty terminators because they close at the first blank line and bypass block protection.
+	if n.spec.emptyArgs[arg] {
+		panic(
+			"schema: BlockDelim arg " + arg + " has a type whose pattern matches" +
+				" the empty string: " + n.Template,
+		)
+	}
+	n.setBlock(BlockStrategy{Kind: BlockDelim, Arg: arg})
+	return n
+}
+
+// BlockUntil opens a raw block terminated by a non-empty literal line and excludes child nodes.
+func (n *Node) BlockUntil(line string) *Node {
+	if line == "" {
+		panic("schema: BlockUntil terminator must be non-empty: " + n.Template)
+	}
+	n.setBlock(BlockStrategy{Kind: BlockUntil, Terminator: line})
+	return n
+}
+
+func (n *Node) setBlock(b BlockStrategy) {
+	if len(n.Children) > 0 {
+		panic("schema: block node cannot have children: " + n.Template)
+	}
+	if n.EmptyOnRemove {
+		panic("schema: block node cannot be ClearOnRemove: " + n.Template)
+	}
+	if n.Respell != nil {
+		panic("schema: block node cannot be RespellAs: " + n.Template)
+	}
+	if n.ListContinuation != nil || n.MembersKind != "" {
+		panic("schema: fold-only list node cannot open a block: " + n.Template)
+	}
+	n.Block = b
+}
+
+// Ref requires captured fromArg to match a key identified by target in "kind.keyArg" form.
+func (n *Node) Ref(fromArg, target string) *Node {
+	n.mustArg("Ref", fromArg)
+	kind, keyf, ok := strings.Cut(target, ".")
+	if !ok || kind == "" || keyf == "" {
+		// Reject targets that cannot resolve or can alias keyless Kind presence.
+		panic("schema: Ref target must be \"kind.keyArg\": " + target)
+	}
+	n.Refs = append(
+		n.Refs,
+		Ref{FromArg: fromArg, TargetKind: kind, TargetKey: keyf},
+	)
+	return n
+}
+
+// Requires declares that any instance of Kind must exist while this node exists.
+func (n *Node) Requires(kind string) *Node {
+	if kind == "" {
+		panic("schema: Requires kind must be non-empty: " + n.Template)
+	}
+	n.RequiresKinds = append(n.RequiresKinds, kind)
+	return n
+}
+
+// Unique restricts exclusive resource identity to captured key arguments so remediation frees the resource before moving it.
+func (n *Node) Unique(args ...string) *Node {
+	for _, arg := range args {
+		n.mustArg("Unique", arg)
+	}
+	n.UniqueArgs = args
+	return n
+}
+
+// List declares a leaf capture as an idempotent unordered set with numeric ranges and elements of elemType.
+func (n *Node) List(arg, elemType string) *Node {
+	n.mustArg("List", arg)
+	if _, ok := n.Schema.Registry.Get(elemType); !ok {
+		panic(
+			"schema: List element type " + elemType + " is not registered: " + n.Template,
+		)
+	}
+	if slices.Contains(n.KeyArgs, arg) {
+		panic(
+			"schema: List arg " + arg + " may not be a key arg: " + n.Template,
+		)
+	}
+	if len(n.Children) > 0 {
+		panic("schema: list node cannot have children: " + n.Template)
+	}
+	if n.EmptyOnRemove {
+		panic("schema: list node cannot be ClearOnRemove: " + n.Template)
+	}
+	n.ListSpec.Arg, n.ListSpec.Elem = arg, elemType
+	n.Idempotent = true
+	return n
+}
+
+// ListDelta declares add and remove templates that must both reference the list argument.
+func (n *Node) ListDelta(addTmpl, removeTmpl string) *Node {
+	if n.ListSpec.Arg == "" {
+		panic("schema: ListDelta requires List: " + n.Template)
+	}
+	if n.MembersKind != "" {
+		panic(
+			"schema: Members and ListDelta are mutually exclusive: " + n.Template,
+		)
+	}
+	if n.ListContinuation != nil && n.ListContinuation != n {
+		// A self-union slot survives folding and can use delta forms; a separate continuation cannot.
+		panic("schema: ListContinues and ListDelta are mutually exclusive: " +
+			n.Template)
+	}
+	if n.Respell != nil {
+		panic(
+			"schema: ListDelta and RespellAs are mutually exclusive: " + n.Template,
+		)
+	}
+	for _, tmpl := range [...]string{addTmpl, removeTmpl} {
+		if !slices.Contains(templateRefs(tmpl), n.ListSpec.Arg) {
+			panic("schema: ListDelta template does not reference " +
+				n.ListSpec.Arg + ": " + tmpl)
+		}
+		// Reject unknown references because interpolation would replace them with empty text.
+		n.mustTemplateArgs("ListDelta", tmpl)
+	}
+	n.ListSpec.AddTmpl, n.ListSpec.RemoveTmpl = addTmpl, removeTmpl
+	return n
+}
+
+// ListSep sets a non-empty list separator and defaults to a comma when unset.
+func (n *Node) ListSep(sep string) *Node {
+	if n.ListSpec.Arg == "" {
+		panic("schema: ListSep requires List: " + n.Template)
+	}
+	if sep == "" {
+		panic("schema: ListSep separator must be non-empty: " + n.Template)
+	}
+	n.ListSpec.Sep = sep
+	n.checkDomain()
+	return n
+}
+
+// ListKeywords declares optional None, All, and Except spellings and the domain required by All and Except.
+func (n *Node) ListKeywords(none, all, except, domain string) *Node {
+	if n.ListSpec.Arg == "" {
+		panic("schema: ListKeywords requires List: " + n.Template)
+	}
+	if (all != "" || except != "") && domain == "" {
+		panic("schema: ListKeywords all/except require a domain: " + n.Template)
+	}
+	n.ListSpec.NoneWord, n.ListSpec.AllWord = none, all
+	n.ListSpec.ExceptWord, n.ListSpec.Domain = except, domain
+	n.checkDomain()
+	return n
+}
+
+// checkDomain validates the domain after ListKeywords or ListSep changes it.
+func (n *Node) checkDomain() {
+	if n.ListSpec.Domain == "" {
+		return
+	}
+	if _, err := listval.Expand(n.ListSpec.Domain, n.ListSpec.Sep); err != nil {
+		panic("schema: ListKeywords domain does not expand: " + n.Template +
+			": " + err.Error())
+	}
+}
+
+// ListContinues unions this list line into a non-keyed sibling base slot during import and removes the continuation line.
+func (n *Node) ListContinues(base *Node) *Node {
+	if base == nil {
+		panic("schema: ListContinues base must be a node: " + n.Template)
+	}
+	if n.ListSpec.Arg == "" {
+		panic("schema: ListContinues requires List: " + n.Template)
+	}
+	if n.Block.Kind != BlockNone {
+		panic("schema: block node cannot declare ListContinues: " + n.Template)
+	}
+	if base.ListSpec.Arg == "" {
+		panic(
+			"schema: ListContinues base must be a list node: " + base.Template,
+		)
+	}
+	if base != n && base.ListContinuation != nil {
+		panic(
+			"schema: ListContinues base is itself a continuation: " + base.Template,
+		)
+	}
+	if len(base.KeyArgs) > 0 {
+		panic("schema: ListContinues base may not be keyed: " + base.Template)
+	}
+	// Self-union keeps the first instance as the slot and unions later instances into it.
+	if base != n && n.ListSpec.AddTmpl != "" {
+		panic("schema: ListContinues and ListDelta are mutually exclusive: " +
+			n.Template)
+	}
+	if n.MembersKind != "" {
+		panic("schema: ListContinues and Members are mutually exclusive: " +
+			n.Template)
+	}
+	if len(n.KeyArgs) > 0 {
+		panic("schema: continuation node may not be keyed: " + n.Template)
+	}
+	if n.Respell != nil || base.Respell != nil {
+		panic(
+			"schema: ListContinues and RespellAs are mutually exclusive: " + n.Template,
+		)
+	}
+	n.ListContinuation = base
+	base.continuedBy = true // Make a later base.Key call reject the invalid combination.
+	return n
+}
+
+// Members folds each list item into a canonical keyed instance of Kind and excludes keys, delta forms, continuations, blocks, and RespellAs.
+func (n *Node) Members(kind string) *Node {
+	if kind == "" {
+		panic("schema: Members kind must be non-empty: " + n.Template)
+	}
+	if n.ListSpec.Arg == "" {
+		panic("schema: Members requires List: " + n.Template)
+	}
+	if n.Block.Kind != BlockNone {
+		panic("schema: block node cannot declare Members: " + n.Template)
+	}
+	if n.ListSpec.AddTmpl != "" {
+		panic(
+			"schema: Members and ListDelta are mutually exclusive: " + n.Template,
+		)
+	}
+	if len(n.KeyArgs) > 0 {
+		panic("schema: membership node may not be keyed: " + n.Template)
+	}
+	if n.ListContinuation != nil {
+		panic("schema: ListContinues and Members are mutually exclusive: " +
+			n.Template)
+	}
+	if n.Respell != nil {
+		panic(
+			"schema: Members and RespellAs are mutually exclusive: " + n.Template,
+		)
+	}
+	n.MembersKind = kind
+	return n
+}
+
+// RespellSpec defines an alternate spelling that folds into an interpolated Header and child lines.
+type RespellSpec struct {
+	Header   string
+	Children []string
+}
+
+// RespellAs folds this alternate spelling into an interpolated canonical header and children during import.
+func (n *Node) RespellAs(header string, children ...string) *Node {
+	if n.Respell != nil {
+		panic("schema: node already declares RespellAs: " + n.Template)
+	}
+	if n.MembersKind != "" {
+		panic(
+			"schema: Members and RespellAs are mutually exclusive: " + n.Template,
+		)
+	}
+	if n.ListSpec.AddTmpl != "" {
+		panic(
+			"schema: ListDelta and RespellAs are mutually exclusive: " + n.Template,
+		)
+	}
+	if n.ListContinuation != nil || n.continuedBy {
+		panic(
+			"schema: ListContinues and RespellAs are mutually exclusive: " + n.Template,
+		)
+	}
+	if n.Block.Kind != BlockNone {
+		panic("schema: block node cannot be RespellAs: " + n.Template)
+	}
+	if len(n.Children) > 0 {
+		panic("schema: RespellAs node cannot have children: " + n.Template)
+	}
+	headerRefs := n.mustTemplateArgs("RespellAs", header)
+	for _, tmpl := range children {
+		n.mustTemplateArgs("RespellAs", tmpl)
+	}
+	if len(headerRefs) == 0 {
+		panic(
+			"schema: RespellAs header references no capture arg of " + n.Template +
+				": " + header,
+		)
+	}
+	n.Respell = &RespellSpec{Header: header, Children: children}
+	return n
+}
+
+// interp scans typeless {{ name }} placeholders, substitutes each through sub, and preserves text outside valid pairs.
+func interp(tmpl string, sub func(name string) string) string {
+	var b strings.Builder
+	for {
+		before, after, found := strings.Cut(tmpl, "{{")
+		b.WriteString(before)
+		if !found {
+			break
+		}
+		name, rest, closed := strings.Cut(after, "}}")
+		if !closed {
+			b.WriteString("{{") // Preserve an unterminated opener.
+			b.WriteString(after)
+			break
+		}
+		b.WriteString(sub(strings.TrimSpace(name)))
+		tmpl = rest
+	}
+	return b.String()
+}
+
+// Interpolate replaces typeless {{ name }} placeholders and preserves text outside valid placeholder pairs.
+func Interpolate(tmpl string, fields map[string]string) string {
+	return interp(tmpl, func(name string) string { return fields[name] })
+}
+
+// templateRefs returns placeholder names from a typeless interpolation template.
+func templateRefs(tmpl string) []string {
+	var names []string
+	interp(tmpl, func(name string) string {
+		names = append(names, name)
+		return ""
+	})
+	return names
+}
+
+// TogglePartner returns the other member of a two-member group or nil for other group sizes.
+func (n *Node) TogglePartner() *Node {
+	if len(n.ToggleGroup) != 2 {
+		return nil
+	}
+	for _, m := range n.ToggleGroup {
+		if m != n {
+			return m
+		}
+	}
+	return nil
+}
+
+// ToggleCanonical returns the group's canonical member or the receiver when ungrouped.
+func (n *Node) ToggleCanonical() *Node {
+	if n.toggleCanon == nil {
+		return n
+	}
+	return n.toggleCanon
+}
+
+// ArgType returns the value-type name declared for the given capture arg.
+func (n *Node) ArgType(name string) string { return n.spec.ArgType(name) }
+
+// MatchLine matches a line exactly and returns captured fields on success.
+func (n *Node) MatchLine(
+	line string,
+) (map[string]string, bool) {
+	return n.spec.Match(line)
+}
+
+// Render produces the config line by substituting field values into the template.
+func (n *Node) Render(f map[string]string) string { return n.spec.Render(f) }
+
+// matchOrderCache stores one candidate slice and its stable specificity order for concurrent reuse.
+type matchOrderCache struct {
+	src     []*Node // The candidates used to compute ordered.
+	ordered []*Node
+}
+
+// MatchChild returns the first match in descending literal specificity and resolves ties by declaration order.
+func MatchChild(
+	candidates []*Node,
+	line string,
+) (*Node, map[string]string, bool) {
+	if len(candidates) == 0 {
+		return nil, nil, false
+	}
+	lead := candidates[0]
+	memo := lead.matchOrder.Load()
+	if memo == nil || !slices.Equal(memo.src, candidates) {
+		ordered := slices.Clone(candidates)
+		slices.SortStableFunc(ordered, func(a, b *Node) int {
+			return b.spec.litLen - a.spec.litLen
+		})
+		memo = &matchOrderCache{src: candidates, ordered: ordered}
+		lead.matchOrder.Store(memo)
+	}
+	for _, c := range memo.ordered {
+		if f, ok := c.spec.Match(line); ok {
+			return c, f, true
+		}
+	}
+	return nil, nil, false
+}

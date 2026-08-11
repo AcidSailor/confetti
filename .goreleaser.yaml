@@ -1,0 +1,14 @@
+version: 2
+
+# Library-only releases: a tag publishes a GitHub Release with
+# changelog, no binaries.
+builds:
+  - skip: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

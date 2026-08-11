@@ -1,0 +1,12 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    uses: acidsailor/go-scaffolds/.github/workflows/go-release.yml@v1
+    permissions:
+      contents: write
+      packages: write

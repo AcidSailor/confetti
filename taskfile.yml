@@ -1,0 +1,58 @@
+version: "3"
+
+tasks:
+  lint:
+    desc: Run formatters + linters with autofix (mutates files)
+    cmds:
+      - golangci-lint fmt
+      - golangci-lint run --fix
+
+  ci:
+    desc: Read-only fmt + lint verification for CI (fail-fast)
+    cmds:
+      - golangci-lint fmt --diff
+      - golangci-lint run
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test -race ./...
+
+  check:
+    desc: Local composite — lint (mutating) + tests
+    cmds:
+      - task: lint
+      - task: test
+
+  build:
+    desc: Compile check — library and example CLI
+    cmds:
+      - go build ./...
+
+  release:
+    desc: Tagged release via GoReleaser — GitHub Release + changelog (CI)
+    cmds:
+      - goreleaser release --clean
+
+  release-plan:
+    desc: Preview the next release version from conventional commits (svu; read-only)
+    silent: true
+    cmds:
+      - svu next --v0
+
+  release-tag:
+    desc: Cut & push the next svu tag — fires the GoReleaser `release` job in CI
+    cmds:
+      - |
+        set -euo pipefail
+        next=$(svu next --v0)
+        if [ -z "$next" ]; then echo "svu returned no version — is svu installed?" >&2; exit 1; fi
+        if [ "$next" = "$(svu current)" ]; then echo "nothing to release (at $next)"; exit 0; fi
+        git tag -a "$next" -m "release $next"
+        git push origin "$next"
+        echo "pushed $next → CI will build the release"
+
+  update:
+    desc: Pull latest go-scaffolds v1 template tooling (3-way merge; source untouched; no prompts)
+    cmds:
+      - uvx copier update --defaults --vcs-ref v1

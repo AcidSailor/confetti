@@ -1,0 +1,38 @@
+# Build output
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Coverage / profiling
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Go workspace
+go.work
+go.work.sum
+
+# Local env / secrets
+.env
+.env.*
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Task runner cache
+/.task/
+
+# Local agent tooling (keep committed skills, ignore worktrees/settings)
+/.claude/*
+!/.claude/skills/
+/.worktrees/
+
+# Reference material (vendored lib dumps) — not part of the deliverable
+references/
