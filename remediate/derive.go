@@ -109,18 +109,21 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 	return out
 }
 
-// addedSubtree returns the subtree an operation creates, or nil when it creates none.
+// addedSubtree returns the subtree an operation creates, or nil when it creates none; a Replace creates its intended half.
 func addedSubtree(o op) *tree.Node {
-	if o.action == graph.Add {
+	if o.action == graph.Add || o.action == graph.Replace {
 		return o.src
 	}
 	return nil
 }
 
-// removedSubtree returns the subtree an operation deletes, or nil when it deletes none.
+// removedSubtree returns the subtree an operation deletes, or nil when it deletes none; a Replace deletes its running half.
 func removedSubtree(o op) *tree.Node {
-	if o.action == graph.Remove {
+	switch o.action {
+	case graph.Remove:
 		return o.src
+	case graph.Replace:
+		return o.runSrc
 	}
 	return o.flipRun
 }
@@ -217,10 +220,11 @@ func (dv *differ) deriveMoveEdges() {
 		}
 	}
 	for i, o := range dv.ops {
-		if o.action != graph.Add {
+		src := addedSubtree(o)
+		if src == nil {
 			continue
 		}
-		for _, r := range resourcesHeld(o.src) {
+		for _, r := range resourcesHeld(src) {
 			for _, j := range freed[r] {
 				if j != i {
 					dv.addEdge(j, i, moveReason(r))
@@ -309,10 +313,11 @@ func (dv *differ) deriveRequireEdges() {
 	// Index the first add for each Kind by the smallest baseline key.
 	addByKind := map[string]int{}
 	for i, o := range ops {
-		if o.action != graph.Add {
+		src := addedSubtree(o)
+		if src == nil {
 			continue
 		}
-		for _, r := range definesOf(o.src) {
+		for _, r := range definesOf(src) {
 			if j, ok := addByKind[r.kind]; !ok ||
 				ops[i].key.compare(ops[j].key) < 0 {
 				addByKind[r.kind] = i

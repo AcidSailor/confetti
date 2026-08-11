@@ -175,7 +175,8 @@ The explanations record constraints that tests do not show.
   supersedes its partner's removal. **Block bodies are not part of
   identity.** A body-only change must be Modify, not separate Add and
   Remove operations. **Merge extends pairing in one way:** each non-keyed
-  ZeroToOne definition without a Kind is one slot per level. Remediation
+  ZeroToOne definition without a Kind, or in a toggle group, is one slot
+  per level. Remediation
   must not pair by definition alone because an unmarked pair can be
   genuinely independent siblings; pairing needs the explicit Kind signal.
   Diff warns when an Add and a Remove still land on one unmarked

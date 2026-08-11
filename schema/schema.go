@@ -249,6 +249,13 @@ func (n *Node) Key(args ...string) *Node {
 	seen := make(map[string]bool, len(args))
 	for _, arg := range args {
 		n.mustArg("Key", arg)
+		// Reject an empty-matchable key arg because an empty key value collides with Kind-paired identities.
+		if n.spec.emptyArgs[arg] {
+			panic(
+				"schema: Key arg " + arg + " has a type whose pattern matches" +
+					" the empty string: " + n.Template,
+			)
+		}
 		if seen[arg] {
 			panic("schema: duplicate Key arg " + arg + ": " + n.Template)
 		}

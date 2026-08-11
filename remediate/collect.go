@@ -69,6 +69,12 @@ func (dv *differ) collect(
 		case ic.Def != rc.Def && (ident.IsSection(ic) || ident.IsSection(rc)):
 			intents = append(intents,
 				createIntent{src: ic, run: rc, kind: ckReplace})
+		// A Kind-paired section header has no key, so a changed header value replaces the whole section instead of a Modify reissue.
+		case ident.IsSection(ic) && ic.Text != rc.Text &&
+			!ic.Def.Idempotent &&
+			ident.CategoryOf(ic) == ident.KindedSingle:
+			intents = append(intents,
+				createIntent{src: ic, run: rc, kind: ckReplace})
 		case ident.IsSection(ic):
 			intents = append(
 				intents,
@@ -148,12 +154,14 @@ func (dv *differ) collect(
 			child := append(slices.Clone(secs), ci.src)
 			dv.collect(ci.run, ci.src, child, k)
 		case ckReplace:
-			// Refuse replacement when either paired definition is protected because replacement includes deletion.
-			runProtected := ci.run.Def != nil && ci.run.Def.Protected
-			srcProtected := ci.src.Def != nil && ci.src.Def.Protected
-			if runProtected || srcProtected {
+			// Refuse replacement when either paired node or a running descendant is protected because replacement includes deletion.
+			p := protectedIn(ci.run)
+			if p == nil && ci.src.Def != nil && ci.src.Def.Protected {
+				p = ci.src
+			}
+			if p != nil {
 				d.Add(diag.Error, "%s: refusing to replace protected %q",
-					ci.run.Path(), ci.run.Text)
+					p.Path(), p.Text)
 				continue
 			}
 			// Refuse replacement of a running EmptyOnRemove section because it has no header negation form.
@@ -200,13 +208,15 @@ func warnSplitSingles(
 ) {
 	for _, ci := range intents {
 		def := ci.src.Def
-		if ci.kind != ckAdd || def == nil ||
-			len(def.KeyArgs) > 0 || !ident.SingleOccupancy(def) {
+		// Toggle members are excluded because the toggle machinery owns their add/remove pairs.
+		if ci.kind != ckAdd || def == nil || len(def.KeyArgs) > 0 ||
+			len(def.ToggleGroup) > 0 || !ident.SingleOccupancy(def) {
 			continue
 		}
 		for _, rc := range removes {
 			rdef := rc.Def
 			if rdef == nil || len(rdef.KeyArgs) > 0 ||
+				len(rdef.ToggleGroup) > 0 ||
 				!ident.SingleOccupancy(rdef) {
 				continue
 			}
@@ -214,7 +224,7 @@ func warnSplitSingles(
 				(def.KindName != "" && rdef.KindName == def.KindName) {
 				d.AddAt(ci.src.Line, diag.Warning,
 					"%s: add and remove split single-occupancy slot %q;"+
-						" share a Kind or MarkIdempotent",
+						" give the definition a Kind or MarkIdempotent",
 					ci.src.Path(), rc.Text)
 			}
 		}

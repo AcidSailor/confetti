@@ -26,8 +26,7 @@ func CategoryOf(n *tree.Node) Category {
 		return Unmatched
 	case len(def.KeyArgs) > 0:
 		return Keyed
-	// Toggle members keep flip semantics instead of Kind pairing.
-	case def.KindName != "" && len(def.ToggleGroup) == 0 && SingleOccupancy(def):
+	case KindedSingleDef(def):
 		return KindedSingle
 	case def.Idempotent && SingleOccupancy(def):
 		return IdempotentSingle
@@ -39,6 +38,12 @@ func CategoryOf(n *tree.Node) Category {
 // SingleOccupancy reports whether at most one instance of the definition can exist per level.
 func SingleOccupancy(def *schema.Node) bool {
 	return def.Cardinality == schema.ZeroToOne || def.Cardinality == schema.One
+}
+
+// KindedSingleDef reports whether a definition pairs by Kind alone; toggle members keep flip semantics instead.
+func KindedSingleDef(def *schema.Node) bool {
+	return len(def.KeyArgs) == 0 && def.KindName != "" &&
+		len(def.ToggleGroup) == 0 && SingleOccupancy(def)
 }
 
 // Ident pairs keyed nodes by Kind and key across sibling templates, and other nodes by definition; block bodies are excluded.

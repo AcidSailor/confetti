@@ -324,3 +324,30 @@ func TestImportCheckDuplicateKindSpelling(t *testing.T) {
 	ImportCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
+
+func TestImportCheckKindSlotSatisfiesRequiredOne(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
+	r.Child("default-originate route-map {{ rmap:word }}").
+		Card(schema.One).Kind("default-originate")
+	r.Child("default-originate").Card(schema.One).Kind("default-originate")
+
+	// Either spelling alone satisfies the required Kind-paired slot.
+	for _, text := range []string{
+		"router bgp 65000\n  default-originate\n",
+		"router bgp 65000\n  default-originate route-map RM\n",
+	} {
+		d := diag.New()
+		cfg := parse.Parse(s, text, diag.Policy{Strict: true}, d)
+		ImportCheck(cfg, d)
+		assert.False(t, d.HasErrors(), "%q: %s", text, d.String())
+	}
+
+	// An empty slot still reports the missing requirement.
+	d := diag.New()
+	cfg := parse.Parse(s, "router bgp 65000\n", diag.Policy{Strict: true}, d)
+	ImportCheck(cfg, d)
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "missing required")
+}

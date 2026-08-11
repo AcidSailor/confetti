@@ -140,14 +140,19 @@ func checkCardinality(
 	}
 
 	for _, sn := range allowed {
-		if sn.Cardinality == schema.One && len(sn.KeyArgs) == 0 &&
-			count[sn] == 0 {
-			d.Add(
-				diag.Error,
-				"%s: missing required %q",
-				parentPath(parent), sn.Template,
-			)
+		if sn.Cardinality != schema.One || len(sn.KeyArgs) > 0 ||
+			count[sn] > 0 {
+			continue
 		}
+		// A Kind-paired slot is satisfied by any sibling spelling.
+		if ident.KindedSingleDef(sn) && kindSeen[sn.KindName] != nil {
+			continue
+		}
+		d.Add(
+			diag.Error,
+			"%s: missing required %q",
+			parentPath(parent), sn.Template,
+		)
 	}
 }
 

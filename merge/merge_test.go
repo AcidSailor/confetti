@@ -397,3 +397,10 @@ func TestMergeKindSlotStrictConflicts(t *testing.T) {
 	assert.True(t, d.HasErrors())
 	assert.Equal(t, "router bgp 65000\n  default-originate\n", got)
 }
+
+func TestMergeKindSlotLenientWarnsOnOverride(t *testing.T) {
+	_, d := mergeText(t, kindSlotSchema(), false,
+		"router bgp 65000\n  default-originate\n",
+		"router bgp 65000\n  default-originate route-map RM\n")
+	assert.Contains(t, d.String(), "overrides")
+}
