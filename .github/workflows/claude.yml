@@ -31,12 +31,6 @@ jobs:
           # Full history so review commands can diff the branch against its base
           fetch-depth: 0
 
-      # go.mod requires a newer Go than the runner image provides
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
