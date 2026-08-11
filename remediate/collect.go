@@ -97,6 +97,7 @@ func (dv *differ) collect(
 		}
 	}
 	removes, flips := dropToggles(intents, removes, d)
+	warnSplitSingles(intents, removes, d)
 
 	for i, ci := range intents {
 		k := append(slices.Clone(prefix), levelKey{0, dv.order[ci.src.Def], i})
@@ -188,6 +189,35 @@ func (dv *differ) collect(
 			node: buildRemove(rc, d), src: rc,
 			action: graph.Remove, secs: secs, key: k,
 		})
+	}
+}
+
+// warnSplitSingles flags an Add and a Remove that land on one single-occupancy slot because the split leaves the slot empty on the device.
+func warnSplitSingles(
+	intents []createIntent,
+	removes []*tree.Node,
+	d *diag.Diagnostics,
+) {
+	for _, ci := range intents {
+		def := ci.src.Def
+		if ci.kind != ckAdd || def == nil ||
+			len(def.KeyArgs) > 0 || !ident.SingleOccupancy(def) {
+			continue
+		}
+		for _, rc := range removes {
+			rdef := rc.Def
+			if rdef == nil || len(rdef.KeyArgs) > 0 ||
+				!ident.SingleOccupancy(rdef) {
+				continue
+			}
+			if rdef == def ||
+				(def.KindName != "" && rdef.KindName == def.KindName) {
+				d.AddAt(ci.src.Line, diag.Warning,
+					"%s: add and remove split single-occupancy slot %q;"+
+						" share a Kind or MarkIdempotent",
+					ci.src.Path(), rc.Text)
+			}
+		}
 	}
 }
 

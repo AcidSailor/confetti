@@ -289,3 +289,38 @@ func TestImportCheckDiagnosticsCarryLines(t *testing.T) {
 	)
 	assert.Equal(t, 4, byMsg[`vlan 10: duplicate key "10"`])
 }
+
+func TestImportCheckDuplicateKindSpelling(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
+	r.Child("default-originate route-map {{ rmap:word }}").
+		Card(schema.ZeroToOne).Kind("default-originate")
+	r.Child("default-originate").
+		Card(schema.ZeroToOne).Kind("default-originate")
+	r.Child("send-community").Card(schema.ZeroToOne)
+	r.Child("send-community extended").Card(schema.ZeroToOne)
+
+	d := diag.New()
+	cfg := parse.Parse(
+		s,
+		"router bgp 65000\n  default-originate\n"+
+			"  default-originate route-map RM\n",
+		diag.Policy{Strict: true},
+		d,
+	)
+	ImportCheck(cfg, d)
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "spelling")
+
+	// Independent siblings without a shared Kind stay silent.
+	d = diag.New()
+	cfg = parse.Parse(
+		s,
+		"router bgp 65000\n  send-community\n  send-community extended\n",
+		diag.Policy{Strict: true},
+		d,
+	)
+	ImportCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}

@@ -368,3 +368,32 @@ func TestMergeListMalformedFallsBackToConflict(t *testing.T) {
 		"interface eth1\n  switchport trunk allowed vlan 10\n",
 		got)
 }
+
+// kindSlotSchema declares two spellings of one slot sharing a Kind.
+func kindSlotSchema() *schema.Schema {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
+	r.Child("default-originate route-map {{ rmap:word }}").
+		Card(schema.ZeroToOne).Kind("default-originate")
+	r.Child("default-originate").
+		Card(schema.ZeroToOne).Kind("default-originate")
+	return s
+}
+
+func TestMergeKindSlotLenientLastWins(t *testing.T) {
+	got, d := mergeText(t, kindSlotSchema(), false,
+		"router bgp 65000\n  default-originate\n",
+		"router bgp 65000\n  default-originate route-map RM\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"router bgp 65000\n  default-originate route-map RM\n", got)
+}
+
+func TestMergeKindSlotStrictConflicts(t *testing.T) {
+	got, d := mergeText(t, kindSlotSchema(), true,
+		"router bgp 65000\n  default-originate\n",
+		"router bgp 65000\n  default-originate route-map RM\n")
+	assert.True(t, d.HasErrors())
+	assert.Equal(t, "router bgp 65000\n  default-originate\n", got)
+}

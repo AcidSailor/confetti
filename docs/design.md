@@ -167,11 +167,20 @@ The explanations record constraints that tests do not show.
   only the new value.
 - **Pairing identity uses Kind instead of definition pointers.** A keyed node
   that changes between sibling templates must pair as one entity. Otherwise,
-  a rename would add and then remove the entity. **Block bodies are not part
-  of identity.** A body-only change must be Modify, not separate Add and
+  a rename would add and then remove the entity. **A non-keyed,
+  single-occupancy, non-toggle node with a Kind pairs by Kind alone**
+  (`KindedSingle`): variant spellings of one slot become one Replace
+  (negate, then add) instead of an Add plus an unrelated Remove that empties
+  the slot on the device. Toggle members are excluded because a flip already
+  supersedes its partner's removal. **Block bodies are not part of
+  identity.** A body-only change must be Modify, not separate Add and
   Remove operations. **Merge extends pairing in one way:** each non-keyed
-  ZeroToOne definition is one slot per level. Remediation must not use this
-  extension because a key change requires Remove and Add.
+  ZeroToOne definition without a Kind is one slot per level. Remediation
+  must not pair by definition alone because an unmarked pair can be
+  genuinely independent siblings; pairing needs the explicit Kind signal.
+  Diff warns when an Add and a Remove still land on one unmarked
+  single-occupancy slot (same definition or same Kind), and Phase A rejects
+  two spellings of one Kind-paired slot at the same level.
 - **A section header is never `OpModify` for identity**: changed header
   identity is Remove+Add of the whole section. A kept section whose
   children all vanish keeps its header and negates each child instead of a

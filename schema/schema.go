@@ -241,7 +241,7 @@ func (n *Node) Card(c Cardinality) *Node {
 	return n
 }
 
-// Kind sets the semantic kind name for this node (used for Ref resolution).
+// Kind sets the semantic kind name for Ref resolution and slot pairing: sibling templates sharing a Kind diff as one slot.
 func (n *Node) Kind(k string) *Node { n.KindName = k; return n }
 
 // Key sets the arg names that form the identity key for this node.
