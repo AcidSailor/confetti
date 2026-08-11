@@ -28,13 +28,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # Full history so review commands can diff the branch against its base
+          fetch-depth: 0
+
+      # go.mod requires a newer Go than the runner image provides
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
 
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Enables '@claude /pr-review-toolkit:review-pr'
+          plugin_marketplaces: "https://github.com/anthropics/claude-plugins-official.git"
+          plugins: "pr-review-toolkit@claude-plugins-official"
+
+          # Read-only commands the review agents need to inspect the diff and CI
+          claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh run view:*),Bash(git diff:*),Bash(git log:*),Bash(go test:*),Bash(go vet:*),Bash(go build:*)"'
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
