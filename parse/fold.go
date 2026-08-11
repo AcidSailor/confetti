@@ -248,7 +248,7 @@ func (lf *levelFold) foldOne(m *tree.Node, seen map[ident.Ident]*tree.Node) {
 		nn := tree.NewNode(text)
 		nn.Def, nn.Fields, nn.RealIndent = canon, fields, m.RealIndent
 		nn.Line = m.Line
-		// Keep conflicting duplicates for ImportCheck.
+		// Drop a duplicate only when it agrees on every synthesized field; conflicting ones stay for ImportCheck.
 		if ex, ok := seen[ident.Of(nn)]; ok &&
 			fieldsSubset(fields, ex.Fields) {
 			continue

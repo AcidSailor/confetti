@@ -54,8 +54,13 @@ func WithExportTree(ts ...transform.TreeTransform) Option {
 	return func(e *Engine) { e.exportTree = append(e.exportTree, ts...) }
 }
 
-// WithCommitChecks appends whole-tree validators after the built-in commit check.
+// WithCommitChecks appends whole-tree validators, which report into d and must not modify cfg, after the built-in commit check.
 func WithCommitChecks(fns ...func(*tree.Config, *diag.Diagnostics)) Option {
+	for _, fn := range fns {
+		if fn == nil {
+			panic("confetti: WithCommitChecks with nil func")
+		}
+	}
 	return func(e *Engine) { e.commitChecks = append(e.commitChecks, fns...) }
 }
 
@@ -115,8 +120,11 @@ func (e *Engine) CommitCheck(cfg *tree.Config) *diag.Diagnostics {
 
 func (e *Engine) commitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 	validate.CommitCheck(cfg, d)
+	// Each validator collects into its own Diagnostics so it cannot drop what earlier checks recorded.
 	for _, fn := range e.commitChecks {
-		fn(cfg, d)
+		vd := diag.New()
+		fn(cfg, vd)
+		d.Merge(vd)
 	}
 }
 

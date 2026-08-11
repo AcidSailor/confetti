@@ -74,7 +74,7 @@ Layering rules:
 Import:    text transforms (outside block spans) → parse → fold
            (Respell → ListContinues → Members) → user tree transforms
            → ImportCheck
-CommitCheck: refs, Requires, and toggles over an assembled tree
+CommitCheck: refs and Requires over an assembled tree
            → custom validators (WithCommitChecks)
 Render:    user tree transforms → render → text transforms (outside blocks)
 Remediate: CommitCheck(intended) + Diff(running, intended)
@@ -139,7 +139,11 @@ The explanations record constraints that tests do not show.
   cycle. `WithCommitChecks` appends validators after the built-in
   `CommitCheck`, in registration order. They run for `CommitCheck`,
   `Remediate` (intended), and `Rollback` (running). `Render`, `Compare`, and
-  `Merge` skip them.
+  `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
+  merged after it returns, so it cannot drop what earlier checks recorded. It
+  must not modify the tree: `Remediate` validates the caller's `intended`
+  before `Diff`, so a mutation would silently change the remediation. A nil
+  validator panics at registration.
 - **Toggle pairs are declared, never text-detected.** The `"no "`-prefix
   heuristic has no fallback. A test verifies that an undeclared pair emits
   separate remove and add operations.

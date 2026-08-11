@@ -68,7 +68,7 @@ configurations.
 
 Use `WithCommitChecks` for whole-tree rules that do not fit the schema. The
 validators run after the built-in check in `CommitCheck`, `Remediate`, and
-`Rollback`:
+`Rollback`. A validator reports diagnostics and must not modify the tree:
 
 ```go
 e := confetti.New(mySchema, confetti.WithCommitChecks(checkPlatformRules))
