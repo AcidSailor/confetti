@@ -162,8 +162,7 @@ func TestVlanRangeSpellingIsNotDrift(t *testing.T) {
 }
 
 func TestVlanRangeStateConflictIsDupKey(t *testing.T) {
-	// The range line and an explicit instance disagree on state: one vlan
-	// Phase A reports two states for the same VLAN identity as a duplicate key.
+	// ImportCheck reports conflicting states for one VLAN identity as a duplicate key.
 	e := Engine(diag.Policy{Strict: true})
 	_, d := e.Import(
 		"bridge 1 protocol rstp vlan-bridge\n" +

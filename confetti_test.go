@@ -777,6 +777,130 @@ func TestCommitCheckPerItemListRef(t *testing.T) {
 	assert.Contains(t, cc3.String(), `vlan "42" does not exist`)
 }
 
+func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
+	noUsersVlan := func(cfg *tree.Config, d *diag.Diagnostics) {
+		tree.Walk(cfg, func(n *tree.Node) {
+			// Bind to the schema definition instead of any node carrying a text field.
+			if n.Parent == nil || n.Parent.Def == nil ||
+				n.Parent.Def.KindName != "vlan" {
+				return
+			}
+			if n.Fields["text"] == "USERS" {
+				d.AddAt(
+					n.Line,
+					diag.Error,
+					"%s: name USERS is reserved",
+					n.Path(),
+				)
+			}
+		})
+	}
+	e := confetti.New(alpha.Schema(),
+		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithCommitChecks(noUsersVlan))
+
+	bad, d := e.Import("vlan 10\n  name USERS\n")
+	require.False(t, d.HasErrors(), d.String())
+	good, d2 := e.Import("vlan 10\n  name GUESTS\n")
+	require.False(t, d2.HasErrors(), d2.String())
+
+	cc := e.CommitCheck(bad)
+	require.True(t, cc.HasErrors())
+	assert.Contains(t, cc.String(), "name USERS is reserved")
+	assert.False(t, e.CommitCheck(good).HasErrors())
+
+	// Remediate checks intended; Rollback checks running.
+	res, rd := e.Remediate(good, bad)
+	assert.Contains(t, rd.String(), "name USERS is reserved")
+	// A failing validator reports without suppressing the operations.
+	require.NotNil(t, res)
+	assert.NotEmpty(t, render.Render(res.Tree))
+	_, bd := e.Rollback(bad, good)
+	assert.Contains(t, bd.String(), "name USERS is reserved")
+
+	// Compare does not run commit checks.
+	_, cd := e.Compare(good, bad)
+	assert.NotContains(t, cd.String(), "name USERS is reserved")
+}
+
+func TestCommitChecksRunExactlyOncePerCommitPath(t *testing.T) {
+	calls := 0
+	count := func(*tree.Config, *diag.Diagnostics) { calls++ }
+	e := confetti.New(alpha.Schema(),
+		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithCommitChecks(count))
+
+	cfg, d := e.Import(cleanConfig)
+	require.False(t, d.HasErrors(), d.String())
+	other, d2 := e.Import("vlan 10\n  name GUESTS\n")
+	require.False(t, d2.HasErrors(), d2.String())
+
+	tests := []struct {
+		name string
+		call func()
+		want int
+	}{
+		{"CommitCheck", func() { e.CommitCheck(cfg) }, 1},
+		{"Remediate", func() { e.Remediate(other, cfg) }, 1},
+		{"Rollback", func() { e.Rollback(other, cfg) }, 1},
+		{"Compare", func() { e.Compare(other, cfg) }, 0},
+		{"Render", func() { e.Render(cfg) }, 0},
+		{"Merge", func() { e.Merge(cfg, other) }, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls = 0
+			tt.call()
+			assert.Equal(t, tt.want, calls)
+		})
+	}
+}
+
+func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
+	mark := func(msg string) func(*tree.Config, *diag.Diagnostics) {
+		return func(_ *tree.Config, d *diag.Diagnostics) {
+			d.Add(diag.Error, "%s", msg)
+		}
+	}
+	// Two options prove that a later WithCommitChecks appends instead of replacing.
+	e := confetti.New(alpha.Schema(),
+		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithCommitChecks(mark("first"), mark("second")),
+		confetti.WithCommitChecks(mark("third")))
+
+	cfg, d := e.Import("interface Ethernet1/1\n  switchport access vlan 99\n")
+	require.False(t, d.HasErrors(), d.String())
+
+	cc := e.CommitCheck(cfg)
+	require.Len(t, cc.Items, 4)
+	assert.Contains(t, cc.Items[0].Message, `vlan "99" does not exist`)
+	assert.Equal(t, "first", cc.Items[1].Message)
+	assert.Equal(t, "second", cc.Items[2].Message)
+	assert.Equal(t, "third", cc.Items[3].Message)
+}
+
+func TestCommitCheckKeepsDiagnosticsFromClobberingValidator(t *testing.T) {
+	clobber := func(_ *tree.Config, d *diag.Diagnostics) { d.Items = nil }
+	e := confetti.New(alpha.Schema(),
+		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithCommitChecks(clobber))
+
+	cfg, d := e.Import("interface Ethernet1/1\n  switchport access vlan 99\n")
+	require.False(t, d.HasErrors(), d.String())
+
+	cc := e.CommitCheck(cfg)
+	assert.True(t, cc.HasErrors())
+	assert.Contains(t, cc.String(), `vlan "99" does not exist`)
+}
+
+func TestWithCommitChecksNilFuncPanics(t *testing.T) {
+	assert.PanicsWithValue(
+		t,
+		"confetti: WithCommitChecks with nil func",
+		func() { confetti.WithCommitChecks(nil) },
+	)
+}
+
 func TestRemediatePerItemRefOrdersDelta(t *testing.T) {
 	e := confetti.New(refListSchema(),
 		confetti.WithPolicy(diag.Policy{Strict: true}))

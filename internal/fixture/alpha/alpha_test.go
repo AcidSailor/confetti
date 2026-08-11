@@ -226,9 +226,7 @@ func TestAlphaMembershipVlanSatisfiesRef(t *testing.T) {
 }
 
 func TestAlphaMembershipBadItemRejected(t *testing.T) {
-	// An out-of-range id inside the membership line surfaces as an import
-	// error: the fold synthesizes the instance ("5000" matches the vlan
-	// PATTERN), and Phase A's value check on the synthesized node reports it.
+	// The fold accepts the pattern, then ImportCheck rejects the synthesized out-of-range VLAN.
 	e := Engine(diag.Policy{Strict: true})
 	_, d := e.Import("vlan 5,5000\n")
 	assert.True(t, d.HasErrors())

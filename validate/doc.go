@@ -1,9 +1,7 @@
-// Package validate implements two phases of semantic validation. Phase A runs per line
-// during Import: value-type checks on captured fields (list args validate
-// per item, as the author spelled them), cardinality and duplicate-key
-// detection, toggle co-presence, and required-child presence. Phase B
-// (CommitCheck) runs over an assembled tree: referential integrity for every
-// Ref (per item for list-valued refs) and Requires existence.
+// Package validate provides import-time and commit-time semantic checks.
+// ImportCheck validates values, cardinality, duplicate keys, toggles, and
+// required children at each tree level. CommitCheck validates references and
+// Requires constraints against an assembled tree.
 //
 // Invalid values, unresolved references, and duplicate keys are Errors in all
 // policies. diag.Policy controls only unknown input during parsing. An

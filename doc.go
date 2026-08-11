@@ -11,4 +11,8 @@
 //
 // Remediate and Rollback run a commit check on their goal. Render, Merge, and
 // Compare do not because callers can use them with incomplete configurations.
+//
+// WithCommitChecks registers whole-tree validators after the built-in check
+// for CommitCheck, Remediate, and Rollback. A validator reports diagnostics
+// and must not modify the tree.
 package confetti

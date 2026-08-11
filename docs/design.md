@@ -28,8 +28,8 @@ confetti (root)   Engine: option wiring + the pipelines below
 ├── parse         text → tree (indent stack, block capture, BlockSpans) and
 │                 the import fold (Respell → ListContinues → Members)
 ├── tree          the config tree; Node stores op tags, lines, and block bodies
-├── validate      Phase A (per-line values, cardinality, dup keys, toggles,
-│                 required children) and Phase B commit check (refs, Requires)
+├── validate      ImportCheck (values, cardinality, dup keys, toggles,
+│                 required children) and CommitCheck (refs, Requires)
 ├── render        tree → canonical text
 ├── transform     text rules (DropLines, PerLineSub) + tree transform seam
 ├── remediate     Diff: pair → collect ops → derive edges → schedule →
@@ -73,8 +73,9 @@ Layering rules:
 ```
 Import:    text transforms (outside block spans) → parse → fold
            (Respell → ListContinues → Members) → user tree transforms
-           → Phase A
-CommitCheck: Phase B over an assembled tree (refs, Requires, toggles)
+           → ImportCheck
+CommitCheck: refs and Requires over an assembled tree
+           → custom validators (WithCommitChecks)
 Render:    user tree transforms → render → text transforms (outside blocks)
 Remediate: CommitCheck(intended) + Diff(running, intended)
 Rollback:  CommitCheck(running)  + Diff(intended, running)
@@ -131,7 +132,18 @@ The explanations record constraints that tests do not show.
   the general definition and the canonical section before membership syntax.
 - **Represent platform-specific behavior as schema data or hooks, not core code.**
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
-  `OrderHook`, and tree transforms keep the engine platform-independent.
+  `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
+  platform-independent.
+- **Whole-tree validators belong to `Engine`.** They consume `*tree.Config`,
+  and `tree` imports `schema`; storing them in `Schema` would create an import
+  cycle. `WithCommitChecks` appends validators after the built-in
+  `CommitCheck`, in registration order. They run for `CommitCheck`,
+  `Remediate` (intended), and `Rollback` (running). `Render`, `Compare`, and
+  `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
+  merged after it returns, so it cannot drop what earlier checks recorded. It
+  must not modify the tree: `Remediate` validates the caller's `intended`
+  before `Diff`, so a mutation would silently change the remediation. A nil
+  validator panics at registration.
 - **Toggle pairs are declared, never text-detected.** The `"no "`-prefix
   heuristic has no fallback. A test verifies that an undeclared pair emits
   separate remove and add operations.

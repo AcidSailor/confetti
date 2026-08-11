@@ -111,7 +111,7 @@ func TestFoldMembersNestedLevel(t *testing.T) {
 }
 
 func TestFoldMembersExpandFailureLeavesLine(t *testing.T) {
-	// Leave a malformed list unchanged for Phase A validation.
+	// Keep the malformed list for ImportCheck.
 	d := diag.New()
 	cfg := Parse(memberSchema(), "vlan 9-5\n", diag.Policy{Strict: true}, d)
 	Fold(cfg, d)
@@ -392,10 +392,8 @@ func TestFoldMembersCompositeDedupsAgreeingInstance(t *testing.T) {
 	}, kidTexts(cfg.Root.Children[0]))
 }
 
-func TestFoldMembersCompositeConflictSplicesForPhaseA(t *testing.T) {
-	// The same ID and bridge with different state values remain separate so
-	// instances land in the tree and Phase A's duplicate-key check owns the
-	// conflict (one vlan cannot carry two states).
+func TestFoldMembersCompositeConflictSplicesForImportCheck(t *testing.T) {
+	// Keep conflicting states as duplicate keys for ImportCheck.
 	d := diag.New()
 	cfg := Parse(compositeSchema(),
 		"vlan database\n"+
@@ -552,7 +550,7 @@ func TestFoldRespellChainedRefusesLoudly(t *testing.T) {
 }
 
 func TestFoldContinuationMalformedBaseWarnsAndLeavesLine(t *testing.T) {
-	// Warn at the continuation line when a malformed base prevents folding; Phase A reports the base line separately.
+	// Warn on the continuation; ImportCheck reports the malformed base separately.
 	d := diag.New()
 	cfg := Parse(contSchema(),
 		"interface Ethernet1/1\n"+
