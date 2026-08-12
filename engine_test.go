@@ -37,6 +37,19 @@ func TestEngineImportRenderRoundTrip(t *testing.T) {
 	assert.Equal(t, "interface Ethernet1/1\n  shutdown\n", out)
 }
 
+func TestEngineCommitCheckExcludeTag(t *testing.T) {
+	e := confetti.New(
+		l2l3Schema(),
+		confetti.WithPolicy(diag.Policy{Strict: true}),
+	)
+	cfg, d := e.Import("interface Ethernet1/1\n  switchport\n" +
+		"  switchport access vlan 20\n  ip address 10.0.0.1/24\n")
+	require.False(t, d.HasErrors(), d.String())
+	cd := e.CommitCheck(cfg)
+	require.True(t, cd.HasErrors())
+	assert.Contains(t, cd.String(), `via label "l2"`)
+}
+
 func TestEngineImportTextTransformStripsComments(t *testing.T) {
 	drop, err := transform.DropLines(`^!`)
 	require.NoError(t, err)
@@ -280,4 +293,39 @@ func TestImportDiagnosticLineSurvivesDropLines(t *testing.T) {
 		}
 	}
 	assert.True(t, hit, d.String())
+}
+
+// l2l3Schema prevents switched and routed lines from sharing an interface.
+func l2l3Schema() *schema.Schema {
+	s := schema.New()
+	iface := s.Node("interface {{ name:word }}").
+		Card(schema.ZeroToN).Key("name")
+	iface.Child("switchport").Card(schema.ZeroToOne).
+		Tag("l2").ExcludeTag("l3")
+	iface.Child("switchport access vlan {{ vlan:uint }}").
+		Card(schema.ZeroToOne).Tag("l2").ExcludeTag("l3")
+	iface.Child("ip address {{ addr:word }}").
+		Card(schema.ZeroToOne).Tag("l3").ExcludeTag("l2")
+	return s
+}
+
+func TestEngineRemediateClearsOldModeFirst(t *testing.T) {
+	e := confetti.New(
+		l2l3Schema(),
+		confetti.WithPolicy(diag.Policy{Strict: true}),
+	)
+	running, d := e.Import("interface Ethernet1/1\n  switchport\n" +
+		"  switchport access vlan 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	intended, id := e.Import(
+		"interface Ethernet1/1\n  ip address 10.0.0.1/24\n",
+	)
+	require.False(t, id.HasErrors(), id.String())
+
+	res, rd := e.Remediate(running, intended)
+	require.False(t, rd.HasErrors(), rd.String())
+	out, od := e.Render(res.Tree)
+	require.False(t, od.HasErrors(), od.String())
+	assert.Equal(t, "interface Ethernet1/1\n  no switchport access vlan 20\n"+
+		"  no switchport\n  ip address 10.0.0.1/24\n", out)
 }

@@ -28,11 +28,14 @@ func TestBuilderStructure(t *testing.T) {
 	assert.Equal(t, ZeroToN, iface.Cardinality)
 	assert.True(t, iface.Children[0].Idempotent)
 
-	ref := iface.Children[1].Refs
+	ref := iface.Children[1].Relations
 	require.Len(t, ref, 1)
 	assert.Equal(
 		t,
-		Ref{FromArg: "vlan", TargetKind: "vlan", TargetKey: "id"},
+		Relation{
+			Label: "vlan", FromArg: "vlan", TargetKey: "id",
+			Scope: ScopeTree, Want: Present,
+		},
 		ref[0],
 	)
 
@@ -189,7 +192,11 @@ func TestOrderingMetadata(t *testing.T) {
 	n := s.Node("router {{ proto:word }}").
 		Requires("feature").
 		Unique("proto")
-	assert.Equal(t, []string{"feature"}, n.RequiresKinds)
+	assert.Equal(
+		t,
+		[]Relation{{Label: "feature", Scope: ScopeTree, Want: Present}},
+		n.Relations,
+	)
 	assert.Equal(t, []string{"proto"}, n.UniqueArgs)
 
 	called := 0
@@ -754,6 +761,37 @@ func TestRequiresEmptyKindPanics(t *testing.T) {
 	assert.Panics(t, func() { New().Node("x").Requires("") })
 }
 
+func TestTagStacksAndRejectsEmpty(t *testing.T) {
+	n := New().Node("switchport").Tag("l2").Tag("mode", "access")
+	assert.Equal(t, []string{"l2", "mode", "access"}, n.TagNames)
+	assert.Panics(t, func() { New().Node("x").Tag() })
+	assert.Panics(t, func() { New().Node("x").Tag("") })
+	assert.Panics(t, func() { New().Node("x").ExcludeTag() })
+	assert.Panics(t, func() { New().Node("x").ExcludeTag("") })
+}
+
+func TestExcludeTagBuildsSiblingAbsentRelations(t *testing.T) {
+	n := New().Node("ip address {{ a:word }}").
+		Tag("l3").
+		ExcludeTag("l2", "mgmt")
+	assert.Equal(t, []Relation{
+		{Label: "l2", Scope: ScopeSiblings, Want: Absent},
+		{Label: "mgmt", Scope: ScopeSiblings, Want: Absent},
+	}, n.Relations)
+}
+
+func TestLabelsCombineKindAndTags(t *testing.T) {
+	n := New().Node("vlan {{ id:uint }}").Kind("vlan").Tag("l2domain")
+	assert.Equal(t, []string{"vlan", "l2domain"}, n.Labels())
+	assert.True(t, n.HasLabel("vlan"))
+	assert.True(t, n.HasLabel("l2domain"))
+	assert.False(t, n.HasLabel("l3"))
+	assert.False(t, n.HasLabel(""))
+
+	kindless := New().Node("switchport").Tag("l2")
+	assert.Equal(t, []string{"l2"}, kindless.Labels())
+}
+
 func TestToggleMemberRejectsKeyAndCard(t *testing.T) {
 	// The Toggles rails (non-keyed ZeroToOne) must hold AFTER grouping too.
 	s := New()
@@ -852,4 +890,53 @@ func TestKeyEmptyMatchingTypePanics(t *testing.T) {
 	assert.Panics(t, func() {
 		s.Node("neighbor{{ g:maybe }}").Key("g")
 	})
+}
+
+func TestRelationZeroValueConstantsAreAnchored(t *testing.T) {
+	// Relation literals depend on ScopeTree and Present remaining zero values.
+	assert.Zero(t, int(ScopeTree))
+	assert.Zero(t, int(Present))
+	assert.Equal(t, 1, int(ScopeSiblings))
+	assert.Equal(t, 1, int(Absent))
+}
+
+func TestTagAndExcludeTagHoldInBothCallOrders(t *testing.T) {
+	want := []Relation{{Label: "l2", Scope: ScopeSiblings, Want: Absent}}
+	first := New().Node("ip address {{ a:word }}").
+		Kind("addr").Tag("l3").ExcludeTag("l2")
+	second := New().Node("ip address {{ a:word }}").
+		ExcludeTag("l2").Tag("l3").Kind("addr")
+	for _, n := range []*Node{first, second} {
+		assert.Equal(t, want, n.Relations)
+		assert.Equal(t, []string{"addr", "l3"}, n.Labels())
+	}
+}
+
+func TestTagAndExcludeTagSurviveToggleGrouping(t *testing.T) {
+	s := New()
+	a := s.Node("switchport").Tag("l2")
+	b := s.Node("no switchport").Tag("l3").ExcludeTag("l2")
+	a.Toggles(b)
+	assert.Equal(t, []string{"l2"}, a.Labels())
+	assert.Equal(t,
+		[]Relation{{Label: "l2", Scope: ScopeSiblings, Want: Absent}},
+		b.Relations)
+}
+
+func TestLabelsDoesNotAliasTagNames(t *testing.T) {
+	n := New().Node("switchport").Tag("l2")
+	_ = append(n.Labels(), "injected")
+	assert.Equal(t, []string{"l2"}, n.TagNames)
+}
+
+func TestWalkVisitsSharedChildrenOnce(t *testing.T) {
+	s := New()
+	shared := s.Node("shutdown")
+	s.Node("interface {{ n:word }}").Adopt(shared)
+	seen := map[*Node]int{}
+	s.Walk(func(n *Node) { seen[n]++ })
+	for n, c := range seen {
+		assert.Equal(t, 1, c, n.Template)
+	}
+	assert.Len(t, seen, 2)
 }

@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -146,6 +147,100 @@ func TestCommitCheckRequiresAbsentBothIsFine(t *testing.T) {
 	assert.False(t, d.HasErrors(), d.String())
 }
 
+// l2l3Schema prevents switched and routed lines from sharing an interface.
+func l2l3Schema() *schema.Schema {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	iface := s.Node("interface {{ name:word }}").
+		Card(schema.ZeroToN).Key("name")
+	iface.Child("switchport").Card(schema.ZeroToOne).
+		Tag("l2").ExcludeTag("l3")
+	iface.Child("switchport access vlan {{ vlan:uint }}").
+		Card(schema.ZeroToOne).Tag("l2").ExcludeTag("l3")
+	iface.Child("ip address {{ addr:word }}").
+		Card(schema.ZeroToOne).Tag("l3").ExcludeTag("l2")
+	hsrp := iface.Child("hsrp {{ grp:uint }}").Card(schema.ZeroToN).Key("grp")
+	hsrp.Child("ip {{ vip:word }}").Card(schema.ZeroToOne).Tag("l2")
+	return s
+}
+
+func TestCommitCheckExcludeTagConflict(t *testing.T) {
+	d := diag.New()
+	in := "interface Ethernet1/1\n  switchport\n" +
+		"  switchport access vlan 20\n  ip address 10.0.0.1/24\n"
+	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	require.True(t, d.HasErrors())
+	assert.Contains(
+		t, d.String(), `mutually exclusive with "switchport" (line 2)`,
+	)
+	assert.Contains(t, d.String(), `via label "l2"`)
+	assert.Contains(t, d.String(), `via label "l3"`)
+}
+
+func TestCommitCheckExcludeTagSameSetCoexists(t *testing.T) {
+	d := diag.New()
+	in := "interface Ethernet1/1\n  switchport\n  switchport access vlan 20\n"
+	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckExcludeTagIgnoresGrandchildren(t *testing.T) {
+	d := diag.New()
+	in := "interface Ethernet1/1\n  ip address 10.0.0.1/24\n" +
+		"  hsrp 1\n    ip 10.0.0.254\n"
+	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckExcludeTagScopedToParentInstance(t *testing.T) {
+	d := diag.New()
+	in := "interface Ethernet1/1\n  switchport\n" +
+		"interface Ethernet1/2\n  ip address 10.0.0.1/24\n"
+	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckRequiresSatisfiedByTag(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("feature lacp").Card(schema.ZeroToOne).Tag("feature-lacp")
+	s.Node("port-channel {{ id:uint }}").
+		Card(schema.ZeroToN).Key("id").Requires("feature-lacp")
+	d := diag.New()
+	cfg := parse.Parse(
+		s, "feature lacp\nport-channel 10\n", diag.Policy{Strict: true}, d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckRefResolvesThroughTag(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("vlan {{ id:vlan }}").
+		Card(schema.ZeroToN).Kind("vlan").Tag("bridge").Key("id")
+	s.Node("member {{ vlan:vlan }}").
+		Card(schema.ZeroToN).Key("vlan").Ref("vlan", "bridge.id")
+	d := diag.New()
+	cfg := parse.Parse(
+		s, "vlan 10\nmember 10\nmember 20\n", diag.Policy{Strict: true}, d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	require.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), `bridge "20" does not exist`)
+	assert.NotContains(t, d.String(), `"10" does not exist`)
+}
+
 func TestCommitCheckDanglingRefCarriesReferrerLine(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(
@@ -158,4 +253,109 @@ func TestCommitCheckDanglingRefCarriesReferrerLine(t *testing.T) {
 	CommitCheck(cfg, d)
 	require.True(t, d.HasErrors())
 	assert.Equal(t, 2, d.Items[0].Line, "points at the referring line")
+}
+
+// checkText runs import-time and commit-time checks.
+func checkText(t *testing.T, s *schema.Schema, in string) *diag.Diagnostics {
+	t.Helper()
+	d := diag.New()
+	cfg := parse.Parse(s, in, diag.Policy{Strict: true}, d)
+	CommitCheck(cfg, d)
+	return d
+}
+
+func TestCommitCheckExcludeTagAtTopLevel(t *testing.T) {
+	s := schema.New()
+	s.Node("feature fabricpath").Card(schema.ZeroToOne).
+		Tag("fabric").ExcludeTag("overlay")
+	s.Node("feature nv overlay").Card(schema.ZeroToOne).
+		Tag("overlay").ExcludeTag("fabric")
+	d := checkText(t, s, "feature fabricpath\nfeature nv overlay\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `via label "overlay"`)
+}
+
+func TestCommitCheckExcludeTagUnknownLabelIsError(t *testing.T) {
+	s := schema.New()
+	iface := s.Node("interface {{ name:word }}").
+		Card(schema.ZeroToN).
+		Key("name")
+	iface.Child("ip address {{ a:word }}").Card(schema.ZeroToOne).
+		ExcludeTag("l2")
+	d := checkText(t, s, "interface Ethernet1\n  ip address 10.0.0.1/24\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `undeclared label "l2"`)
+}
+
+func TestCommitCheckRequiresUnknownLabelIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("router {{ proto:word }}").Card(schema.ZeroToN).Requires("nosuch")
+	d := checkText(t, s, "router bgp\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `undeclared label "nosuch"`)
+}
+
+func TestCommitCheckTagCollidingWithKindIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("vlan {{ id:uint }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
+	s.Node("bogus {{ id:uint }}").Card(schema.ZeroToN).Key("id").Tag("vlan")
+	d := checkText(t, s, "vlan 10\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `Tag "vlan" collides with a Kind`)
+}
+
+func TestCommitCheckRefUnknownTargetKeyIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("grp {{ id:uint }}").Card(schema.ZeroToN).Key("id").Tag("bridge")
+	s.Node("member {{ v:uint }}").Card(schema.ZeroToN).Key("v").
+		Ref("v", "bridge.nosuch")
+	d := checkText(t, s, "grp 10\nmember 10\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`no definition carrying "bridge" keys by "nosuch"`,
+	)
+}
+
+func TestCommitCheckHalfSpecifiedRelationIsError(t *testing.T) {
+	s := schema.New()
+	n := s.Node("member {{ v:uint }}").Card(schema.ZeroToN).Key("v").Tag("m")
+	n.Relations = append(n.Relations, schema.Relation{Label: "m", FromArg: "v"})
+	d := checkText(t, s, "member 10\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "matches arg \"v\" against no target key")
+}
+
+func TestCommitCheckInvalidRelationEnumsAreErrors(t *testing.T) {
+	s := schema.New()
+	n := s.Node("feature").Tag("feature")
+	n.Relations = append(n.Relations,
+		schema.Relation{Label: "feature", Scope: schema.Scope(2)},
+		schema.Relation{Label: "feature", Want: schema.Polarity(2)},
+	)
+	d := checkText(t, s, "feature\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `invalid scope 2`)
+	assert.Contains(t, d.String(), `invalid polarity 2`)
+}
+
+func TestCommitCheckUnsupportedRelationShapesAreErrors(t *testing.T) {
+	s := schema.New()
+	n := s.Node("feature").Tag("feature")
+	n.Relations = append(n.Relations,
+		schema.Relation{
+			Label: "feature",
+			Scope: schema.ScopeTree,
+			Want:  schema.Absent,
+		},
+		schema.Relation{
+			Label: "feature",
+			Scope: schema.ScopeSiblings,
+			Want:  schema.Present,
+		},
+	)
+	d := checkText(t, s, "feature\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Equal(t, 2, strings.Count(d.String(), "is unsupported"), d.String())
 }

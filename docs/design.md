@@ -29,7 +29,8 @@ confetti (root)   Engine: option wiring + the pipelines below
 │                 the import fold (Respell → ListContinues → Members)
 ├── tree          the config tree; Node stores op tags, lines, and block bodies
 ├── validate      ImportCheck (values, cardinality, dup keys, toggles,
-│                 required children) and CommitCheck (refs, Requires)
+│                 required children) and CommitCheck (relations: refs,
+│                 Requires, tag exclusions)
 ├── render        tree → canonical text
 ├── transform     text rules (DropLines, PerLineSub) + tree transform seam
 ├── remediate     Diff: pair → collect ops → derive edges → schedule →
@@ -74,7 +75,7 @@ Layering rules:
 Import:    text transforms (outside block spans) → parse → fold
            (Respell → ListContinues → Members) → user tree transforms
            → ImportCheck
-CommitCheck: refs and Requires over an assembled tree
+CommitCheck: relations (refs, Requires, exclusions) over an assembled tree
            → custom validators (WithCommitChecks)
 Render:    user tree transforms → render → text transforms (outside blocks)
 Remediate: CommitCheck(intended) + Diff(running, intended)
@@ -196,7 +197,7 @@ The explanations record constraints that tests do not show.
 ### Ordering
 
 - **Ordering is derived per instance from schema semantics (`Ref`, identity
-  conflicts, and `Requires`) and is topologically sorted.** Use `OrderHook`
+  conflicts, `Requires`, and sibling exclusions) and is topologically sorted.** Use `OrderHook`
   for platform-specific ordering. By default, creates ascend by
   declaration rank, removes descend (define-before-reference on add,
   reference-before-definition on removal).
@@ -210,6 +211,14 @@ The explanations record constraints that tests do not show.
 - **Declare exclusivity with `Unique`.** `Requires` is
   existential only. Use `OrderHook` for sequencing preferences that have no
   existence semantics.
+- **Sibling exclusions order removals before additions.** `Diff` does not check
+  intermediate states, but the emitted operations must remain valid for the
+  device. Each conflicting sibling is removed before its excluder is installed
+  (`no switchport` before `ip address`). Edges between a pure removal and a pure
+  addition cannot cycle. `Replace` and cross-definition `Modify` operations can
+  occur at either end of an edge and can form cycles.
+- **Absent relations derive only exclusion edges.** They do not identify a
+  required provider, so they do not derive reference or prerequisite edges.
 
 ### Import folds (dual-form, lists, respell)
 
@@ -292,6 +301,15 @@ cycle break warns about its partial-application risk and names the dependency.
   places the node in the Modify pairing category the delta machinery uses).
 - **`EmptyOnRemove` is per definition, not per Kind** because its mode-like,
   always-present section declares no Kind.
+- **Tags are non-identity labels.** Relations match a node's Kind and Tags.
+  Identity and pairing use only Kind, but ordering also uses Tags. Sibling
+  relations compare direct children of one parent; top-level nodes share the
+  sentinel root. Use `Toggles` for alternate spellings of one setting and
+  `ExcludeTag` for many-to-many mode splits such as L2 versus L3.
+- **A Tag must not shadow a Kind.** A name cannot be both identity-bearing and
+  non-identity metadata. `ValidateRelations` also rejects undeclared labels,
+  incomplete key matches, unsupported relation shapes, and missing target
+  keys.
 - Blocks, lists, `Members`, `RespellAs`, and `Key` are mutually exclusive in
   documented combinations that cannot represent valid grammar. Invalid
   combinations panic in both call orders.

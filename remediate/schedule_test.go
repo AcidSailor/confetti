@@ -33,7 +33,7 @@ func sched(
 	dv := &differ{
 		ops: ops,
 		g:   g,
-		why: edgeReasons{},
+		why: map[[2]int]string{},
 		p:   diag.Policy{Strict: strict},
 		d:   d,
 	}
@@ -140,12 +140,8 @@ func TestScheduleCycleBreakNamesProtectedDependency(t *testing.T) {
 	g := graph.New(opViews(ops))
 	g.AddEdge(0, 1)
 	g.AddEdge(1, 0)
-	why := edgeReasons{}
-	why.put(
-		1,
-		0,
-		`ref vlan.id="10"`,
-	) // the greatest-key edge, i.e. the dropped one
+	// [1, 0] is the greatest-key edge and will be dropped.
+	why := map[[2]int]string{{1, 0}: `ref vlan.id="10"`}
 	d := diag.New()
 	dv := &differ{ops: ops, g: g, why: why, d: d}
 	order := dv.schedule()
