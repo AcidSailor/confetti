@@ -212,8 +212,10 @@ func refReason(r resource) string {
 	return fmt.Sprintf("ref %s.%s=%q", r.kind, r.arg, r.key)
 }
 
-// resourcesHeld returns exclusive resources for keyed nodes by UniqueArgs or the full key.
-func resourcesHeld(n *tree.Node) []resource {
+// resourcesHeld returns exclusive resources for keyed nodes by UniqueArgs or the full key. When the resource key
+// includes the node's List arg, it expands that arg into one resource per member instead of keying on its raw
+// text, so two spellings of the same member set (e.g. "1-100" and "1-50,51-100") pair as the same resources.
+func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []resource {
 	var out []resource
 	n.Walk(func(x *tree.Node) {
 		def := x.Def
@@ -224,17 +226,49 @@ func resourcesHeld(n *tree.Node) []resource {
 		if u := def.UniqueArgs; len(u) > 0 {
 			args = u
 		}
+		listIdx := -1
+		if def.ListSpec.Arg != "" {
+			listIdx = slices.Index(args, def.ListSpec.Arg)
+		}
+		if listIdx < 0 {
+			parts := make([]string, len(args))
+			for i, a := range args {
+				parts[i] = x.Fields[a]
+			}
+			out = append(out, resourceFor(def, strings.Join(parts, "\x00")))
+			return
+		}
+		ls := def.ListSpec
+		items, err := listval.Resolve(x.Fields[ls.Arg], ls.Sep, ls.Keywords())
+		if err != nil {
+			d.AddAt(
+				x.Line, diag.Warning,
+				"%s: unresolvable list %q: exclusive-resource ordering for this line skipped (%v)",
+				x.Path(), x.Fields[ls.Arg], err,
+			)
+			return
+		}
 		parts := make([]string, len(args))
 		for i, a := range args {
-			parts[i] = x.Fields[a]
+			if i != listIdx {
+				parts[i] = x.Fields[a]
+			}
 		}
-		r := resource{kind: def.KindName, key: strings.Join(parts, "\x00")}
-		if r.kind == "" {
-			r.def = def
+		for _, it := range items {
+			parts[listIdx] = it
+			out = append(out, resourceFor(def, strings.Join(parts, "\x00")))
 		}
-		out = append(out, r)
 	})
 	return out
+}
+
+// resourceFor builds a resource for def keyed by key, falling back to the definition itself when the Kind is empty.
+func resourceFor(def *schema.Node, key string) resource {
+	r := resource{kind: def.KindName, key: key}
+	if r.kind == "" {
+		r.def = def
+	}
+	return r
 }
 
 // deriveMoveEdges orders each resource release before a new claim on the same resource.
@@ -245,7 +279,7 @@ func (dv *differ) deriveMoveEdges() {
 		if src == nil {
 			continue
 		}
-		for _, r := range resourcesHeld(src) {
+		for _, r := range resourcesHeld(src, dv.d) {
 			freed[r] = append(freed[r], i)
 		}
 	}
@@ -254,7 +288,7 @@ func (dv *differ) deriveMoveEdges() {
 		if src == nil {
 			continue
 		}
-		for _, r := range resourcesHeld(src) {
+		for _, r := range resourcesHeld(src, dv.d) {
 			for _, j := range freed[r] {
 				if j != i {
 					dv.addEdge(j, i, moveReason(r))

@@ -251,6 +251,38 @@ func TestUniqueScopeDerivesMoveOnPartialKeyMatch(t *testing.T) {
 	assert.Equal(t, "no slot 1 owner alpha\nslot 1 owner beta\n", out)
 }
 
+func TestUniqueListArgExpandsToPerMemberResources(t *testing.T) {
+	s := schema.New()
+	s.Node("priority {{ ids:word }} value {{ value:word }}").
+		Card(schema.ZeroToN).Kind("prio").Key("value").Unique("ids").
+		List("ids", "uint").
+		ListDelta("priority {{ ids }} value {{ value }}",
+			"no priority {{ ids }} value {{ value }}")
+	// Same id set, respelled from one range into two ranges, with a new value key.
+	// The old and new instances hold the same members, so the release must precede the claim
+	// even though the raw "ids" text differs.
+	out, d := orderedDiff(t, s,
+		"priority 1-100 value 10\n",
+		"priority 1-50,51-100 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"no priority 1-100 value 10\npriority 1-50,51-100 value 20\n", out)
+}
+
+func TestUniqueListArgMalformedListWarnsNotSilent(t *testing.T) {
+	s := schema.New()
+	s.Node("priority {{ ids:word }} value {{ value:word }}").
+		Card(schema.ZeroToN).Kind("prio").Key("value").Unique("ids").
+		List("ids", "uint").
+		ListDelta("priority {{ ids }} value {{ value }}",
+			"no priority {{ ids }} value {{ value }}")
+	out, d := orderedDiff(t, s, "priority 100-1 value 10\n", "")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "unresolvable list")
+	assert.Contains(t, d.String(), `"100-1"`)
+	assert.Equal(t, "no priority 100-1 value 10\n", out)
+}
+
 func TestOppositeMovesDeterministic(t *testing.T) {
 	var first string
 	for range 5 {
