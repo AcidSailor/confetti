@@ -68,7 +68,6 @@ func checkCardinality(
 
 	count := map[*schema.Node]int{}
 	seenKey := map[ident.Ident]bool{}
-	// Map each Kind-paired single slot to the first spelling present.
 	kindSeen := map[string]*tree.Node{}
 	// Map each canonical toggle member to the first present group member.
 	toggleSeen := map[*schema.Node]*tree.Node{}
@@ -119,7 +118,7 @@ func checkCardinality(
 					c.Path(),
 				)
 			}
-			// Two spellings of one Kind-paired slot; same-def duplicates are already reported above.
+			// Same-definition duplicates were reported above.
 			if ident.KindedSingleDef(def) {
 				first, ok := kindSeen[def.KindName]
 				switch {
@@ -145,7 +144,6 @@ func checkCardinality(
 			count[sn] > 0 {
 			continue
 		}
-		// A Kind-paired slot is satisfied by any sibling spelling.
 		if ident.KindedSingleDef(sn) && kindSeen[sn.KindName] != nil {
 			continue
 		}

@@ -138,6 +138,5 @@ func TestIndexByIdentFirstWins(t *testing.T) {
 	idx := indexByIdent(cfg.Root.Children)
 	require.Len(t, idx, 1)
 	assert.Same(t, cfg.Root.Children[0], idx[ident.Of(cfg.Root.Children[0])])
-	// The loser maps to the winner, which is how collect detects and reports it.
 	assert.NotSame(t, cfg.Root.Children[1], idx[ident.Of(cfg.Root.Children[1])])
 }

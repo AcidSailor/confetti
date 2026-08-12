@@ -314,7 +314,6 @@ func TestImportCheckDuplicateKindSpelling(t *testing.T) {
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "spelling")
 
-	// Independent siblings without a shared Kind stay silent.
 	d = diag.New()
 	cfg = parse.Parse(
 		s,
@@ -334,7 +333,6 @@ func TestImportCheckKindSlotSatisfiesRequiredOne(t *testing.T) {
 		Card(schema.One).Kind("default-originate")
 	r.Child("default-originate").Card(schema.One).Kind("default-originate")
 
-	// Either spelling alone satisfies the required Kind-paired slot.
 	for _, text := range []string{
 		"router bgp 65000\n  default-originate\n",
 		"router bgp 65000\n  default-originate route-map RM\n",
@@ -345,7 +343,6 @@ func TestImportCheckKindSlotSatisfiesRequiredOne(t *testing.T) {
 		assert.False(t, d.HasErrors(), "%q: %s", text, d.String())
 	}
 
-	// An empty slot still reports the missing requirement.
 	d := diag.New()
 	cfg := parse.Parse(s, "router bgp 65000\n", diag.Policy{Strict: true}, d)
 	ImportCheck(cfg, d)
@@ -354,7 +351,6 @@ func TestImportCheckKindSlotSatisfiesRequiredOne(t *testing.T) {
 }
 
 func TestImportCheckKindSpellingsAtDifferentLevelsAreFine(t *testing.T) {
-	// kindSeen is per level, so one spelling under each of two parents is a valid config, not a duplicate.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	v := s.Node("vrf {{ name:word }}").Card(schema.ZeroToN).Key("name")
@@ -376,7 +372,6 @@ func TestImportCheckKindSpellingsAtDifferentLevelsAreFine(t *testing.T) {
 }
 
 func TestImportCheckThreeKindSpellingsReportEachExtra(t *testing.T) {
-	// Every spelling past the first is unreachable for pairing, so each one must be named.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)

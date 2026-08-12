@@ -66,7 +66,7 @@ func (dv *differ) collect(
 	var intents []createIntent
 	for _, ic := range intParent.Children {
 		id := ident.Of(ic)
-		// A second intended spelling of one slot makes the goal ambiguous, so report it instead of applying both.
+		// Apply only the first spelling of an ambiguous intended slot.
 		if first := intByIdent[id]; first != ic {
 			d.AddAt(ic.Line, dv.p.Severity(),
 				"%s: duplicate spelling of %q; only the first is applied",
@@ -85,7 +85,7 @@ func (dv *differ) collect(
 		case ic.Def != rc.Def && (ident.IsSection(ic) || ident.IsSection(rc)):
 			intents = append(intents,
 				createIntent{src: ic, run: rc, kind: ckReplace})
-		// A non-idempotent Kind-paired section header has no key, so a changed header value replaces the whole section instead of a Modify reissue.
+		// A changed non-idempotent section header requires negation, not reissue.
 		case ident.IsSection(ic) && ic.Text != rc.Text &&
 			!ic.Def.Idempotent &&
 			ident.CategoryOf(ic) == ident.KindedSingle:
@@ -126,13 +126,13 @@ func (dv *differ) collect(
 			continue
 		}
 		if first := runByIdent[id]; first != rc {
-			// Two spellings of one Kind slot are two live device lines, so the unpaired one still needs negating.
+			// Negate each unpaired spelling of a live Kind slot.
 			if ident.CategoryOf(rc) == ident.KindedSingle &&
 				rc.Text != first.Text {
 				removes = append(removes, rc)
 				continue
 			}
-			// Any other duplicate repeats a line the device holds once, so negating it would delete the kept slot.
+			// Negating another duplicate category would delete the kept slot.
 			d.AddAt(rc.Line, diag.Warning,
 				"%s: duplicate of %q ignored by diff (first occurrence wins)",
 				rc.Path(), first.Text)
@@ -147,7 +147,7 @@ func (dv *differ) collect(
 
 	for i, ci := range intents {
 		k := append(slices.Clone(prefix), levelKey{0, dv.order[ci.src.Def], i})
-		// A cross-definition Modify destroys the running line just as a Replace does, so both obey protection.
+		// Cross-definition reissues delete the running definition.
 		if (ci.kind == ckModify || ci.kind == ckListDelta) &&
 			ci.src.Def != ci.run.Def && dv.refuseProtected(ci) {
 			continue
@@ -261,12 +261,12 @@ func (dv *differ) refuseDelete(n *tree.Node) bool {
 	return true
 }
 
-// checkSplitSingles reports an Add and a Remove that land on one single-occupancy slot because the split leaves the slot empty on the device.
+// checkSplitSingles reports separate Add and Remove operations for one slot.
 func (dv *differ) checkSplitSingles(
 	intents []createIntent,
 	removes []*tree.Node,
 ) {
-	// Keyed and EmptyOnRemove removals cannot pair, so filter them out once instead of rescanning them per intent.
+	// Only negatable, unkeyed slots can split.
 	slots := make([]*tree.Node, 0, len(removes))
 	for _, rc := range removes {
 		if ident.SlotDef(rc.Def) {
@@ -280,7 +280,7 @@ func (dv *differ) checkSplitSingles(
 		}
 		for _, rc := range slots {
 			rdef := rc.Def
-			// Declared toggle partners are excluded because the device flip supersedes the removal.
+			// A declared toggle add supersedes its partner's removal.
 			if slices.Contains(def.ToggleGroup, rdef) {
 				continue
 			}

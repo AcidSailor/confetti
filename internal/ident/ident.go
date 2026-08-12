@@ -13,8 +13,8 @@ type Category int
 const (
 	Unmatched        Category = iota // def == nil
 	Keyed                            // len(KeyArgs()) > 0
-	KindedSingle                     // non-keyed, non-toggle, non-EmptyOnRemove, Kind set, single-occupancy
-	IdempotentSingle                 // idempotent && card in {ZeroToOne, One}; KindedSingle wins when both apply
+	KindedSingle                     // A Kind identifies one unkeyed slot.
+	IdempotentSingle                 // The definition identifies one reissuable slot.
 	FullLine                         // everything else
 )
 
@@ -40,18 +40,18 @@ func SingleOccupancy(def *schema.Node) bool {
 	return def.Cardinality == schema.ZeroToOne || def.Cardinality == schema.One
 }
 
-// SlotDef reports whether a definition holds one unkeyed slot per level; EmptyOnRemove sections are excluded because they have no header negation to pair with.
+// SlotDef reports whether a definition has one negatable, unkeyed slot per level.
 func SlotDef(def *schema.Node) bool {
 	return def != nil && len(def.KeyArgs) == 0 &&
 		!def.EmptyOnRemove && SingleOccupancy(def)
 }
 
-// KindedSingleDef reports whether a definition pairs by Kind alone; toggle members are excluded because they keep flip semantics.
+// KindedSingleDef reports whether a definition pairs by Kind alone.
 func KindedSingleDef(def *schema.Node) bool {
 	return SlotDef(def) && def.KindName != "" && len(def.ToggleGroup) == 0
 }
 
-// Ident pairs keyed nodes by Kind and key across sibling templates, Kind-marked single-occupancy nodes by Kind alone, and other nodes by definition; block bodies are excluded.
+// Ident is a node's pairing identity.
 type Ident struct {
 	Def  *schema.Node
 	Kind string
@@ -69,7 +69,6 @@ func Of(n *tree.Node) Ident {
 		}
 		return Ident{Def: n.Def, Key: KeyValue(n)}
 	case KindedSingle:
-		// Exclude the definition and value so sibling spellings of one Kind pair as one slot.
 		return Ident{Kind: n.Def.KindName}
 	case IdempotentSingle:
 		// Exclude the value so instances of the same slot pair.

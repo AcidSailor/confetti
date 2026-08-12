@@ -849,7 +849,6 @@ func TestKeyEmptyMatchingTypePanics(t *testing.T) {
 		Name:    "maybe",
 		Pattern: `[a-z]*`,
 	}))
-	// An empty key value would collide with Kind-paired slot identities.
 	assert.Panics(t, func() {
 		s.Node("neighbor{{ g:maybe }}").Key("g")
 	})

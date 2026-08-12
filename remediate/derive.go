@@ -189,7 +189,7 @@ func (dv *differ) deriveRefEdges() {
 			}
 		}
 		// A Remove op deletes o.src; every other action can retarget away from runSrc or a superseded toggle partner.
-		// A Replace's removed subtree is its runSrc, so walking both would double every edge and diagnostic.
+		// Do not visit a Replace running subtree twice.
 		rm := removedSubtree(o)
 		if rm == o.runSrc {
 			rm = nil
@@ -393,7 +393,7 @@ func (dv *differ) deriveRequireEdges() {
 		}
 	}
 	for i, o := range ops {
-		// A Remove op needs no prerequisite; the removal walk below covers the same subtree.
+		// The removal walk covers prerequisites for Remove operations.
 		if o.action != graph.Remove {
 			for _, rq := range requirementsOf(o.src) {
 				if !validRequirement(rq) || survivors[rq.kind] {
@@ -412,7 +412,7 @@ func (dv *differ) deriveRequireEdges() {
 				)
 			}
 		}
-		// Whatever an op supersedes must lose its prerequisites after it: Remove uses src, Replace and cross-definition Modify use runSrc, and a toggle flip uses flipRun.
+		// Remove prerequisites only after the operations that supersede their users.
 		rm := removedSubtree(o)
 		if rm == nil {
 			continue

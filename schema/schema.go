@@ -252,14 +252,14 @@ func (n *Node) Card(c Cardinality) *Node {
 	return n
 }
 
-// Kind sets the semantic kind name for Ref resolution and pairing: keyed siblings pair by Kind and key, non-keyed single-occupancy siblings pair as one slot.
+// Kind sets the name used for Ref resolution and pairs keyed siblings by Kind and key or unkeyed single-occupancy siblings by Kind unless they toggle or use EmptyOnRemove.
 func (n *Node) Kind(k string) *Node { n.KindName = k; return n }
 
 // Key sets the arg names that form the identity key for this node.
 func (n *Node) Key(args ...string) *Node {
 	seen := make(map[string]bool, len(args))
 	for _, arg := range args {
-		// Reject an empty-matchable key arg because an empty key value collides with Kind-paired identities.
+		// Empty key values collide with Kind-only slot identities.
 		n.mustNonEmptyArg("Key", arg)
 		if seen[arg] {
 			panic("schema: duplicate Key arg " + arg + ": " + n.Template)

@@ -33,7 +33,7 @@ func sameValue(a, b *tree.Node) bool {
 	return a.Def == b.Def && a.Text == b.Text && slices.Equal(a.Block, b.Block)
 }
 
-// runningCounterpart selects a stale Kind-slot spelling so cleanup reissues the intended value after its negation.
+// runningCounterpart selects the stale spelling to replace before slot cleanup.
 func runningCounterpart(
 	nodes []*tree.Node,
 	intended *tree.Node,

@@ -190,7 +190,6 @@ func TestRequiresRemovalPrecedesEveryDefinerRemoval(t *testing.T) {
 }
 
 func TestCrossDefModifyOldRequiresOrdersBeforeTargetRemoval(t *testing.T) {
-	// A cross-definition reissue must disable the old user before removing its prerequisite.
 	s := schema.New()
 	targets := s.Node("targets").Card(schema.ZeroToOne)
 	targets.Child("gate").Card(schema.ZeroToOne).Kind("gate")

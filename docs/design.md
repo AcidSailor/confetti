@@ -165,30 +165,24 @@ The explanations record constraints that tests do not show.
   logic does not assign device-specific meaning to an argument. A `Result`
   cannot be inverted because OpRemove has no definition and OpModify stores
   only the new value.
-- **Pairing identity uses Kind instead of definition pointers.** A keyed node
-  that changes between sibling templates must pair as one entity. Otherwise,
-  a rename would add and then remove the entity. **A non-keyed,
-  single-occupancy, non-toggle node with a Kind pairs by Kind alone**
-  (`KindedSingle`): variant spellings of one slot become one Replace
-  (negate, then add) instead of an Add plus an unrelated Remove that empties
-  the slot on the device. Toggle members are excluded because a flip already
-  supersedes its partner's removal, and `EmptyOnRemove` sections are
-  excluded because they have no header negation to pair with, so adding a
-  Kind for Ref resolution never changes how such a section remediates.
-  A running config holding multiple spellings of one Kind slot negates stale
-  spellings before it reissues the intended value; two intended spellings are
-  an ambiguous goal reported at policy severity, and only the first applies.
-  **Block bodies are not part of
-  identity.** A body-only change must be Modify, not separate Add and
-  Remove operations. **Merge extends pairing in one way:** each non-keyed
-  ZeroToOne definition without a Kind, or in a toggle group, is one slot
-  per level. Remediation
-  must not pair by definition alone because an unmarked pair can be
-  genuinely independent siblings; pairing needs the explicit Kind signal.
-  Diff reports at policy severity when an Add and a Remove still land on
-  one single-occupancy slot (same definition, or the same Kind shared
-  across a toggle member and a non-toggle sibling), and `ImportCheck`
-  rejects two spellings of one Kind-paired slot at the same level.
+- **Pairing identity uses Kind instead of definition pointers.** Keyed sibling
+  templates with the same Kind and key pair as one entity.
+- **A `KindedSingle` pairs by Kind alone.** It is non-keyed,
+  single-occupancy, non-toggle, not `EmptyOnRemove`, and has a Kind. Variant
+  spellings therefore produce one Replace: negate the running spelling, then
+  add the intended spelling. Toggle members retain flip semantics.
+  `EmptyOnRemove` sections cannot pair because they have no header negation.
+- **Duplicate Kind-paired spellings produce diagnostics.** Diff removes stale
+  running spellings before it reissues the intended value. Multiple intended
+  spellings produce a policy-severity diagnostic, and only the first is
+  applied. `ImportCheck` rejects multiple spellings at one level.
+- **Block bodies are not part of identity.** A body-only change is a Modify.
+- **Merge gives every non-keyed ZeroToOne definition one slot per level.**
+  This includes definitions without a Kind and toggle groups. Remediation
+  requires a Kind because unmarked sibling definitions can be independent.
+  Diff reports at policy severity when separate Add and Remove operations
+  target the same definition or a Kind shared by toggle and non-toggle
+  siblings.
 - **A section header is never `OpModify` for identity**: changed header
   identity is Remove+Add of the whole section. A kept section whose
   children all vanish keeps its header and negates each child instead of a
