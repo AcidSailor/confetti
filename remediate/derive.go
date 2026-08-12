@@ -242,9 +242,12 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []resource {
 		items, err := listval.Resolve(x.Fields[ls.Arg], ls.Sep, ls.Keywords())
 		if err != nil {
 			d.AddAt(
-				x.Line, diag.Warning,
+				x.Line,
+				diag.Warning,
 				"%s: unresolvable list %q: exclusive-resource ordering for this line skipped (%v)",
-				x.Path(), x.Fields[ls.Arg], err,
+				x.Path(),
+				x.Fields[ls.Arg],
+				err,
 			)
 			return
 		}
