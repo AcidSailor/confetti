@@ -305,7 +305,7 @@ func (dv *differ) deriveMoveEdges() {
 			continue
 		}
 		for _, r := range resourcesHeld(src, dv.d) {
-			// ponytail: releases × claims per bucket, and a Unique-only-list def buckets under the empty key; sort by low bound if a config makes it hurt.
+			// releases × claims per bucket, and a Unique-only-list def buckets under the empty key; sort by low bound if a config makes it hurt.
 			for _, old := range freed[r.resource] {
 				if old.op != i && old.conflicts(r) {
 					dv.addEdge(old.op, i, moveReason(r))
