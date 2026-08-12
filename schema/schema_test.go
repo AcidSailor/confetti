@@ -893,8 +893,7 @@ func TestKeyEmptyMatchingTypePanics(t *testing.T) {
 }
 
 func TestRelationZeroValueConstantsAreAnchored(t *testing.T) {
-	// Relation literals elsewhere omit these fields; reordering either const
-	// block would silently change what those literals mean.
+	// Relation literals depend on ScopeTree and Present remaining zero values.
 	assert.Zero(t, int(ScopeTree))
 	assert.Zero(t, int(Present))
 	assert.Equal(t, 1, int(ScopeSiblings))

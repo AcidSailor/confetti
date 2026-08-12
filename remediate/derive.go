@@ -13,7 +13,7 @@ import (
 	"github.com/acidsailor/confetti/tree"
 )
 
-// resource identifies a definition, reference, or exclusive value by label, key argument, definition, and key.
+// resource identifies a labeled or exclusive value.
 type resource struct {
 	label string
 	arg   string
@@ -62,7 +62,7 @@ func definesOf(n *tree.Node) []resource {
 			return
 		}
 		for _, label := range def.Labels() {
-			// A keyless label still provides the presence required by Requires.
+			// Keyless labels satisfy presence-only Requires relations.
 			if len(def.KeyArgs) == 0 {
 				out = append(out, resource{label: label})
 				continue
@@ -115,7 +115,7 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 	return out
 }
 
-// addedSubtree returns the subtree an operation creates, including the new half of a Replace or cross-definition Modify.
+// addedSubtree returns the subtree created by an operation, including replacement and cross-definition modification results.
 func addedSubtree(o op) *tree.Node {
 	if o.action == graph.Add || o.action == graph.Replace {
 		return o.src
@@ -127,7 +127,7 @@ func addedSubtree(o op) *tree.Node {
 	return nil
 }
 
-// removedSubtree returns the subtree an operation deletes, including the old half of a Replace or cross-definition Modify.
+// removedSubtree returns the subtree removed by an operation, including replaced and cross-definition modified inputs.
 func removedSubtree(o op) *tree.Node {
 	switch o.action {
 	case graph.Remove:
@@ -171,7 +171,7 @@ func excludes(a, b *schema.Node) (string, bool) {
 	return "", false
 }
 
-// conflictLabel returns the label making two sibling definitions mutually exclusive, in either declaration direction.
+// conflictLabel returns a label that makes two sibling definitions mutually exclusive in either direction.
 func conflictLabel(a, b *schema.Node) (string, bool) {
 	if a == nil || b == nil {
 		return "", false
@@ -182,7 +182,7 @@ func conflictLabel(a, b *schema.Node) (string, bool) {
 	return excludes(b, a)
 }
 
-// deriveExclusionEdges orders the removal of a conflicting sibling before the operation installing its excluder so a mode transition clears the old mode first.
+// deriveExclusionEdges removes conflicting siblings before it installs their excluder.
 func (dv *differ) deriveExclusionEdges() {
 	for i, add := range dv.ops {
 		added := addedSubtree(add)
@@ -419,7 +419,7 @@ func requirementsOf(n *tree.Node) []requirement {
 	return out
 }
 
-// survivingLabels returns labels the same definition and key provide in running and intended, so no window exists where the label disappears.
+// survivingLabels returns labels provided by the same definition and key in both configurations.
 func survivingLabels(running, intended *tree.Config) map[string]bool {
 	collect := func(c *tree.Config) map[resource]bool {
 		set := map[resource]bool{}
@@ -428,7 +428,7 @@ func survivingLabels(running, intended *tree.Config) map[string]bool {
 			if def == nil {
 				return
 			}
-			// Key by definition: two definitions sharing a label cannot cover each other's absence.
+			// Definitions sharing a label do not preserve each other's presence.
 			for _, label := range def.Labels() {
 				set[resource{
 					label: label, def: def, key: ident.KeyValue(n),
@@ -452,7 +452,7 @@ func (dv *differ) deriveRequireEdges() {
 	ops, d := dv.ops, dv.d
 	survivors := survivingLabels(dv.running, dv.intended)
 
-	// dv.order already enumerates every reachable definition, so no second schema walk is needed.
+	// The order index already contains every reachable definition.
 	declared := map[string]bool{}
 	for n := range dv.order {
 		for _, label := range n.Labels() {

@@ -147,7 +147,7 @@ func TestCommitCheckRequiresAbsentBothIsFine(t *testing.T) {
 	assert.False(t, d.HasErrors(), d.String())
 }
 
-// l2l3Schema models the NX-OS L2/L3 split from issue #9: both sets on one header, exclusion by tag.
+// l2l3Schema prevents switched and routed lines from sharing an interface.
 func l2l3Schema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -172,7 +172,6 @@ func TestCommitCheckExcludeTagConflict(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	require.True(t, d.HasErrors())
-	// The diagnostic names both offending lines and the tag in conflict.
 	assert.Contains(
 		t, d.String(), `mutually exclusive with "switchport" (line 2)`,
 	)
@@ -181,7 +180,6 @@ func TestCommitCheckExcludeTagConflict(t *testing.T) {
 }
 
 func TestCommitCheckExcludeTagSameSetCoexists(t *testing.T) {
-	// Many-to-many: members of one set coexist freely.
 	d := diag.New()
 	in := "interface Ethernet1/1\n  switchport\n  switchport access vlan 20\n"
 	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
@@ -191,7 +189,6 @@ func TestCommitCheckExcludeTagSameSetCoexists(t *testing.T) {
 }
 
 func TestCommitCheckExcludeTagIgnoresGrandchildren(t *testing.T) {
-	// Sibling scope stops at direct children: an l2-tagged grandchild is not in conflict.
 	d := diag.New()
 	in := "interface Ethernet1/1\n  ip address 10.0.0.1/24\n" +
 		"  hsrp 1\n    ip 10.0.0.254\n"
@@ -202,7 +199,6 @@ func TestCommitCheckExcludeTagIgnoresGrandchildren(t *testing.T) {
 }
 
 func TestCommitCheckExcludeTagScopedToParentInstance(t *testing.T) {
-	// Exclusion is per parent instance: an l2 port and an l3 port coexist.
 	d := diag.New()
 	in := "interface Ethernet1/1\n  switchport\n" +
 		"interface Ethernet1/2\n  ip address 10.0.0.1/24\n"
@@ -213,7 +209,6 @@ func TestCommitCheckExcludeTagScopedToParentInstance(t *testing.T) {
 }
 
 func TestCommitCheckRequiresSatisfiedByTag(t *testing.T) {
-	// A Tag provides the same label presence a Kind does.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("feature lacp").Card(schema.ZeroToOne).Tag("feature-lacp")
@@ -229,7 +224,6 @@ func TestCommitCheckRequiresSatisfiedByTag(t *testing.T) {
 }
 
 func TestCommitCheckRefResolvesThroughTag(t *testing.T) {
-	// A keyed definition's Tag also indexes its key values.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("vlan {{ id:vlan }}").
@@ -261,7 +255,7 @@ func TestCommitCheckDanglingRefCarriesReferrerLine(t *testing.T) {
 	assert.Equal(t, 2, d.Items[0].Line, "points at the referring line")
 }
 
-// checkText parses cfg against s and returns every diagnostic both stages report.
+// checkText runs import-time and commit-time checks.
 func checkText(t *testing.T, s *schema.Schema, in string) *diag.Diagnostics {
 	t.Helper()
 	d := diag.New()
@@ -271,8 +265,6 @@ func checkText(t *testing.T, s *schema.Schema, in string) *diag.Diagnostics {
 }
 
 func TestCommitCheckExcludeTagAtTopLevel(t *testing.T) {
-	// Top-level nodes are siblings under the sentinel root, so the exclusion
-	// applies to them exactly as it does to children.
 	s := schema.New()
 	s.Node("feature fabricpath").Card(schema.ZeroToOne).
 		Tag("fabric").ExcludeTag("overlay")
@@ -284,8 +276,6 @@ func TestCommitCheckExcludeTagAtTopLevel(t *testing.T) {
 }
 
 func TestCommitCheckExcludeTagUnknownLabelIsError(t *testing.T) {
-	// An exclusion naming a label no definition declares can never fire; it
-	// must not pass for a constraint the author believes is enforced.
 	s := schema.New()
 	iface := s.Node("interface {{ name:word }}").
 		Card(schema.ZeroToN).
@@ -306,7 +296,6 @@ func TestCommitCheckRequiresUnknownLabelIsError(t *testing.T) {
 }
 
 func TestCommitCheckTagCollidingWithKindIsError(t *testing.T) {
-	// Kind is identity-bearing and Tag is not, so one name must not mean both.
 	s := schema.New()
 	s.Node("vlan {{ id:uint }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
 	s.Node("bogus {{ id:uint }}").Card(schema.ZeroToN).Key("id").Tag("vlan")
@@ -330,8 +319,6 @@ func TestCommitCheckRefUnknownTargetKeyIsError(t *testing.T) {
 }
 
 func TestCommitCheckHalfSpecifiedRelationIsError(t *testing.T) {
-	// Relations is exported, so a hand-built half-specified key match must be
-	// reported against the schema rather than failing forever against config.
 	s := schema.New()
 	n := s.Node("member {{ v:uint }}").Card(schema.ZeroToN).Key("v").Tag("m")
 	n.Relations = append(n.Relations, schema.Relation{Label: "m", FromArg: "v"})
@@ -354,8 +341,6 @@ func TestCommitCheckInvalidRelationEnumsAreErrors(t *testing.T) {
 }
 
 func TestCommitCheckUnsupportedRelationShapesAreErrors(t *testing.T) {
-	// Only Ref, Requires, and ExcludeTag shapes have checkers, so the other two
-	// scope and polarity pairings must be rejected instead of silently ignored.
 	s := schema.New()
 	n := s.Node("feature").Tag("feature")
 	n.Relations = append(n.Relations,

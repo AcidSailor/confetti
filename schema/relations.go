@@ -19,22 +19,22 @@ func (s *Schema) Walk(fn func(*Node)) {
 	walk(s.Roots)
 }
 
-// IsRef reports whether the relation matches a captured arg against a key elsewhere in the tree; see Ref.
+// IsRef reports whether the relation matches a capture against a key elsewhere in the tree.
 func (r Relation) IsRef() bool {
 	return r.Scope == ScopeTree && r.Want == Present && r.FromArg != ""
 }
 
-// IsRequires reports whether the relation demands any instance carrying the label; see Requires.
+// IsRequires reports whether the relation requires an instance with the label.
 func (r Relation) IsRequires() bool {
 	return r.Scope == ScopeTree && r.Want == Present && r.FromArg == ""
 }
 
-// IsExclusion reports whether the relation forbids a direct sibling carrying the label; see ExcludeTag.
+// IsExclusion reports whether the relation forbids a direct sibling with the label.
 func (r Relation) IsExclusion() bool {
 	return r.Scope == ScopeSiblings && r.Want == Absent
 }
 
-// ValidateRelations reports authoring defects a single builder call cannot see: a Tag shadowing a Kind, a relation naming an undeclared label, a half-specified key match, or a target key no labeled definition carries.
+// ValidateRelations reports relation defects that depend on multiple definitions.
 func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 	kinds := map[string]bool{}
 	keysOf := map[string]map[string]bool{}
@@ -52,7 +52,7 @@ func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 		}
 	})
 	s.Walk(func(n *Node) {
-		// Kind is identity-bearing and Tag is not, so one name must not mean both.
+		// A label cannot be both identity-bearing and non-identity metadata.
 		for _, name := range n.TagNames {
 			if kinds[name] {
 				d.Add(diag.Error,
@@ -84,7 +84,7 @@ func (n *Node) checkRelation(
 		d.Add(diag.Error, "%s: relation has an empty label", n.Template)
 		return
 	}
-	// Reject combinations no checker implements rather than let them pass silently.
+	// Unsupported relation shapes are authoring errors.
 	if rel.Scope == ScopeTree && rel.Want == Absent ||
 		rel.Scope == ScopeSiblings && rel.Want == Present {
 		d.Add(diag.Error, "%s: relation on label %q is unsupported;"+

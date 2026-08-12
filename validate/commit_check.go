@@ -6,10 +6,10 @@ import (
 	"github.com/acidsailor/confetti/tree"
 )
 
-// target identifies one indexed key value: the label, its key argument, and the value.
+// target identifies a labeled key value.
 type target struct{ label, arg, val string }
 
-// checker holds the label index CommitCheck builds once and reports against.
+// checker holds the relation indexes and diagnostic sink.
 type checker struct {
 	// index holds every declared key value so tree-scope relations resolve against it.
 	index map[target]bool
@@ -20,7 +20,7 @@ type checker struct {
 
 // CommitCheck validates relations (references, prerequisites, exclusions) against the assembled tree.
 func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
-	// Report unresolvable relations here because a declaration a config never instantiates still constrains nothing.
+	// Validate the complete schema, including definitions absent from the configuration.
 	if cfg.Schema != nil {
 		cfg.Schema.ValidateRelations(d)
 	}
@@ -56,7 +56,7 @@ func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 	})
 }
 
-// relValues returns the values a relation must match: one presence sentinel or the capture's list-expanded values.
+// relValues returns a presence sentinel or the expanded capture values to match.
 func relValues(
 	n *tree.Node,
 	rel schema.Relation,
@@ -127,7 +127,7 @@ func findSibling(n *tree.Node, rel schema.Relation, v string) *tree.Node {
 	return nil
 }
 
-// relMatches reports whether x is a node other than self carrying the relation's label and, when FromArg is set, key value v.
+// relMatches reports whether x is another node that provides the required label and value.
 func relMatches(x, self *tree.Node, rel schema.Relation, v string) bool {
 	return x != self && x.Def != nil && x.Def.HasLabel(rel.Label) &&
 		(rel.FromArg == "" || x.Fields[rel.TargetKey] == v)

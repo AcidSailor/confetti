@@ -197,7 +197,7 @@ The explanations record constraints that tests do not show.
 ### Ordering
 
 - **Ordering is derived per instance from schema semantics (`Ref`, identity
-  conflicts, and `Requires`) and is topologically sorted.** Use `OrderHook`
+  conflicts, `Requires`, and sibling exclusions) and is topologically sorted.** Use `OrderHook`
   for platform-specific ordering. By default, creates ascend by
   declaration rank, removes descend (define-before-reference on add,
   reference-before-definition on removal).
@@ -211,18 +211,14 @@ The explanations record constraints that tests do not show.
 - **Declare exclusivity with `Unique`.** `Requires` is
   existential only. Use `OrderHook` for sequencing preferences that have no
   existence semantics.
-- **Sibling exclusions order the removal before the add.** `Diff` never
-  commit-checks its own intermediate states, so a mode transition cannot trip
-  the exclusion it converges toward. The emitted order still has to be one a
-  device accepts, so `deriveExclusionEdges` puts the removal of every
-  conflicting sibling before the operation that installs its excluder
-  (`no switchport` before `ip address`). Exclusion edges between a pure removal
-  and a pure add cannot cycle. An operation that both removes and adds
-  (`Replace`, cross-definition `Modify`) sits at either end, so a pair of them
-  can cycle and relies on the cycle break like any other derived edge.
-- **Absent relations derive no existence edges.** Only tree-scope `Present`
-  relations reach `refsOf` and `requirementsOf`; an exclusion asserts what
-  must not exist and so defines no definer to order against.
+- **Sibling exclusions order removals before additions.** `Diff` does not check
+  intermediate states, but the emitted operations must remain valid for the
+  device. Each conflicting sibling is removed before its excluder is installed
+  (`no switchport` before `ip address`). Edges between a pure removal and a pure
+  addition cannot cycle. `Replace` and cross-definition `Modify` operations can
+  occur at either end of an edge and can form cycles.
+- **Absent relations derive only exclusion edges.** They do not identify a
+  required provider, so they do not derive reference or prerequisite edges.
 
 ### Import folds (dual-form, lists, respell)
 
@@ -305,21 +301,15 @@ cycle break warns about its partial-application risk and names the dependency.
   places the node in the Modify pairing category the delta machinery uses).
 - **`EmptyOnRemove` is per definition, not per Kind** because its mode-like,
   always-present section declares no Kind.
-- **Tags are non-identity labels.** A node's label set is its Kind plus its
-  Tags, and every relation (`Ref`, `Requires`, `ExcludeTag`) matches labels.
-  Identity and pairing ignore Tags: `ident.Of` and the exclusive-resource key
-  in `resourceFor` read `KindName` alone, so adding a Tag never changes what
-  pairs with what. Ordering does match labels, so a Tag can satisfy a
-  `Requires` and change the emitted plan order. Sibling-scope relations
-  compare the direct children of one parent, so tagged grandchildren stay out
-  of the comparison; top-level nodes are siblings under the sentinel root.
-  `Toggles` remains the one-setting alternate-spelling primitive;
-  `ExcludeTag` models many-to-many mode splits such as L2 versus L3.
-- **A Tag may not shadow a Kind.** `ValidateRelations` reports a Tag whose
-  name is also a Kind name, because a `Ref` target must resolve to a keyed
-  identity rather than to whichever definition happens to carry the label. It
-  also reports relations naming an undeclared label, so a mistyped
-  `ExcludeTag` fails loudly instead of never firing.
+- **Tags are non-identity labels.** Relations match a node's Kind and Tags.
+  Identity and pairing use only Kind, but ordering also uses Tags. Sibling
+  relations compare direct children of one parent; top-level nodes share the
+  sentinel root. Use `Toggles` for alternate spellings of one setting and
+  `ExcludeTag` for many-to-many mode splits such as L2 versus L3.
+- **A Tag must not shadow a Kind.** A name cannot be both identity-bearing and
+  non-identity metadata. `ValidateRelations` also rejects undeclared labels,
+  incomplete key matches, unsupported relation shapes, and missing target
+  keys.
 - Blocks, lists, `Members`, `RespellAs`, and `Key` are mutually exclusive in
   documented combinations that cannot represent valid grammar. Invalid
   combinations panic in both call orders.

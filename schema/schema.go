@@ -42,7 +42,7 @@ const (
 	Absent
 )
 
-// Relation constrains this node against nodes carrying Label; build one with Ref, Requires, or ExcludeTag.
+// Relation constrains this node against nodes with Label.
 type Relation struct {
 	Label     string   // The label to look for.
 	FromArg   string   // "" checks presence only; otherwise this capture must equal TargetKey.
@@ -445,7 +445,7 @@ func (n *Node) setBlock(b BlockStrategy) {
 	n.Block = b
 }
 
-// Ref requires captured fromArg to match a key identified by target in "label.keyArg" form.
+// Ref requires fromArg to match the key in a "label.keyArg" target.
 func (n *Node) Ref(fromArg, target string) *Node {
 	n.mustArg("Ref", fromArg)
 	label, keyf, ok := strings.Cut(target, ".")
@@ -460,7 +460,7 @@ func (n *Node) Ref(fromArg, target string) *Node {
 	return n
 }
 
-// Requires declares that any instance carrying the label must exist while this node exists.
+// Requires requires an instance with label while this node exists.
 func (n *Node) Requires(label string) *Node {
 	if label == "" {
 		panic("schema: Requires label must be non-empty: " + n.Template)
@@ -472,7 +472,7 @@ func (n *Node) Requires(label string) *Node {
 	return n
 }
 
-// Tag adds non-identity labels that Relations can target; identity, pairing, and diffing ignore them.
+// Tag adds non-identity labels that relations can target.
 func (n *Node) Tag(names ...string) *Node {
 	if len(names) == 0 {
 		panic("schema: Tag needs at least one name: " + n.Template)
@@ -486,7 +486,7 @@ func (n *Node) Tag(names ...string) *Node {
 	return n
 }
 
-// ExcludeTag forbids any sibling carrying the label while this node exists.
+// ExcludeTag forbids siblings with any specified label.
 func (n *Node) ExcludeTag(names ...string) *Node {
 	if len(names) == 0 {
 		panic("schema: ExcludeTag needs at least one name: " + n.Template)
@@ -503,7 +503,7 @@ func (n *Node) ExcludeTag(names ...string) *Node {
 	return n
 }
 
-// Labels returns every label Relations can match on this definition: the Kind name plus all Tags.
+// Labels returns the Kind name and Tags that relations can match.
 func (n *Node) Labels() []string {
 	if n.KindName == "" {
 		// Clone so a caller appending to the result cannot write into TagNames.

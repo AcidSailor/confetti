@@ -37,7 +37,6 @@ func TestEngineImportRenderRoundTrip(t *testing.T) {
 	assert.Equal(t, "interface Ethernet1/1\n  shutdown\n", out)
 }
 
-// TestEngineCommitCheckExcludeTag is the issue #9 reproduction: an L2 line and an L3 line under one port.
 func TestEngineCommitCheckExcludeTag(t *testing.T) {
 	e := confetti.New(
 		l2l3Schema(),
@@ -296,7 +295,7 @@ func TestImportDiagnosticLineSurvivesDropLines(t *testing.T) {
 	assert.True(t, hit, d.String())
 }
 
-// l2l3Schema is the issue #9 grammar: switched and routed lines that cannot share a port.
+// l2l3Schema prevents switched and routed lines from sharing an interface.
 func l2l3Schema() *schema.Schema {
 	s := schema.New()
 	iface := s.Node("interface {{ name:word }}").
@@ -310,7 +309,6 @@ func l2l3Schema() *schema.Schema {
 	return s
 }
 
-// TestEngineRemediateClearsOldModeFirst pins the transition the exclusion converges toward: the device rejects an address on a switched port.
 func TestEngineRemediateClearsOldModeFirst(t *testing.T) {
 	e := confetti.New(
 		l2l3Schema(),

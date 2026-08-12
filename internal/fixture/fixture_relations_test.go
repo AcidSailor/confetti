@@ -11,7 +11,6 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// TestFixtureSchemasDeclareResolvableRelations guards the only in-repository grammars against an unresolvable relation.
 func TestFixtureSchemasDeclareResolvableRelations(t *testing.T) {
 	for name, s := range map[string]*schema.Schema{
 		"alpha": alpha.Schema(), "beta": beta.Schema(),
