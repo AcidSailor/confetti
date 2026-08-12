@@ -62,14 +62,15 @@ func (dv *differ) collect(
 
 	var intents []createIntent
 	for _, ic := range intParent.Children {
+		id := ident.Of(ic)
 		// A second intended spelling of one slot makes the goal ambiguous, so report it instead of applying both.
-		if first := intByIdent[ident.Of(ic)]; first != ic {
+		if first := intByIdent[id]; first != ic {
 			d.AddAt(ic.Line, dv.p.Severity(),
 				"%s: duplicate spelling of %q; only the first is applied",
 				ic.Path(), first.Text)
 			continue
 		}
-		rc, ok := runByIdent[ident.Of(ic)]
+		rc, ok := runByIdent[id]
 		switch {
 		case !ok:
 			intents = append(intents, createIntent{src: ic, kind: ckAdd})
@@ -105,7 +106,8 @@ func (dv *differ) collect(
 
 	var removes []*tree.Node
 	for _, rc := range runParent.Children {
-		if first := runByIdent[ident.Of(rc)]; first != rc {
+		id := ident.Of(rc)
+		if first := runByIdent[id]; first != rc {
 			// Two spellings of one Kind slot are two live device lines, so the unpaired one still needs negating.
 			if ident.CategoryOf(rc) == ident.KindedSingle &&
 				rc.Text != first.Text {
@@ -118,7 +120,7 @@ func (dv *differ) collect(
 				rc.Path(), first.Text)
 			continue
 		}
-		if _, ok := intByIdent[ident.Of(rc)]; !ok {
+		if _, ok := intByIdent[id]; !ok {
 			removes = append(removes, rc)
 		}
 	}
@@ -206,9 +208,7 @@ func (dv *differ) collect(
 			continue
 		}
 		// Refuse deletion of a protected node or descendant in both policies after toggle flips are removed.
-		if p := protectedIn(rc); p != nil {
-			d.Add(diag.Error, "%s: refusing to delete protected %q",
-				p.Path(), p.Text)
+		if dv.refuseDelete(rc) {
 			continue
 		}
 		dv.ops = append(dv.ops, op{
@@ -232,25 +232,38 @@ func (dv *differ) refuseProtected(ci createIntent) bool {
 	return true
 }
 
+// refuseDelete reports the protected node a removal would destroy and returns true when the removal must be dropped.
+func (dv *differ) refuseDelete(n *tree.Node) bool {
+	p := protectedIn(n)
+	if p == nil {
+		return false
+	}
+	dv.d.Add(diag.Error, "%s: refusing to delete protected %q",
+		p.Path(), p.Text)
+	return true
+}
+
 // checkSplitSingles reports an Add and a Remove that land on one single-occupancy slot because the split leaves the slot empty on the device.
 func (dv *differ) checkSplitSingles(
 	intents []createIntent,
 	removes []*tree.Node,
 ) {
-	// An EmptyOnRemove section is excluded because expandRemove empties it instead of negating a header that could cancel the add.
-	pairable := func(def *schema.Node) bool {
-		return def != nil && len(def.KeyArgs) == 0 &&
-			!def.EmptyOnRemove && ident.SingleOccupancy(def)
+	// Keyed and EmptyOnRemove removals cannot pair, so filter them out once instead of rescanning them per intent.
+	slots := make([]*tree.Node, 0, len(removes))
+	for _, rc := range removes {
+		if ident.SlotDef(rc.Def) {
+			slots = append(slots, rc)
+		}
 	}
 	for _, ci := range intents {
 		def := ci.src.Def
-		if ci.kind != ckAdd || !pairable(def) {
+		if ci.kind != ckAdd || !ident.SlotDef(def) {
 			continue
 		}
-		for _, rc := range removes {
+		for _, rc := range slots {
 			rdef := rc.Def
 			// Declared toggle partners are excluded because the device flip supersedes the removal.
-			if !pairable(rdef) || slices.Contains(def.ToggleGroup, rdef) {
+			if slices.Contains(def.ToggleGroup, rdef) {
 				continue
 			}
 			if rdef == def ||
@@ -287,9 +300,7 @@ func (dv *differ) expandRemove(
 			dv.expandRemove(cc, child, k)
 			continue
 		}
-		if p := protectedIn(cc); p != nil {
-			d.Add(diag.Error, "%s: refusing to delete protected %q",
-				p.Path(), p.Text)
+		if dv.refuseDelete(cc) {
 			continue
 		}
 		dv.ops = append(dv.ops, op{

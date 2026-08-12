@@ -184,6 +184,17 @@ func (n *Node) mustArg(setter, arg string) {
 	}
 }
 
+// mustNonEmptyArg panics unless arg is a capture arg whose type cannot match the empty string.
+func (n *Node) mustNonEmptyArg(setter, arg string) {
+	n.mustArg(setter, arg)
+	if n.spec.emptyArgs[arg] {
+		panic(
+			"schema: " + setter + " arg " + arg + " has a type whose pattern matches" +
+				" the empty string: " + n.Template,
+		)
+	}
+}
+
 // mustTemplateArgs returns the placeholder names of tmpl and panics on any that this node does not capture.
 func (n *Node) mustTemplateArgs(setter, tmpl string) []string {
 	refs := templateRefs(tmpl)
@@ -248,14 +259,8 @@ func (n *Node) Kind(k string) *Node { n.KindName = k; return n }
 func (n *Node) Key(args ...string) *Node {
 	seen := make(map[string]bool, len(args))
 	for _, arg := range args {
-		n.mustArg("Key", arg)
 		// Reject an empty-matchable key arg because an empty key value collides with Kind-paired identities.
-		if n.spec.emptyArgs[arg] {
-			panic(
-				"schema: Key arg " + arg + " has a type whose pattern matches" +
-					" the empty string: " + n.Template,
-			)
-		}
+		n.mustNonEmptyArg("Key", arg)
 		if seen[arg] {
 			panic("schema: duplicate Key arg " + arg + ": " + n.Template)
 		}
@@ -385,14 +390,8 @@ func (n *Node) Toggles(partners ...*Node) *Node {
 
 // BlockDelim opens a raw block terminated by a non-empty captured argument and excludes child nodes.
 func (n *Node) BlockDelim(arg string) *Node {
-	n.mustArg("BlockDelim", arg)
 	// Reject empty terminators because they close at the first blank line and bypass block protection.
-	if n.spec.emptyArgs[arg] {
-		panic(
-			"schema: BlockDelim arg " + arg + " has a type whose pattern matches" +
-				" the empty string: " + n.Template,
-		)
-	}
+	n.mustNonEmptyArg("BlockDelim", arg)
 	n.setBlock(BlockStrategy{Kind: BlockDelim, Arg: arg})
 	return n
 }

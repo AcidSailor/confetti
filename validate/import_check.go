@@ -110,7 +110,7 @@ func checkCardinality(
 				)
 			}
 			seenKey[id] = true
-		case def.Cardinality == schema.ZeroToOne || def.Cardinality == schema.One:
+		case ident.SingleOccupancy(def):
 			if count[def] > 1 {
 				d.AddAt(
 					c.Line,
@@ -120,9 +120,12 @@ func checkCardinality(
 				)
 			}
 			// Two spellings of one Kind-paired slot; same-def duplicates are already reported above.
-			if ident.CategoryOf(c) == ident.KindedSingle {
-				k := def.KindName
-				if first, ok := kindSeen[k]; ok && first.Def != def {
+			if ident.KindedSingleDef(def) {
+				first, ok := kindSeen[def.KindName]
+				switch {
+				case !ok:
+					kindSeen[def.KindName] = c
+				case first.Def != def:
 					d.AddAt(
 						c.Line,
 						diag.Error,
@@ -131,8 +134,6 @@ func checkCardinality(
 						first.Text,
 						first.Line,
 					)
-				} else if !ok {
-					kindSeen[k] = c
 				}
 			}
 		}

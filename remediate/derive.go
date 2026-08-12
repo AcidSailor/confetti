@@ -165,11 +165,11 @@ func (dv *differ) deriveRefEdges() {
 		}
 		// A Remove op deletes o.src; every other action can retarget away from runSrc or a superseded toggle partner.
 		// A Replace's removed subtree is its runSrc, so walking both would double every edge and diagnostic.
-		retargeted := []*tree.Node{o.runSrc}
-		if rm := removedSubtree(o); rm != o.runSrc {
-			retargeted = append(retargeted, rm)
+		rm := removedSubtree(o)
+		if rm == o.runSrc {
+			rm = nil
 		}
-		for _, src := range retargeted {
+		for _, src := range [2]*tree.Node{o.runSrc, rm} {
 			if src == nil {
 				continue
 			}
@@ -368,15 +368,12 @@ func (dv *differ) deriveRequireEdges() {
 		}
 	}
 	for i, o := range ops {
-		for _, rq := range requirementsOf(o.src) {
-			if !validRequirement(rq) {
-				continue
-			}
-			if survivors[rq.kind] {
-				continue
-			}
-			switch o.action {
-			case graph.Add, graph.Modify, graph.Replace:
+		// A Remove op needs no prerequisite; the removal walk below covers the same subtree.
+		if o.action != graph.Remove {
+			for _, rq := range requirementsOf(o.src) {
+				if !validRequirement(rq) || survivors[rq.kind] {
+					continue
+				}
 				if j, ok := addByKind[rq.kind]; ok {
 					if j != i {
 						dv.addEdge(j, i, requireReason(rq))

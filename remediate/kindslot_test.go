@@ -30,7 +30,31 @@ func kindSlotSchema() *schema.Schema {
 	return s
 }
 
-func kindSlotDiff(
+// idempotentVariantSchema marks only the route-map spelling idempotent so the two directions take different paths.
+func idempotentVariantSchema() *schema.Schema {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
+	r.Child("default-originate route-map {{ rmap:word }}").
+		Card(schema.ZeroToOne).Kind("default-originate").MarkIdempotent()
+	r.Child("default-originate").
+		Card(schema.ZeroToOne).Kind("default-originate")
+	return s
+}
+
+// toggleKindSchema declares a toggle pair whose members also share a Kind.
+func toggleKindSchema() *schema.Schema {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+	shut := iface.Child("shutdown").Card(schema.ZeroToOne).Kind("shutdown")
+	iface.Child("no shutdown").Card(schema.ZeroToOne).Kind("shutdown").
+		Toggles(shut)
+	return s
+}
+
+// rawDiff runs Diff without failing on diagnostics so refusal paths can be asserted.
+func rawDiff(
 	t *testing.T,
 	s *schema.Schema,
 	running, intended string,
@@ -41,8 +65,19 @@ func kindSlotDiff(
 		mustParse(t, s, intended),
 		diag.Policy{},
 	)
-	require.False(t, d.HasErrors(), d.String())
 	return render.Render(res.Tree), d
+}
+
+// kindSlotDiff runs rawDiff and fails the test on any diagnostic error.
+func kindSlotDiff(
+	t *testing.T,
+	s *schema.Schema,
+	running, intended string,
+) (string, *diag.Diagnostics) {
+	t.Helper()
+	out, d := rawDiff(t, s, running, intended)
+	require.False(t, d.HasErrors(), d.String())
+	return out, d
 }
 
 func TestKindSlotSpellingChangeNegatesThenAdds(t *testing.T) {
@@ -68,14 +103,7 @@ func TestKindSlotSpellingChangeReverse(t *testing.T) {
 }
 
 func TestKindSlotIdempotentVariantReissues(t *testing.T) {
-	s := schema.New()
-	testtypes.Fill(s.Registry)
-	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
-	r.Child("default-originate route-map {{ rmap:word }}").
-		Card(schema.ZeroToOne).Kind("default-originate").MarkIdempotent()
-	r.Child("default-originate").
-		Card(schema.ZeroToOne).Kind("default-originate")
-	out, _ := kindSlotDiff(t, s,
+	out, _ := kindSlotDiff(t, idempotentVariantSchema(),
 		"router bgp 65000\n  default-originate\n",
 		"router bgp 65000\n  default-originate route-map RM\n")
 	assert.Equal(t,
@@ -128,13 +156,7 @@ func TestSplitSlotWarningSilentForUnrelatedAddRemove(t *testing.T) {
 
 func TestKindSlotToggleMembersKeepFlip(t *testing.T) {
 	// A toggle member with a Kind keeps flip semantics: the add supersedes the remove.
-	s := schema.New()
-	testtypes.Fill(s.Registry)
-	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
-	shut := iface.Child("shutdown").Card(schema.ZeroToOne).Kind("shutdown")
-	iface.Child("no shutdown").Card(schema.ZeroToOne).Kind("shutdown").
-		Toggles(shut)
-	out, _ := kindSlotDiff(t, s,
+	out, _ := kindSlotDiff(t, toggleKindSchema(),
 		"interface Ethernet1/1\n  shutdown\n",
 		"interface Ethernet1/1\n  no shutdown\n")
 	assert.Equal(t, "interface Ethernet1/1\n  no shutdown\n", out)
@@ -158,30 +180,13 @@ func TestCategoryOfKindedSingle(t *testing.T) {
 }
 
 func TestCategoryOfToggleMemberWithKindStaysFullLine(t *testing.T) {
-	s := schema.New()
-	testtypes.Fill(s.Registry)
-	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
-	shut := iface.Child("shutdown").Card(schema.ZeroToOne).Kind("shutdown")
-	iface.Child("no shutdown").Card(schema.ZeroToOne).Kind("shutdown").
-		Toggles(shut)
-	cfg := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
+	cfg := mustParse(
+		t,
+		toggleKindSchema(),
+		"interface Ethernet1/1\n  shutdown\n",
+	)
 	assert.Equal(t, ident.FullLine,
 		ident.CategoryOf(cfg.Root.Children[0].Children[0]))
-}
-
-// rawDiff runs Diff without failing on diagnostics so refusal paths can be asserted.
-func rawDiff(
-	t *testing.T,
-	s *schema.Schema,
-	running, intended string,
-) (string, *diag.Diagnostics) {
-	t.Helper()
-	res, d := Diff(
-		mustParse(t, s, running),
-		mustParse(t, s, intended),
-		diag.Policy{},
-	)
-	return render.Render(res.Tree), d
 }
 
 // kindSectionSchema pairs a leaf spelling and a section spelling of one slot.
@@ -282,14 +287,7 @@ func TestSplitSlotWarningSilentForKeptToggleRemoval(t *testing.T) {
 
 func TestKindSlotIdempotentVariantReverseReplaces(t *testing.T) {
 	// Only the intended definition's idempotency selects the reissue path; the reverse direction is a full Replace.
-	s := schema.New()
-	testtypes.Fill(s.Registry)
-	r := s.Node("router bgp {{ as:asn }}").Card(schema.ZeroToOne)
-	r.Child("default-originate route-map {{ rmap:word }}").
-		Card(schema.ZeroToOne).Kind("default-originate").MarkIdempotent()
-	r.Child("default-originate").
-		Card(schema.ZeroToOne).Kind("default-originate")
-	out, _ := kindSlotDiff(t, s,
+	out, _ := kindSlotDiff(t, idempotentVariantSchema(),
 		"router bgp 65000\n  default-originate route-map RM\n",
 		"router bgp 65000\n  default-originate\n")
 	assert.Equal(t,
