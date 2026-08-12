@@ -244,7 +244,12 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 			for i, a := range args {
 				parts[i] = x.Fields[a]
 			}
-			out = append(out, heldResource{resource: resourceFor(def, strings.Join(parts, "\x00"))})
+			out = append(
+				out,
+				heldResource{
+					resource: resourceFor(def, strings.Join(parts, "\x00")),
+				},
+			)
 			return
 		}
 		ls := def.ListSpec

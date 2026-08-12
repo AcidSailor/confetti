@@ -204,6 +204,13 @@ func TestIntersectsCanonicalWithoutExpandingRanges(t *testing.T) {
 		{"", "", false},
 	}
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, IntersectsCanonical(tt.a, tt.b, ""), "%q and %q", tt.a, tt.b)
+		assert.Equal(
+			t,
+			tt.want,
+			IntersectsCanonical(tt.a, tt.b, ""),
+			"%q and %q",
+			tt.a,
+			tt.b,
+		)
 	}
 }
