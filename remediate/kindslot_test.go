@@ -313,13 +313,46 @@ func TestKindSlotProtectedRunningRefusesCrossDefReissue(t *testing.T) {
 }
 
 func TestKindSlotRunningCarriesBothSpellings(t *testing.T) {
-	// A device holding two spellings of one slot must have the unpaired one negated, not silently left live.
+	// Cleanup must reissue the intended spelling after negating the stale duplicate.
+	tests := []struct {
+		name, intended, want string
+	}{
+		{
+			name:     "first spelling intended",
+			intended: "router bgp 65000\n  default-originate\n",
+			want: "router bgp 65000\n  no default-originate route-map RM\n" +
+				"  default-originate\n",
+		},
+		{
+			name:     "second spelling intended",
+			intended: "router bgp 65000\n  default-originate route-map RM\n",
+			want: "router bgp 65000\n  no default-originate\n" +
+				"  default-originate route-map RM\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, d := rawDiff(t, kindSlotSchema(),
+				"router bgp 65000\n  default-originate\n"+
+					"  default-originate route-map RM\n",
+				tt.intended)
+			assert.Equal(t, tt.want, out)
+			assert.Empty(t, d.String())
+		})
+	}
+}
+
+func TestKindSlotRunningCarriesThreeSpellings(t *testing.T) {
+	// Every extra stale spelling must be negated before the intended value is reissued.
 	out, d := rawDiff(t, kindSlotSchema(),
-		"router bgp 65000\n  default-originate\n"+
-			"  default-originate route-map RM\n",
-		"router bgp 65000\n  default-originate\n")
+		"router bgp 65000\n  default-originate route-map OLD\n"+
+			"  default-originate\n  default-originate route-map RM\n",
+		"router bgp 65000\n  default-originate route-map RM\n")
 	assert.Equal(t,
-		"router bgp 65000\n  no default-originate route-map RM\n", out)
+		"router bgp 65000\n  no default-originate\n"+
+			"  no default-originate route-map OLD\n"+
+			"  default-originate route-map RM\n",
+		out)
 	assert.Empty(t, d.String())
 }
 

@@ -189,6 +189,23 @@ func TestRequiresRemovalPrecedesEveryDefinerRemoval(t *testing.T) {
 	assert.Less(t, router, strings.Index(out, "no feature b"), out)
 }
 
+func TestCrossDefModifyOldRequiresOrdersBeforeTargetRemoval(t *testing.T) {
+	// A cross-definition reissue must disable the old user before removing its prerequisite.
+	s := schema.New()
+	targets := s.Node("targets").Card(schema.ZeroToOne)
+	targets.Child("gate").Card(schema.ZeroToOne).Kind("gate")
+	features := s.Node("features").Card(schema.ZeroToOne)
+	features.Child("feature on").Card(schema.ZeroToOne).
+		Kind("feature").Requires("gate")
+	features.Child("feature off").Card(schema.ZeroToOne).
+		Kind("feature").MarkIdempotent()
+	out, d := orderedDiff(t, s,
+		"targets\n  gate\nfeatures\n  feature on\n",
+		"targets\nfeatures\n  feature off\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "features\n  feature off\ntargets\n  no gate\n", out)
+}
+
 // moveSchema: a keyed child that can migrate between sections.
 func moveSchema() *schema.Schema {
 	s := schema.New()

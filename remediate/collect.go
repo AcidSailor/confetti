@@ -58,7 +58,10 @@ func (dv *differ) collect(
 ) {
 	d := dv.d
 	runByIdent := indexByIdent(runParent.Children)
+	runGroups := groupByIdent(runParent.Children)
 	intByIdent := indexByIdent(intParent.Children)
+	pairedRun := map[*tree.Node]bool{}
+	cleanupSlots := map[ident.Ident]bool{}
 
 	var intents []createIntent
 	for _, ic := range intParent.Children {
@@ -70,10 +73,15 @@ func (dv *differ) collect(
 				ic.Path(), first.Text)
 			continue
 		}
-		rc, ok := runByIdent[id]
-		switch {
-		case !ok:
+		group := runGroups[id]
+		if len(group) == 0 {
 			intents = append(intents, createIntent{src: ic, kind: ckAdd})
+			continue
+		}
+		rc, cleanup := runningCounterpart(group, ic)
+		pairedRun[rc] = true
+		cleanupSlots[id] = cleanup
+		switch {
 		case ic.Def != rc.Def && (ident.IsSection(ic) || ident.IsSection(rc)):
 			intents = append(intents,
 				createIntent{src: ic, run: rc, kind: ckReplace})
@@ -107,6 +115,16 @@ func (dv *differ) collect(
 	var removes []*tree.Node
 	for _, rc := range runParent.Children {
 		id := ident.Of(rc)
+		if pairedRun[rc] {
+			continue
+		}
+		if cleanupSlots[id] {
+			if sameValue(rc, intByIdent[id]) {
+				continue
+			}
+			removes = append(removes, rc)
+			continue
+		}
 		if first := runByIdent[id]; first != rc {
 			// Two spellings of one Kind slot are two live device lines, so the unpaired one still needs negating.
 			if ident.CategoryOf(rc) == ident.KindedSingle &&

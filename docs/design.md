@@ -175,9 +175,10 @@ The explanations record constraints that tests do not show.
   supersedes its partner's removal, and `EmptyOnRemove` sections are
   excluded because they have no header negation to pair with, so adding a
   Kind for Ref resolution never changes how such a section remediates.
-  A running config holding two spellings of one Kind slot negates the
-  unpaired one; two intended spellings are an ambiguous goal reported at
-  policy severity, and only the first applies. **Block bodies are not part of
+  A running config holding multiple spellings of one Kind slot negates stale
+  spellings before it reissues the intended value; two intended spellings are
+  an ambiguous goal reported at policy severity, and only the first applies.
+  **Block bodies are not part of
   identity.** A body-only change must be Modify, not separate Add and
   Remove operations. **Merge extends pairing in one way:** each non-keyed
   ZeroToOne definition without a Kind, or in a toggle group, is one slot

@@ -2,6 +2,7 @@ package remediate
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/acidsailor/confetti/diag"
@@ -34,6 +35,7 @@ func (r edgeReasons) put(from, to int, why string) {
 func (dv *differ) buildGraph() {
 	dv.g = graph.New(opViews(dv.ops))
 	dv.why = edgeReasons{}
+	dv.deriveSlotCleanupEdges()
 	dv.deriveRefEdges()
 	dv.deriveMoveEdges()
 	dv.deriveRequireEdges()
@@ -117,15 +119,38 @@ func addedSubtree(o op) *tree.Node {
 	return nil
 }
 
-// removedSubtree returns the subtree an operation deletes, or nil when it deletes none; a Replace deletes its running half.
+// removedSubtree returns the subtree an operation deletes, including the old half of a Replace or cross-definition Modify.
 func removedSubtree(o op) *tree.Node {
 	switch o.action {
 	case graph.Remove:
 		return o.src
 	case graph.Replace:
 		return o.runSrc
+	case graph.Modify:
+		if o.runSrc != nil && o.src.Def != o.runSrc.Def {
+			return o.runSrc
+		}
 	}
 	return o.flipRun
+}
+
+// deriveSlotCleanupEdges orders extra stale spellings before the operation that reissues their Kind-paired slot.
+func (dv *differ) deriveSlotCleanupEdges() {
+	for i, rm := range dv.ops {
+		if rm.action != graph.Remove ||
+			ident.CategoryOf(rm.src) != ident.KindedSingle {
+			continue
+		}
+		id := ident.Of(rm.src)
+		for j, add := range dv.ops {
+			if i == j || add.action == graph.Remove ||
+				ident.CategoryOf(add.src) != ident.KindedSingle ||
+				id != ident.Of(add.src) || !slices.Equal(rm.secs, add.secs) {
+				continue
+			}
+			dv.addEdge(i, j, "single-occupancy slot cleanup")
+		}
+	}
 }
 
 // definerIndex maps each resource defined by the selected subtrees to the operation with the smallest baseline key.
@@ -387,7 +412,7 @@ func (dv *differ) deriveRequireEdges() {
 				)
 			}
 		}
-		// Whatever an op deletes must lose its prerequisites after it: o.src for a Remove, o.runSrc for a Replace, o.flipRun for a toggle flip.
+		// Whatever an op supersedes must lose its prerequisites after it: Remove uses src, Replace and cross-definition Modify use runSrc, and a toggle flip uses flipRun.
 		rm := removedSubtree(o)
 		if rm == nil {
 			continue
