@@ -192,25 +192,55 @@ func TestCanonicalPrefersKeywords(t *testing.T) {
 	assert.Equal(t, "1-3", Canonical([]string{"1", "2", "3"}, "", Keywords{}))
 }
 
-func TestIntersectsCanonicalWithoutExpandingRanges(t *testing.T) {
+func TestMembersIntersectWithoutExpandingRanges(t *testing.T) {
 	tests := []struct {
 		a, b string
+		sepA string
+		sepB string
 		want bool
+		why  string
 	}{
-		{"1-65536", "32768-70000", true},
-		{"1-100", "101-200", false},
-		{"1-3,blue", "blue,9", true},
-		{"red", "blue", false},
-		{"", "", false},
+		{a: "1-65536", b: "32768-70000", want: true, why: "overlapping ranges"},
+		{a: "1-100", b: "101-200", want: false, why: "adjacent but disjoint"},
+		{a: "1-3,blue", b: "blue,9", want: true, why: "shared lexical item"},
+		{a: "red", b: "blue", want: false, why: "distinct lexical items"},
+		{a: "", b: "", want: false, why: "empty sets hold nothing"},
+		{a: "", b: "1-3", want: false, why: "empty set against a range"},
+		// Expand deduplicates "007" and "7" as one item, so intersection must agree.
+		{a: "007", b: "7", want: true, why: "zero-padded spelling"},
+		{a: "007", b: "1-10", want: true, why: "zero-padded inside a range"},
+		{a: "0070", b: "1-10", want: false, why: "zero-padded outside a range"},
+		// Each side splits with its own separator, so a mismatch cannot hide an overlap.
+		{a: "1;5", sepA: ";", b: "5", want: true, why: "separators differ"},
+		{
+			a:    "1;5",
+			sepA: ";",
+			b:    "9",
+			want: false,
+			why:  "separators differ, disjoint",
+		},
 	}
 	for _, tt := range tests {
+		a := Split(tt.a, tt.sepA)
+		b := Split(tt.b, tt.sepB)
 		assert.Equal(
 			t,
 			tt.want,
-			IntersectsCanonical(tt.a, tt.b, ""),
-			"%q and %q",
+			a.Intersects(b),
+			"%s: %q and %q",
+			tt.why,
 			tt.a,
 			tt.b,
+		)
+		// Intersection is symmetric regardless of how each side was spelled.
+		assert.Equal(
+			t,
+			tt.want,
+			b.Intersects(a),
+			"%s reversed: %q and %q",
+			tt.why,
+			tt.b,
+			tt.a,
 		)
 	}
 }

@@ -21,13 +21,12 @@ type resource struct {
 	key  string
 }
 
-// heldResource optionally carries a compact canonical list. Resources with
-// lists conflict when their base keys match and their member sets overlap.
+// heldResource is a resource plus, when a List arg is part of its key, that arg's members and the spelling diagnostics report.
 type heldResource struct {
 	resource
-	list   string
-	sep    string
-	isList bool
+	members listval.Members
+	display string
+	isList  bool
 }
 
 // edgeReasons stores the first recorded reason for each derived edge so lenient cycle warnings can identify the affected dependency.
@@ -221,9 +220,7 @@ func refReason(r resource) string {
 	return fmt.Sprintf("ref %s.%s=%q", r.kind, r.arg, r.key)
 }
 
-// resourcesHeld returns exclusive resources for keyed nodes by UniqueArgs or the full key. When the resource key
-// includes the node's List arg, it retains a compact semantic set alongside the other key parts so equivalent and
-// overlapping list spellings conflict without allocating a persistent resource for every member.
+// resourcesHeld returns exclusive resources for keyed nodes by UniqueArgs or the full key; a List arg is blanked from the key and carried as a member set, and an unresolvable list warns and yields none for that node.
 func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 	var out []heldResource
 	n.Walk(func(x *tree.Node) {
@@ -244,10 +241,12 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 			for i, a := range args {
 				parts[i] = x.Fields[a]
 			}
+			key := strings.Join(parts, "\x00")
 			out = append(
 				out,
 				heldResource{
-					resource: resourceFor(def, strings.Join(parts, "\x00")),
+					resource: resourceFor(def, key),
+					display:  key,
 				},
 			)
 			return
@@ -265,23 +264,23 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 			)
 			return
 		}
+		// Leave the list slot empty so equivalent and overlapping spellings share one base key.
 		parts := make([]string, len(args))
 		for i, a := range args {
 			if i != listIdx {
 				parts[i] = x.Fields[a]
 			}
 		}
-		// Keep the list out of the base key and retain one compressed semantic
-		// set per line. This bounds resource-map growth by the number of lines,
-		// rather than by the number of expanded range members.
-		parts[listIdx] = ""
+		key := strings.Join(parts, "\x00")
+		// Empty Keywords keeps members explicit: no fold back to All, and an empty set renders "" and holds nothing.
+		list := listval.Canonical(items, ls.Sep, listval.Keywords{})
+		parts[listIdx] = list
 		out = append(out, heldResource{
-			resource: resourceFor(def, strings.Join(parts, "\x00")),
-			// Resolve has already applied list keywords; canonicalize the actual
-			// members without folding the complete domain back to the All token.
-			list:   listval.Canonical(items, ls.Sep, listval.Keywords{}),
-			sep:    ls.Sep,
-			isList: true,
+			resource: resourceFor(def, key),
+			// Split once per line so conflict tests do not re-split per candidate pair.
+			members: listval.Split(list, ls.Sep),
+			display: strings.Join(parts, "\x00"),
+			isList:  true,
 		})
 	})
 	return out
@@ -318,33 +317,33 @@ func (dv *differ) deriveMoveEdges() {
 			continue
 		}
 		for _, r := range resourcesHeld(src, dv.d) {
+			// list resources share one bucket per base key, so this scans
+			// releases × claims; interval-tree the bucket if a config makes it hurt.
 			for _, old := range freed[r.resource] {
-				if old.op != i && listsConflict(old.heldResource, r) {
-					dv.addEdge(old.op, i, moveReason(r.resource))
+				if old.op != i && old.conflicts(r) {
+					dv.addEdge(old.op, i, moveReason(r))
 				}
 			}
 		}
 	}
 }
 
-func listsConflict(a, b heldResource) bool {
+// conflicts reports a conflict for two non-list resources, or for two list resources whose members overlap; an empty set holds nothing and never conflicts.
+func (a heldResource) conflicts(b heldResource) bool {
 	if !a.isList || !b.isList {
 		return !a.isList && !b.isList
 	}
-	if a.list == "" || b.list == "" {
-		return false
-	}
-	return listval.IntersectsCanonical(a.list, b.list, a.sep)
+	return a.members.Intersects(b.members)
 }
 
 // moveReason formats an exclusive resource for a cycle warning.
-func moveReason(r resource) string {
-	name := r.kind
-	if name == "" && r.def != nil {
-		name = r.def.Template
+func moveReason(h heldResource) string {
+	name := h.kind
+	if name == "" && h.def != nil {
+		name = h.def.Template
 	}
 	return fmt.Sprintf("exclusive resource %s %q",
-		name, strings.ReplaceAll(r.key, "\x00", ","))
+		name, strings.ReplaceAll(h.display, "\x00", ","))
 }
 
 // requirement is one Requires declaration found in an op's subtree.

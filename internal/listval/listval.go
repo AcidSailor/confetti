@@ -122,21 +122,40 @@ func Canonical(items []string, sep string, kw Keywords) string {
 	return compressSorted(sorted, sep)
 }
 
-// IntersectsCanonical reports whether two values produced by Canonical share an
-// item. It compares numeric runs as intervals, avoiding expansion of compact
-// ranges back into their individual members.
-func IntersectsCanonical(a, b, sep string) bool {
-	left := strings.Split(a, sepOr(sep))
-	right := strings.Split(b, sepOr(sep))
-	for _, x := range left {
-		xlo, xhi, xnum := canonicalInterval(x)
-		for _, y := range right {
-			ylo, yhi, ynum := canonicalInterval(y)
-			if xnum && ynum {
-				if xlo <= yhi && ylo <= xhi {
+// Members holds a Canonical value split into items, keeping numeric runs compact as intervals.
+type Members []member
+
+// member is a closed numeric interval, or a literal item when num is false.
+type member struct {
+	lo, hi int
+	text   string
+	num    bool
+}
+
+// Split parses a Canonical value produced with sep into comparable members; an empty value holds none.
+func Split(canonical, sep string) Members {
+	if canonical == "" {
+		return nil
+	}
+	parts := strings.Split(canonical, sepOr(sep))
+	out := make(Members, 0, len(parts))
+	for _, p := range parts {
+		lo, hi, ok := interval(p)
+		out = append(out, member{lo: lo, hi: hi, text: p, num: ok})
+	}
+	return out
+}
+
+// Intersects reports whether two member sets share an item, comparing numeric runs as intervals rather than expanding them.
+func (m Members) Intersects(o Members) bool {
+	for _, x := range m {
+		for _, y := range o {
+			switch {
+			case x.num && y.num:
+				if x.lo <= y.hi && y.lo <= x.hi {
 					return true
 				}
-			} else if !xnum && !ynum && x == y && x != "" {
+			case !x.num && !y.num && x.text == y.text:
 				return true
 			}
 		}
@@ -144,16 +163,17 @@ func IntersectsCanonical(a, b, sep string) bool {
 	return false
 }
 
-func canonicalInterval(s string) (lo, hi int, ok bool) {
-	if n, plain := plain(s); plain {
+// interval reports an item as a closed numeric range; it counts by value, so zero-padded spellings match their plain form.
+func interval(s string) (lo, hi int, ok bool) {
+	if n, isNum := num(s); isNum {
 		return n, n, true
 	}
 	a, b, found := strings.Cut(s, "-")
 	if !found {
 		return 0, 0, false
 	}
-	lo, aok := plain(a)
-	hi, bok := plain(b)
+	lo, aok := num(a)
+	hi, bok := num(b)
 	return lo, hi, aok && bok
 }
 
