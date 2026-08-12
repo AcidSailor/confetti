@@ -122,17 +122,17 @@ func Canonical(items []string, sep string, kw Keywords) string {
 	return compressSorted(sorted, sep)
 }
 
-// Members holds a semantic item set with numeric runs kept compact as intervals, so overlap needs no expansion.
+// Members represents a semantic item set as numeric intervals and literal items.
 type Members []member
 
-// member is a closed numeric interval, or a literal item when num is false.
+// member represents a closed numeric interval or a literal item when num is false.
 type member struct {
 	lo, hi int
 	text   string
 	num    bool
 }
 
-// Intervals folds a Resolve item set into closed numeric intervals, keeping other items literal; an empty set holds none.
+// Intervals converts resolved items to compact numeric intervals and literal items.
 func Intervals(items []string) Members {
 	out := make(Members, 0, len(items))
 	for _, it := range items {
@@ -149,7 +149,7 @@ func Intervals(items []string) Members {
 	return out
 }
 
-// Intersects reports whether two member sets share an item, comparing numeric runs as intervals rather than expanding them.
+// Intersects reports whether two member sets overlap.
 func (m Members) Intersects(o Members) bool {
 	for _, x := range m {
 		for _, y := range o {

@@ -251,7 +251,7 @@ func TestUniqueScopeDerivesMoveOnPartialKeyMatch(t *testing.T) {
 	assert.Equal(t, "no slot 1 owner alpha\nslot 1 owner beta\n", out)
 }
 
-// prioListSchema: a keyed line whose Unique arg is a List, so held resources compare members instead of raw text.
+// prioListSchema returns a keyed schema with a unique list argument.
 func prioListSchema() *schema.Schema {
 	s := schema.New()
 	s.Node("priority {{ ids:word }} value {{ value:word }}").
@@ -264,9 +264,7 @@ func prioListSchema() *schema.Schema {
 
 func TestUniqueListArgUsesCompactSemanticResources(t *testing.T) {
 	s := prioListSchema()
-	// Same id set, respelled from one range into two ranges, with a new value key.
-	// The old and new instances hold the same members, so the release must precede the claim
-	// even though the raw "ids" text differs.
+	// Equivalent list spellings must order the release before the claim.
 	out, d := orderedDiff(t, s,
 		"priority 1-100 value 10\n",
 		"priority 1-50,51-100 value 20\n")
@@ -274,8 +272,7 @@ func TestUniqueListArgUsesCompactSemanticResources(t *testing.T) {
 	assert.Equal(t,
 		"no priority 1-100 value 10\npriority 1-50,51-100 value 20\n", out)
 
-	// Partial overlap is also exclusive, without requiring either range to
-	// materialize as one held resource per member.
+	// Overlap requires ordering without expanding the ranges.
 	out, d = orderedDiff(t, s,
 		"priority 1-65536 value 10\n",
 		"priority 65536-70000 value 20\n")
@@ -285,10 +282,7 @@ func TestUniqueListArgUsesCompactSemanticResources(t *testing.T) {
 }
 
 func TestUniqueListArgDisjointMembersDeriveNoMoveEdge(t *testing.T) {
-	// The counterpart to the overlap cases: without a shared member there is no
-	// exclusive resource to release, so declaration rank stands and the claim
-	// is emitted first. A comparator that always reported a conflict would
-	// satisfy the overlap tests but fail this one.
+	// Disjoint member sets retain declaration order.
 	out, d := orderedDiff(t, prioListSchema(),
 		"priority 1-50 value 10\n",
 		"priority 51-100 value 20\n")
@@ -298,8 +292,7 @@ func TestUniqueListArgDisjointMembersDeriveNoMoveEdge(t *testing.T) {
 }
 
 func TestUniqueListArgZeroPaddedMembersConflict(t *testing.T) {
-	// Expand deduplicates "007" and "7" as one member, so the exclusive
-	// resource must too; comparing canonical spellings would miss the overlap.
+	// Numeric member identity ignores zero padding.
 	s := prioListSchema()
 	out, d := orderedDiff(t, s,
 		"priority 007 value 10\n",
@@ -326,8 +319,7 @@ func TestUniqueListArgMultipleReleasesPrecedeOneClaim(t *testing.T) {
 }
 
 func TestUniqueListArgMoveEdgesDeterministic(t *testing.T) {
-	// TestOppositeMovesDeterministic uses a schema with no List arg, so it never
-	// reaches the member comparison; this covers the list path.
+	// TestOppositeMovesDeterministic covers scalar resources; this test covers lists.
 	var first string
 	for range 5 {
 		out, d := orderedDiff(t, prioListSchema(),
@@ -341,7 +333,7 @@ func TestUniqueListArgMoveEdgesDeterministic(t *testing.T) {
 	}
 }
 
-// prioKeywordSchema captures ids as rest so the multi-word Except form parses.
+// prioKeywordSchema uses a rest capture for multi-word Except values.
 func prioKeywordSchema() *schema.Schema {
 	s := schema.New()
 	s.Node("priority {{ value:word }} ids {{ ids:rest }}").
@@ -354,10 +346,10 @@ func prioKeywordSchema() *schema.Schema {
 }
 
 func TestUniqueListArgKeywordSetsCompareByMembers(t *testing.T) {
-	// Members come from Resolve, so a keyword slot compares as the set it denotes, not as its token.
+	// Resolve compares keyword spellings by their semantic member sets.
 	s := prioKeywordSchema()
 
-	// All covers its whole domain, so it overlaps any explicit subset.
+	// All overlaps every non-empty subset of its domain.
 	out, d := orderedDiff(t, s,
 		"priority 10 ids all\n",
 		"priority 20 ids 3-5\n")
@@ -365,7 +357,7 @@ func TestUniqueListArgKeywordSetsCompareByMembers(t *testing.T) {
 	assert.Equal(t,
 		"no priority 10 ids all\npriority 20 ids 3-5\n", out)
 
-	// Except excludes its exceptions, so the excluded member is free to claim.
+	// Except does not overlap an excluded member.
 	out, d = orderedDiff(t, s,
 		"priority 10 ids except 5\n",
 		"priority 20 ids 5\n")
@@ -373,7 +365,7 @@ func TestUniqueListArgKeywordSetsCompareByMembers(t *testing.T) {
 	assert.Equal(t,
 		"priority 20 ids 5\nno priority 10 ids except 5\n", out)
 
-	// None holds no members, so it is exclusive with nothing, including itself.
+	// None does not overlap any set, including itself.
 	out, d = orderedDiff(t, s,
 		"priority 10 ids none\n",
 		"priority 20 ids none\n")
@@ -383,9 +375,7 @@ func TestUniqueListArgKeywordSetsCompareByMembers(t *testing.T) {
 }
 
 func TestUniqueListArgSeparatorMismatchConflictsBothDirections(t *testing.T) {
-	// Two defs share a Kind with different list separators. Because the List arg
-	// is blanked from the base key, both land in one bucket, so each side must be
-	// resolved with its own separator or the answer would depend on direction.
+	// Each definition must resolve its list with its own separator in both directions.
 	build := func() *schema.Schema {
 		s := prioListSchema()
 		s.Node("backup {{ ids:word }} value {{ value:word }}").
@@ -395,7 +385,6 @@ func TestUniqueListArgSeparatorMismatchConflictsBothDirections(t *testing.T) {
 				"no backup {{ ids }} value {{ value }}")
 		return s
 	}
-	// Members 1 and 5 are non-consecutive so a wrong separator yields one literal item, not two.
 	out, d := orderedDiff(t, build(),
 		"backup 1;5 value 10\n", "priority 5 value 20\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -406,7 +395,6 @@ func TestUniqueListArgSeparatorMismatchConflictsBothDirections(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "no priority 5 value 10\nbackup 1;5 value 20\n", out)
 
-	// Control: no shared member, so neither direction derives an edge.
 	out, d = orderedDiff(t, build(),
 		"priority 9 value 10\n", "backup 1;5 value 20\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -422,15 +410,14 @@ func TestUniqueListArgMalformedListWarnsNotSilent(t *testing.T) {
 }
 
 func TestMoveReasonNamesListMembers(t *testing.T) {
-	// The list is blanked from the key so equivalent spellings share a bucket;
-	// cycle warnings must still name the members rather than the empty slot.
+	// Cycle warnings must retain list members that the bucket key excludes.
 	cfg := mustParse(t, prioListSchema(), "priority 1-50,51-100 value 10\n")
 	d := diag.New()
 	held := resourcesHeld(topNode(cfg, 0), d)
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, held, 1)
 	assert.Equal(t, `exclusive resource prio "1-100"`, moveReason(held[0]))
-	// The key that buckets the resource keeps the list slot empty.
+	// The bucket key excludes the list.
 	assert.Equal(t, "", held[0].key)
 }
 

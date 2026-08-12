@@ -21,7 +21,7 @@ type resource struct {
 	key  string
 }
 
-// heldResource is a resource plus, for a List arg, its members and the spelling moveReason prints.
+// heldResource adds list members and cycle-warning text to a resource.
 type heldResource struct {
 	resource
 	members listval.Members
@@ -210,7 +210,7 @@ func refReason(r resource) string {
 	return fmt.Sprintf("ref %s.%s=%q", r.kind, r.arg, r.key)
 }
 
-// resourcesHeld returns exclusive resources for keyed nodes by UniqueArgs or the full key; a List arg is blanked from the key and carried as a member set, and an unresolvable list warns and yields none for that node.
+// resourcesHeld returns comparable exclusive resources and warns about unresolvable lists.
 func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 	var out []heldResource
 	n.Walk(func(x *tree.Node) {
@@ -226,7 +226,7 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 		if def.ListSpec.Arg != "" {
 			listIdx = slices.Index(args, def.ListSpec.Arg)
 		}
-		// Leave the list slot empty so equivalent and overlapping spellings share one base key.
+		// Exclude the list from the bucket key so overlapping spellings share a bucket.
 		parts := make([]string, len(args))
 		for i, a := range args {
 			if i != listIdx {
@@ -251,7 +251,7 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 	return out
 }
 
-// resolveListArg returns a node's semantic list items, warning that the named ordering is skipped when the value cannot be resolved.
+// resolveListArg resolves a list argument and warns when ordering must skip the line.
 func resolveListArg(
 	x *tree.Node,
 	ls schema.ListStrategy,
@@ -274,7 +274,7 @@ func resolveListArg(
 	return items, true
 }
 
-// resourceFor builds a resource for def keyed by key, falling back to the definition itself when the Kind is empty.
+// resourceFor returns a Kind-keyed resource or uses the definition when Kind is empty.
 func resourceFor(def *schema.Node, key string) resource {
 	r := resource{kind: def.KindName, key: key}
 	if r.kind == "" {
@@ -305,7 +305,7 @@ func (dv *differ) deriveMoveEdges() {
 			continue
 		}
 		for _, r := range resourcesHeld(src, dv.d) {
-			// releases × claims per bucket, and a Unique-only-list def buckets under the empty key; sort by low bound if a config makes it hurt.
+			// Compare every release and claim in the bucket.
 			for _, old := range freed[r.resource] {
 				if old.op != i && old.conflicts(r) {
 					dv.addEdge(old.op, i, moveReason(r))
@@ -315,7 +315,7 @@ func (dv *differ) deriveMoveEdges() {
 	}
 }
 
-// conflicts reports a conflict for two non-list resources, or for two list resources whose members overlap; an empty set holds nothing and never conflicts.
+// conflicts reports whether two held resources claim the same exclusive value.
 func (a heldResource) conflicts(b heldResource) bool {
 	if a.isList && b.isList {
 		return a.members.Intersects(b.members)
