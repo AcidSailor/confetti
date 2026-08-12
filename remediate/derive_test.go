@@ -526,12 +526,12 @@ func TestRequiresPartialKeyOverlapIsNotSurvival(t *testing.T) {
 	assert.Equal(t, "grp 20 zone a\nrouter bgp\nno grp 10 zone a\n", out)
 }
 
-func TestRequiresUnknownKindIsError(t *testing.T) {
+func TestRequiresUnknownLabelIsError(t *testing.T) {
 	s := schema.New()
 	s.Node("router {{ proto:word }}").Card(schema.ZeroToN).Requires("nosuch")
 	_, d := orderedDiff(t, s, "", "router bgp\n")
 	require.True(t, d.HasErrors())
-	assert.Contains(t, d.String(), `unknown kind "nosuch"`)
+	assert.Contains(t, d.String(), `unknown label "nosuch"`)
 }
 
 func TestRequiresUnsatisfiedSeverityFollowsPolicy(t *testing.T) {
@@ -619,4 +619,74 @@ func TestCycleBreakNamesRefEndToEnd(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "dropped ordering edge")
 	assert.Contains(t, d.String(), "(protecting ref ")
+}
+
+func l2l3RemSchema() *schema.Schema {
+	s := schema.New()
+	iface := s.Node("interface {{ name:word }}").
+		Card(schema.ZeroToN).
+		Key("name")
+	iface.Child("switchport").Card(schema.ZeroToOne).Tag("l2").ExcludeTag("l3")
+	iface.Child("switchport access vlan {{ vlan:uint }}").
+		Card(schema.ZeroToOne).Tag("l2").ExcludeTag("l3")
+	iface.Child("ip address {{ addr:word }}").
+		Card(schema.ZeroToOne).Tag("l3").ExcludeTag("l2")
+	return s
+}
+
+func TestExcludeTagOrdersRemovalBeforeAdd(t *testing.T) {
+	// A device rejects an address on a switched port, so every excluded
+	// sibling must be negated before the routed line is issued.
+	out, d := orderedDiff(t, l2l3RemSchema(),
+		"interface Ethernet1\n  switchport\n  switchport access vlan 20\n",
+		"interface Ethernet1\n  ip address 10.0.0.1/24\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "interface Ethernet1\n  no switchport access vlan 20\n"+
+		"  no switchport\n  ip address 10.0.0.1/24\n", out)
+}
+
+func TestExcludeTagOrdersRemovalBeforeAddReverse(t *testing.T) {
+	// The mirror transition must hold for the same reason, not by rank luck.
+	out, d := orderedDiff(t, l2l3RemSchema(),
+		"interface Ethernet1\n  ip address 10.0.0.1/24\n",
+		"interface Ethernet1\n  switchport\n  switchport access vlan 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "interface Ethernet1\n  no ip address 10.0.0.1/24\n"+
+		"  switchport\n  switchport access vlan 20\n", out)
+}
+
+func TestExcludeTagIgnoresOtherParentInstances(t *testing.T) {
+	// Sibling scope is per parent instance, so a removal under one interface
+	// must not order an add under another.
+	out, d := orderedDiff(t, l2l3RemSchema(),
+		"interface Ethernet1\n  switchport\n",
+		"interface Ethernet1\n  switchport\ninterface Ethernet2\n"+
+			"  ip address 10.0.0.1/24\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"interface Ethernet2\n  ip address 10.0.0.1/24\n", out)
+}
+
+func TestRefEdgeThroughTagLabelOrdersOnAdd(t *testing.T) {
+	// refsOf reads the relation label while definesOf reads Labels(); a Tag
+	// target must derive the same edge a Kind target does.
+	s := schema.New()
+	s.Node("grp {{ id:uint }}").Card(schema.ZeroToN).Key("id").Tag("bridge")
+	s.Node("member {{ v:uint }}").Card(schema.ZeroToN).Key("v").
+		Ref("v", "bridge.id")
+	out, d := orderedDiff(t, s, "", "member 10\ngrp 10\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "grp 10\nmember 10\n", out)
+}
+
+func TestRequiresSharedLabelAcrossDefinitionsIsNotSurvival(t *testing.T) {
+	// Two definitions provide one label. Removing the first while adding the
+	// second leaves a window with no provider, so the edges must still fire.
+	s := schema.New()
+	s.Node("router {{ proto:word }}").Card(schema.ZeroToN).Requires("gate")
+	s.Node("feature lacp").Card(schema.ZeroToOne).Tag("gate")
+	s.Node("feature vpc").Card(schema.ZeroToOne).Tag("gate")
+	out, d := orderedDiff(t, s, "feature lacp\n", "router bgp\nfeature vpc\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "feature vpc\nrouter bgp\nno feature lacp\n", out)
 }

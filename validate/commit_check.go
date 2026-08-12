@@ -11,6 +11,10 @@ type target struct{ label, arg, val string }
 
 // CommitCheck validates relations (references, prerequisites, exclusions) against the assembled tree.
 func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
+	// Report unresolvable relations here because a declaration a config never instantiates still constrains nothing.
+	if cfg.Schema != nil {
+		cfg.Schema.ValidateRelations(d)
+	}
 	// Index every declared key value under each label so tree-scope relations resolve against it.
 	index := map[target]bool{}
 	// Record whether any instance carries each label.
@@ -81,7 +85,7 @@ func checkRelation(
 				n.Line,
 				diag.Error,
 				"%s: requires a %s instance",
-				n.Path(), rel.Tag,
+				n.Path(), rel.Label,
 			)
 			return
 		}
@@ -89,7 +93,7 @@ func checkRelation(
 			n.Line,
 			diag.Error,
 			"%s: %s %q does not exist",
-			n.Path(), rel.Tag, v,
+			n.Path(), rel.Label, v,
 		)
 		return
 	}
@@ -97,8 +101,8 @@ func checkRelation(
 		d.AddAt(
 			n.Line,
 			diag.Error,
-			"%s: mutually exclusive with %q (line %d) via tag %q",
-			n.Path(), hit.Text, hit.Line, rel.Tag,
+			"%s: mutually exclusive with %q (line %d) via label %q",
+			n.Path(), hit.Text, hit.Line, rel.Label,
 		)
 	}
 }
@@ -115,9 +119,9 @@ func relationSatisfied(
 		return findSibling(n, rel, v) != nil
 	}
 	if rel.FromArg == "" {
-		return present[rel.Tag]
+		return present[rel.Label]
 	}
-	return index[target{rel.Tag, rel.TargetKey, v}]
+	return index[target{rel.Label, rel.TargetKey, v}]
 }
 
 // findConflict returns the first node other than n that matches rel within its scope.
@@ -152,8 +156,8 @@ func findSibling(n *tree.Node, rel schema.Relation, v string) *tree.Node {
 	return nil
 }
 
-// relMatches reports whether x is a node other than self carrying rel.Tag and, when FromArg is set, key value v.
+// relMatches reports whether x is a node other than self carrying the relation's label and, when FromArg is set, key value v.
 func relMatches(x, self *tree.Node, rel schema.Relation, v string) bool {
-	return x != self && x.Def != nil && x.Def.HasLabel(rel.Tag) &&
+	return x != self && x.Def != nil && x.Def.HasLabel(rel.Label) &&
 		(rel.FromArg == "" || x.Fields[rel.TargetKey] == v)
 }

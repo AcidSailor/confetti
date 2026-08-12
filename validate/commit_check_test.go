@@ -175,8 +175,8 @@ func TestCommitCheckExcludeTagConflict(t *testing.T) {
 	assert.Contains(
 		t, d.String(), `mutually exclusive with "switchport" (line 2)`,
 	)
-	assert.Contains(t, d.String(), `via tag "l2"`)
-	assert.Contains(t, d.String(), `via tag "l3"`)
+	assert.Contains(t, d.String(), `via label "l2"`)
+	assert.Contains(t, d.String(), `via label "l3"`)
 }
 
 func TestCommitCheckExcludeTagSameSetCoexists(t *testing.T) {
@@ -258,4 +258,83 @@ func TestCommitCheckDanglingRefCarriesReferrerLine(t *testing.T) {
 	CommitCheck(cfg, d)
 	require.True(t, d.HasErrors())
 	assert.Equal(t, 2, d.Items[0].Line, "points at the referring line")
+}
+
+// checkText parses cfg against s and returns every diagnostic both stages report.
+func checkText(t *testing.T, s *schema.Schema, in string) *diag.Diagnostics {
+	t.Helper()
+	d := diag.New()
+	cfg := parse.Parse(s, in, diag.Policy{Strict: true}, d)
+	CommitCheck(cfg, d)
+	return d
+}
+
+func TestCommitCheckExcludeTagAtTopLevel(t *testing.T) {
+	// Top-level nodes are siblings under the sentinel root, so the exclusion
+	// applies to them exactly as it does to children.
+	s := schema.New()
+	s.Node("feature fabricpath").Card(schema.ZeroToOne).
+		Tag("fabric").ExcludeTag("overlay")
+	s.Node("feature nv overlay").Card(schema.ZeroToOne).
+		Tag("overlay").ExcludeTag("fabric")
+	d := checkText(t, s, "feature fabricpath\nfeature nv overlay\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `via label "overlay"`)
+}
+
+func TestCommitCheckExcludeTagUnknownLabelIsError(t *testing.T) {
+	// An exclusion naming a label no definition declares can never fire; it
+	// must not pass for a constraint the author believes is enforced.
+	s := schema.New()
+	iface := s.Node("interface {{ name:word }}").
+		Card(schema.ZeroToN).
+		Key("name")
+	iface.Child("ip address {{ a:word }}").Card(schema.ZeroToOne).
+		ExcludeTag("l2")
+	d := checkText(t, s, "interface Ethernet1\n  ip address 10.0.0.1/24\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `undeclared label "l2"`)
+}
+
+func TestCommitCheckRequiresUnknownLabelIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("router {{ proto:word }}").Card(schema.ZeroToN).Requires("nosuch")
+	d := checkText(t, s, "router bgp\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `undeclared label "nosuch"`)
+}
+
+func TestCommitCheckTagCollidingWithKindIsError(t *testing.T) {
+	// Kind is identity-bearing and Tag is not, so one name must not mean both.
+	s := schema.New()
+	s.Node("vlan {{ id:uint }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
+	s.Node("bogus {{ id:uint }}").Card(schema.ZeroToN).Key("id").Tag("vlan")
+	d := checkText(t, s, "vlan 10\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `Tag "vlan" collides with a Kind`)
+}
+
+func TestCommitCheckRefUnknownTargetKeyIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("grp {{ id:uint }}").Card(schema.ZeroToN).Key("id").Tag("bridge")
+	s.Node("member {{ v:uint }}").Card(schema.ZeroToN).Key("v").
+		Ref("v", "bridge.nosuch")
+	d := checkText(t, s, "grp 10\nmember 10\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`no definition carrying "bridge" keys by "nosuch"`,
+	)
+}
+
+func TestCommitCheckHalfSpecifiedRelationIsError(t *testing.T) {
+	// Relations is exported, so a hand-built half-specified key match must be
+	// reported against the schema rather than failing forever against config.
+	s := schema.New()
+	n := s.Node("member {{ v:uint }}").Card(schema.ZeroToN).Key("v").Tag("m")
+	n.Relations = append(n.Relations, schema.Relation{Label: "m", FromArg: "v"})
+	d := checkText(t, s, "member 10\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "matches arg \"v\" against no target key")
 }

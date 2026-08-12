@@ -13,7 +13,7 @@ import (
 	"github.com/acidsailor/confetti/tree"
 )
 
-// resource identifies a definition, reference, or exclusive value by Kind, key argument, definition, and key.
+// resource identifies a definition, reference, or exclusive value by label or Kind, key argument, definition, and key.
 type resource struct {
 	kind string
 	arg  string
@@ -47,6 +47,7 @@ func (dv *differ) buildGraph() {
 	dv.deriveRefEdges()
 	dv.deriveMoveEdges()
 	dv.deriveRequireEdges()
+	dv.deriveExclusionEdges()
 	for _, h := range dv.intended.Schema.OrderHooks {
 		h(dv.g)
 	}
@@ -77,7 +78,7 @@ func definesOf(n *tree.Node) []resource {
 	return out
 }
 
-// treePresence selects relations that assert tree-wide existence; only they derive ordering edges.
+// treePresence selects relations naming a definer to order against; sibling exclusions order through deriveExclusionEdges instead.
 func treePresence(r schema.Relation) bool {
 	return r.Scope == schema.ScopeTree && r.Want == schema.Present
 }
@@ -101,7 +102,7 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 				}
 				for _, it := range items {
 					out = append(out, resource{
-						kind: r.Tag, arg: r.TargetKey, key: it,
+						kind: r.Label, arg: r.TargetKey, key: it,
 					})
 				}
 				continue
@@ -109,7 +110,7 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 			out = append(
 				out,
 				resource{
-					kind: r.Tag,
+					kind: r.Label,
 					arg:  r.TargetKey,
 					key:  x.Fields[r.FromArg],
 				},
@@ -159,6 +160,58 @@ func (dv *differ) deriveSlotCleanupEdges() {
 			dv.addEdge(i, j, "single-occupancy slot cleanup")
 		}
 	}
+}
+
+// excludedLabels returns the labels a definition forbids among its siblings.
+func excludedLabels(def *schema.Node) []string {
+	var out []string
+	for _, r := range def.Relations {
+		if r.Scope == schema.ScopeSiblings && r.Want == schema.Absent {
+			out = append(out, r.Label)
+		}
+	}
+	return out
+}
+
+// conflictLabel returns the label making two sibling definitions mutually exclusive, in either declaration direction.
+func conflictLabel(a, b *schema.Node) (string, bool) {
+	if a == nil || b == nil {
+		return "", false
+	}
+	for _, label := range excludedLabels(a) {
+		if b.HasLabel(label) {
+			return label, true
+		}
+	}
+	for _, label := range excludedLabels(b) {
+		if a.HasLabel(label) {
+			return label, true
+		}
+	}
+	return "", false
+}
+
+// deriveExclusionEdges orders the removal of a conflicting sibling before the operation installing its excluder so a mode transition clears the old mode first.
+func (dv *differ) deriveExclusionEdges() {
+	for i, add := range dv.ops {
+		if add.action == graph.Remove || add.src == nil {
+			continue
+		}
+		for j, rm := range dv.ops {
+			if i == j || rm.action != graph.Remove || rm.src == nil ||
+				!slices.Equal(rm.secs, add.secs) {
+				continue
+			}
+			if label, ok := conflictLabel(add.src.Def, rm.src.Def); ok {
+				dv.addEdge(j, i, excludeReason(label))
+			}
+		}
+	}
+}
+
+// excludeReason renders a sibling exclusion for the cycle-break warning.
+func excludeReason(label string) string {
+	return fmt.Sprintf("mutually exclusive label %q", label)
 }
 
 // definerIndex maps each resource defined by the selected subtrees to the operation with the smallest baseline key.
@@ -345,13 +398,13 @@ func moveReason(h heldResource) string {
 
 // requirement is one Requires declaration found in an op's subtree.
 type requirement struct {
-	tmpl string // The owning definition template used in diagnostics.
-	kind string
+	tmpl  string // The owning definition template used in diagnostics.
+	label string
 }
 
 // requireReason renders a Requires prerequisite for the cycle-break warning.
 func requireReason(rq requirement) string {
-	return fmt.Sprintf("required kind %q", rq.kind)
+	return fmt.Sprintf("required label %q", rq.label)
 }
 
 func requirementsOf(n *tree.Node) []requirement {
@@ -363,26 +416,18 @@ func requirementsOf(n *tree.Node) []requirement {
 		}
 		for _, r := range def.Relations {
 			if treePresence(r) && r.FromArg == "" {
-				out = append(out, requirement{tmpl: def.Template, kind: r.Tag})
+				out = append(
+					out,
+					requirement{tmpl: def.Template, label: r.Label},
+				)
 			}
 		}
 	})
 	return out
 }
 
-// declaredKinds collects every label any def declares, reusing the single schema enumeration in buildOrderIndex.
-func declaredKinds(s *schema.Schema) map[string]bool {
-	kinds := map[string]bool{}
-	for n := range buildOrderIndex(s) {
-		for _, label := range n.Labels() {
-			kinds[label] = true
-		}
-	}
-	return kinds
-}
-
-// survivingKinds returns labels with the same complete identity in running and intended.
-func survivingKinds(running, intended *tree.Config) map[string]bool {
+// survivingLabels returns labels the same definition and key provide in running and intended, so no window exists where the label disappears.
+func survivingLabels(running, intended *tree.Config) map[string]bool {
 	collect := func(c *tree.Config) map[resource]bool {
 		set := map[resource]bool{}
 		tree.Walk(c, func(n *tree.Node) {
@@ -390,9 +435,11 @@ func survivingKinds(running, intended *tree.Config) map[string]bool {
 			if def == nil {
 				return
 			}
-			// A keyless label survives when it is present in both configurations.
+			// Key by definition: two definitions sharing a label cannot cover each other's absence.
 			for _, label := range def.Labels() {
-				set[resource{kind: label, key: ident.KeyValue(n)}] = true
+				set[resource{
+					kind: label, def: def, key: ident.KeyValue(n),
+				}] = true
 			}
 		})
 		return set
@@ -410,26 +457,26 @@ func survivingKinds(running, intended *tree.Config) map[string]bool {
 // deriveRequireEdges orders Requires users after prerequisite adds and before prerequisite removals when no instance survives.
 func (dv *differ) deriveRequireEdges() {
 	ops, d := dv.ops, dv.d
-	declared := declaredKinds(dv.intended.Schema)
-	survivors := survivingKinds(dv.running, dv.intended)
+	declared := dv.intended.Schema.DeclaredLabels()
+	survivors := survivingLabels(dv.running, dv.intended)
 
-	// Index the first add for each Kind by the smallest baseline key.
-	addByKind := map[string]int{}
+	// Index the first add for each label by the smallest baseline key.
+	addByLabel := map[string]int{}
 	for i, o := range ops {
 		src := addedSubtree(o)
 		if src == nil {
 			continue
 		}
 		for _, r := range definesOf(src) {
-			if j, ok := addByKind[r.kind]; !ok ||
+			if j, ok := addByLabel[r.kind]; !ok ||
 				ops[i].key.compare(ops[j].key) < 0 {
-				addByKind[r.kind] = i
+				addByLabel[r.kind] = i
 			}
 		}
 	}
 
-	// Index each removal once per Kind.
-	removeByKind := map[string][]int{}
+	// Index each removal once per label.
+	removeByLabel := map[string][]int{}
 	for j, o := range ops {
 		src := removedSubtree(o)
 		if src == nil {
@@ -439,7 +486,7 @@ func (dv *differ) deriveRequireEdges() {
 		for _, r := range definesOf(src) {
 			if !seen[r.kind] {
 				seen[r.kind] = true
-				removeByKind[r.kind] = append(removeByKind[r.kind], j)
+				removeByLabel[r.kind] = append(removeByLabel[r.kind], j)
 			}
 		}
 	}
@@ -447,18 +494,23 @@ func (dv *differ) deriveRequireEdges() {
 	unsatSev := dv.p.Severity()
 	reported := map[string]bool{}
 	validRequirement := func(rq requirement) bool {
-		if declared[rq.kind] {
+		if declared[rq.label] {
 			return true
 		}
-		once := rq.tmpl + "\x00" + rq.kind
+		once := rq.tmpl + "\x00" + rq.label
 		if !reported[once] {
 			reported[once] = true
-			d.Add(diag.Error, "%s: requires unknown kind %q", rq.tmpl, rq.kind)
+			d.Add(
+				diag.Error,
+				"%s: requires unknown label %q",
+				rq.tmpl,
+				rq.label,
+			)
 		}
 		return false
 	}
 	addRemovalEdges := func(i int, rq requirement) {
-		for _, j := range removeByKind[rq.kind] {
+		for _, j := range removeByLabel[rq.label] {
 			if j == i {
 				continue
 			}
@@ -469,10 +521,10 @@ func (dv *differ) deriveRequireEdges() {
 		// The removal walk covers prerequisites for Remove operations.
 		if o.action != graph.Remove {
 			for _, rq := range requirementsOf(o.src) {
-				if !validRequirement(rq) || survivors[rq.kind] {
+				if !validRequirement(rq) || survivors[rq.label] {
 					continue
 				}
-				if j, ok := addByKind[rq.kind]; ok {
+				if j, ok := addByLabel[rq.label]; ok {
 					if j != i {
 						dv.addEdge(j, i, requireReason(rq))
 					}
@@ -481,7 +533,7 @@ func (dv *differ) deriveRequireEdges() {
 				d.Add(
 					unsatSev,
 					"%s: requires a %q but the goal defines none",
-					opPath(o), rq.kind,
+					opPath(o), rq.label,
 				)
 			}
 		}
@@ -491,7 +543,7 @@ func (dv *differ) deriveRequireEdges() {
 			continue
 		}
 		for _, rq := range requirementsOf(rm) {
-			if validRequirement(rq) && !survivors[rq.kind] {
+			if validRequirement(rq) && !survivors[rq.label] {
 				addRemovalEdges(i, rq)
 			}
 		}

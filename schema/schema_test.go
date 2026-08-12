@@ -33,7 +33,7 @@ func TestBuilderStructure(t *testing.T) {
 	assert.Equal(
 		t,
 		Relation{
-			Tag: "vlan", FromArg: "vlan", TargetKey: "id",
+			Label: "vlan", FromArg: "vlan", TargetKey: "id",
 			Scope: ScopeTree, Want: Present,
 		},
 		ref[0],
@@ -194,7 +194,7 @@ func TestOrderingMetadata(t *testing.T) {
 		Unique("proto")
 	assert.Equal(
 		t,
-		[]Relation{{Tag: "feature", Scope: ScopeTree, Want: Present}},
+		[]Relation{{Label: "feature", Scope: ScopeTree, Want: Present}},
 		n.Relations,
 	)
 	assert.Equal(t, []string{"proto"}, n.UniqueArgs)
@@ -775,8 +775,8 @@ func TestExcludeTagBuildsSiblingAbsentRelations(t *testing.T) {
 		Tag("l3").
 		ExcludeTag("l2", "mgmt")
 	assert.Equal(t, []Relation{
-		{Tag: "l2", Scope: ScopeSiblings, Want: Absent},
-		{Tag: "mgmt", Scope: ScopeSiblings, Want: Absent},
+		{Label: "l2", Scope: ScopeSiblings, Want: Absent},
+		{Label: "mgmt", Scope: ScopeSiblings, Want: Absent},
 	}, n.Relations)
 }
 
@@ -890,4 +890,54 @@ func TestKeyEmptyMatchingTypePanics(t *testing.T) {
 	assert.Panics(t, func() {
 		s.Node("neighbor{{ g:maybe }}").Key("g")
 	})
+}
+
+func TestRelationZeroValueConstantsAreAnchored(t *testing.T) {
+	// Relation literals elsewhere omit these fields; reordering either const
+	// block would silently change what those literals mean.
+	assert.Zero(t, int(ScopeTree))
+	assert.Zero(t, int(Present))
+	assert.Equal(t, 1, int(ScopeSiblings))
+	assert.Equal(t, 1, int(Absent))
+}
+
+func TestTagAndExcludeTagHoldInBothCallOrders(t *testing.T) {
+	want := []Relation{{Label: "l2", Scope: ScopeSiblings, Want: Absent}}
+	first := New().Node("ip address {{ a:word }}").
+		Kind("addr").Tag("l3").ExcludeTag("l2")
+	second := New().Node("ip address {{ a:word }}").
+		ExcludeTag("l2").Tag("l3").Kind("addr")
+	for _, n := range []*Node{first, second} {
+		assert.Equal(t, want, n.Relations)
+		assert.Equal(t, []string{"addr", "l3"}, n.Labels())
+	}
+}
+
+func TestTagAndExcludeTagSurviveToggleGrouping(t *testing.T) {
+	s := New()
+	a := s.Node("switchport").Tag("l2")
+	b := s.Node("no switchport").Tag("l3").ExcludeTag("l2")
+	a.Toggles(b)
+	assert.Equal(t, []string{"l2"}, a.Labels())
+	assert.Equal(t,
+		[]Relation{{Label: "l2", Scope: ScopeSiblings, Want: Absent}},
+		b.Relations)
+}
+
+func TestLabelsDoesNotAliasTagNames(t *testing.T) {
+	n := New().Node("switchport").Tag("l2")
+	_ = append(n.Labels(), "injected")
+	assert.Equal(t, []string{"l2"}, n.TagNames)
+}
+
+func TestWalkVisitsSharedChildrenOnce(t *testing.T) {
+	s := New()
+	shared := s.Node("shutdown")
+	s.Node("interface {{ n:word }}").Adopt(shared)
+	seen := map[*Node]int{}
+	s.Walk(func(n *Node) { seen[n]++ })
+	for n, c := range seen {
+		assert.Equal(t, 1, c, n.Template)
+	}
+	assert.Len(t, seen, 2)
 }

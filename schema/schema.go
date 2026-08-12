@@ -42,9 +42,11 @@ const (
 	Absent
 )
 
-// Relation constrains this node against nodes labeled Tag; a label is a Kind name or a Tag name.
+// Relation constrains this node against nodes carrying Label; a label is a Kind name or a Tag name.
+// Build relations with Ref, Requires, or ExcludeTag: the zero value is not a usable relation, and
+// FromArg and TargetKey are set together or not at all. See ValidateRelations.
 type Relation struct {
-	Tag       string   // The label to look for.
+	Label     string   // The label to look for.
 	FromArg   string   // "" checks presence only; otherwise this capture must equal TargetKey.
 	TargetKey string   // The key argument matched against FromArg's value.
 	Scope     Scope    // Where to search.
@@ -451,10 +453,10 @@ func (n *Node) Ref(fromArg, target string) *Node {
 	label, keyf, ok := strings.Cut(target, ".")
 	if !ok || label == "" || keyf == "" {
 		// Reject targets that cannot resolve or can alias keyless label presence.
-		panic("schema: Ref target must be \"kind.keyArg\": " + target)
+		panic("schema: Ref target must be \"label.keyArg\": " + target)
 	}
 	n.Relations = append(n.Relations, Relation{
-		Tag: label, FromArg: fromArg, TargetKey: keyf,
+		Label: label, FromArg: fromArg, TargetKey: keyf,
 		Scope: ScopeTree, Want: Present,
 	})
 	return n
@@ -463,11 +465,11 @@ func (n *Node) Ref(fromArg, target string) *Node {
 // Requires declares that any instance carrying the label must exist while this node exists.
 func (n *Node) Requires(label string) *Node {
 	if label == "" {
-		panic("schema: Requires kind must be non-empty: " + n.Template)
+		panic("schema: Requires label must be non-empty: " + n.Template)
 	}
 	n.Relations = append(
 		n.Relations,
-		Relation{Tag: label, Scope: ScopeTree, Want: Present},
+		Relation{Label: label, Scope: ScopeTree, Want: Present},
 	)
 	return n
 }
@@ -497,7 +499,7 @@ func (n *Node) ExcludeTag(names ...string) *Node {
 		}
 		n.Relations = append(
 			n.Relations,
-			Relation{Tag: name, Scope: ScopeSiblings, Want: Absent},
+			Relation{Label: name, Scope: ScopeSiblings, Want: Absent},
 		)
 	}
 	return n
@@ -506,7 +508,8 @@ func (n *Node) ExcludeTag(names ...string) *Node {
 // Labels returns every label Relations can match on this definition: the Kind name plus all Tags.
 func (n *Node) Labels() []string {
 	if n.KindName == "" {
-		return n.TagNames
+		// Clone so a caller appending to the result cannot write into TagNames.
+		return slices.Clone(n.TagNames)
 	}
 	return append([]string{n.KindName}, n.TagNames...)
 }
