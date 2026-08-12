@@ -29,20 +29,10 @@ type heldResource struct {
 	isList  bool
 }
 
-// edgeReasons stores the first recorded reason for each derived edge so lenient cycle warnings can identify the affected dependency.
-type edgeReasons map[[2]int]string
-
-func (r edgeReasons) put(from, to int, why string) {
-	k := [2]int{from, to}
-	if _, ok := r[k]; !ok {
-		r[k] = why
-	}
-}
-
 // buildGraph derives ordering edges among planned operations and then runs schema OrderHooks in registration order.
 func (dv *differ) buildGraph() {
 	dv.g = graph.New(opViews(dv.ops))
-	dv.why = edgeReasons{}
+	dv.why = map[[2]int]string{}
 	dv.deriveSlotCleanupEdges()
 	dv.deriveRefEdges()
 	dv.deriveMoveEdges()
@@ -196,15 +186,10 @@ func (dv *differ) deriveExclusionEdges() {
 				continue
 			}
 			if label, ok := conflictLabel(added.Def, removed.Def); ok {
-				dv.addEdge(j, i, excludeReason(label))
+				dv.addEdge(j, i, "mutually exclusive label %q", label)
 			}
 		}
 	}
-}
-
-// excludeReason renders a sibling exclusion for the cycle-break warning.
-func excludeReason(label string) string {
-	return fmt.Sprintf("mutually exclusive label %q", label)
 }
 
 // definerIndex maps each resource defined by the selected subtrees to the operation with the smallest baseline key.
@@ -224,10 +209,12 @@ func definerIndex(ops []op, pick func(op) *tree.Node) map[resource]int {
 	return idx
 }
 
-// addEdge records an ordering edge together with the reason cycle warnings report.
-func (dv *differ) addEdge(from, to int, reason string) {
+// addEdge records an ordering edge and formats the reason cycle warnings report, keeping the first reason per edge.
+func (dv *differ) addEdge(from, to int, reason string, args ...any) {
 	dv.g.AddEdge(from, to)
-	dv.why.put(from, to, reason)
+	if k := [2]int{from, to}; dv.why[k] == "" {
+		dv.why[k] = fmt.Sprintf(reason, args...)
+	}
 }
 
 // deriveRefEdges orders definition adds before referrer adds and referrer removals before definition removals, including retargeting operations.
@@ -238,7 +225,7 @@ func (dv *differ) deriveRefEdges() {
 		if o.action != graph.Remove {
 			for _, r := range refsOf(o.src, dv.d) {
 				if j, ok := addDef[r]; ok && j != i {
-					dv.addEdge(j, i, refReason(r))
+					dv.addEdge(j, i, "ref %s.%s=%q", r.label, r.arg, r.key)
 				}
 			}
 		}
@@ -254,16 +241,11 @@ func (dv *differ) deriveRefEdges() {
 			}
 			for _, r := range refsOf(src, dv.d) {
 				if j, ok := rmDef[r]; ok && j != i {
-					dv.addEdge(i, j, refReason(r))
+					dv.addEdge(i, j, "ref %s.%s=%q", r.label, r.arg, r.key)
 				}
 			}
 		}
 	}
-}
-
-// refReason renders a ref resource for the cycle-break warning.
-func refReason(r resource) string {
-	return fmt.Sprintf("ref %s.%s=%q", r.label, r.arg, r.key)
 }
 
 // resourcesHeld returns comparable exclusive resources and warns about unresolvable lists.
@@ -364,7 +346,7 @@ func (dv *differ) deriveMoveEdges() {
 			// Compare every release and claim in the bucket.
 			for _, old := range freed[r.resource] {
 				if old.op != i && old.conflicts(r) {
-					dv.addEdge(old.op, i, moveReason(r))
+					dv.addEdge(old.op, i, "exclusive resource %s", r)
 				}
 			}
 		}
@@ -379,25 +361,20 @@ func (a heldResource) conflicts(b heldResource) bool {
 	return !a.isList && !b.isList
 }
 
-// moveReason formats an exclusive resource for a cycle warning.
-func moveReason(h heldResource) string {
-	name := h.label
-	if name == "" && h.def != nil {
-		name = h.def.Template
+// String names the exclusive resource and its value for a cycle warning.
+func (a heldResource) String() string {
+	name := a.label
+	if name == "" && a.def != nil {
+		name = a.def.Template
 	}
-	return fmt.Sprintf("exclusive resource %s %q",
-		name, strings.ReplaceAll(h.display, "\x00", ","))
+	return fmt.Sprintf("%s %q", name,
+		strings.ReplaceAll(a.display, "\x00", ","))
 }
 
 // requirement is one Requires declaration found in an op's subtree.
 type requirement struct {
 	tmpl  string // The owning definition template used in diagnostics.
 	label string
-}
-
-// requireReason renders a Requires prerequisite for the cycle-break warning.
-func requireReason(rq requirement) string {
-	return fmt.Sprintf("required label %q", rq.label)
 }
 
 func requirementsOf(n *tree.Node) []requirement {
@@ -509,14 +486,6 @@ func (dv *differ) deriveRequireEdges() {
 		}
 		return false
 	}
-	addRemovalEdges := func(i int, rq requirement) {
-		for _, j := range removeByLabel[rq.label] {
-			if j == i {
-				continue
-			}
-			dv.addEdge(i, j, requireReason(rq))
-		}
-	}
 	for i, o := range ops {
 		// The removal walk covers prerequisites for Remove operations.
 		if o.action != graph.Remove {
@@ -526,7 +495,7 @@ func (dv *differ) deriveRequireEdges() {
 				}
 				if j, ok := addByLabel[rq.label]; ok {
 					if j != i {
-						dv.addEdge(j, i, requireReason(rq))
+						dv.addEdge(j, i, "required label %q", rq.label)
 					}
 					continue
 				}
@@ -543,8 +512,13 @@ func (dv *differ) deriveRequireEdges() {
 			continue
 		}
 		for _, rq := range requirementsOf(rm) {
-			if validRequirement(rq) && !survivors[rq.label] {
-				addRemovalEdges(i, rq)
+			if !validRequirement(rq) || survivors[rq.label] {
+				continue
+			}
+			for _, j := range removeByLabel[rq.label] {
+				if j != i {
+					dv.addEdge(i, j, "required label %q", rq.label)
+				}
 			}
 		}
 	}

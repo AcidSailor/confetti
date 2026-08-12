@@ -120,15 +120,10 @@ func findSibling(n *tree.Node, rel schema.Relation, v string) *tree.Node {
 		return nil
 	}
 	for _, x := range n.Parent.Children {
-		if relMatches(x, n, rel, v) {
+		if x != n && x.Def != nil && x.Def.HasLabel(rel.Label) &&
+			(rel.FromArg == "" || x.Fields[rel.TargetKey] == v) {
 			return x
 		}
 	}
 	return nil
-}
-
-// relMatches reports whether x is another node that provides the required label and value.
-func relMatches(x, self *tree.Node, rel schema.Relation, v string) bool {
-	return x != self && x.Def != nil && x.Def.HasLabel(rel.Label) &&
-		(rel.FromArg == "" || x.Fields[rel.TargetKey] == v)
 }

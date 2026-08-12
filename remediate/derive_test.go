@@ -409,14 +409,14 @@ func TestUniqueListArgMalformedListWarnsNotSilent(t *testing.T) {
 	assert.Equal(t, "no priority 100-1 value 10\n", out)
 }
 
-func TestMoveReasonNamesListMembers(t *testing.T) {
+func TestHeldResourceStringNamesListMembers(t *testing.T) {
 	// Cycle warnings must retain list members that the bucket key excludes.
 	cfg := mustParse(t, prioListSchema(), "priority 1-50,51-100 value 10\n")
 	d := diag.New()
 	held := resourcesHeld(topNode(cfg, 0), d)
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, held, 1)
-	assert.Equal(t, `exclusive resource prio "1-100"`, moveReason(held[0]))
+	assert.Equal(t, `prio "1-100"`, held[0].String())
 	// The bucket key excludes the list.
 	assert.Equal(t, "", held[0].key)
 }
