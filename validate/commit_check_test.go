@@ -146,6 +146,106 @@ func TestCommitCheckRequiresAbsentBothIsFine(t *testing.T) {
 	assert.False(t, d.HasErrors(), d.String())
 }
 
+// l2l3Schema models the NX-OS L2/L3 split from issue #9: both sets on one header, exclusion by tag.
+func l2l3Schema() *schema.Schema {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	iface := s.Node("interface {{ name:word }}").
+		Card(schema.ZeroToN).Key("name")
+	iface.Child("switchport").Card(schema.ZeroToOne).
+		Tag("l2").ExcludeTag("l3")
+	iface.Child("switchport access vlan {{ vlan:uint }}").
+		Card(schema.ZeroToOne).Tag("l2").ExcludeTag("l3")
+	iface.Child("ip address {{ addr:word }}").
+		Card(schema.ZeroToOne).Tag("l3").ExcludeTag("l2")
+	hsrp := iface.Child("hsrp {{ grp:uint }}").Card(schema.ZeroToN).Key("grp")
+	hsrp.Child("ip {{ vip:word }}").Card(schema.ZeroToOne).Tag("l2")
+	return s
+}
+
+func TestCommitCheckExcludeTagConflict(t *testing.T) {
+	d := diag.New()
+	in := "interface Ethernet1/1\n  switchport\n" +
+		"  switchport access vlan 20\n  ip address 10.0.0.1/24\n"
+	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	require.True(t, d.HasErrors())
+	// The diagnostic names both offending lines and the tag in conflict.
+	assert.Contains(
+		t, d.String(), `mutually exclusive with "switchport" (line 2)`,
+	)
+	assert.Contains(t, d.String(), `via tag "l2"`)
+	assert.Contains(t, d.String(), `via tag "l3"`)
+}
+
+func TestCommitCheckExcludeTagSameSetCoexists(t *testing.T) {
+	// Many-to-many: members of one set coexist freely.
+	d := diag.New()
+	in := "interface Ethernet1/1\n  switchport\n  switchport access vlan 20\n"
+	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckExcludeTagIgnoresGrandchildren(t *testing.T) {
+	// Sibling scope stops at direct children: an l2-tagged grandchild is not in conflict.
+	d := diag.New()
+	in := "interface Ethernet1/1\n  ip address 10.0.0.1/24\n" +
+		"  hsrp 1\n    ip 10.0.0.254\n"
+	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckExcludeTagScopedToParentInstance(t *testing.T) {
+	// Exclusion is per parent instance: an l2 port and an l3 port coexist.
+	d := diag.New()
+	in := "interface Ethernet1/1\n  switchport\n" +
+		"interface Ethernet1/2\n  ip address 10.0.0.1/24\n"
+	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckRequiresSatisfiedByTag(t *testing.T) {
+	// A Tag provides the same label presence a Kind does.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("feature lacp").Card(schema.ZeroToOne).Tag("feature-lacp")
+	s.Node("port-channel {{ id:uint }}").
+		Card(schema.ZeroToN).Key("id").Requires("feature-lacp")
+	d := diag.New()
+	cfg := parse.Parse(
+		s, "feature lacp\nport-channel 10\n", diag.Policy{Strict: true}, d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckRefResolvesThroughTag(t *testing.T) {
+	// A keyed definition's Tag also indexes its key values.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("vlan {{ id:vlan }}").
+		Card(schema.ZeroToN).Kind("vlan").Tag("bridge").Key("id")
+	s.Node("member {{ vlan:vlan }}").
+		Card(schema.ZeroToN).Key("vlan").Ref("vlan", "bridge.id")
+	d := diag.New()
+	cfg := parse.Parse(
+		s, "vlan 10\nmember 10\nmember 20\n", diag.Policy{Strict: true}, d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, d)
+	require.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), `bridge "20" does not exist`)
+	assert.NotContains(t, d.String(), `"10" does not exist`)
+}
+
 func TestCommitCheckDanglingRefCarriesReferrerLine(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(

@@ -22,9 +22,33 @@ const (
 	One
 )
 
-// Ref requires FromArg to equal TargetKey on a node of TargetKind.
-type Ref struct {
-	FromArg, TargetKind, TargetKey string
+// Scope selects which nodes a Relation searches.
+type Scope int
+
+const (
+	// ScopeTree searches the whole assembled tree.
+	ScopeTree Scope = iota
+	// ScopeSiblings searches the direct children of the node's parent.
+	ScopeSiblings
+)
+
+// Polarity selects whether a Relation target must exist or must not.
+type Polarity int
+
+const (
+	// Present requires at least one matching node.
+	Present Polarity = iota
+	// Absent forbids any matching node.
+	Absent
+)
+
+// Relation constrains this node against nodes labeled Tag; a label is a Kind name or a Tag name.
+type Relation struct {
+	Tag       string   // The label to look for.
+	FromArg   string   // "" checks presence only; otherwise this capture must equal TargetKey.
+	TargetKey string   // The key argument matched against FromArg's value.
+	Scope     Scope    // Where to search.
+	Want      Polarity // Whether a match satisfies or violates the relation.
 }
 
 // NegateKind selects how a command line is negated.
@@ -139,8 +163,8 @@ type Node struct {
 	KindName         string
 	KeyArgs          []string
 	Children         []*Node
-	Refs             []Ref
-	RequiresKinds    []string
+	Relations        []Relation
+	TagNames         []string // Non-identity labels; see Tag.
 	UniqueArgs       []string
 	Idempotent       bool
 	Negate           NegateStrategy
@@ -421,28 +445,76 @@ func (n *Node) setBlock(b BlockStrategy) {
 	n.Block = b
 }
 
-// Ref requires captured fromArg to match a key identified by target in "kind.keyArg" form.
+// Ref requires captured fromArg to match a key identified by target in "label.keyArg" form.
 func (n *Node) Ref(fromArg, target string) *Node {
 	n.mustArg("Ref", fromArg)
-	kind, keyf, ok := strings.Cut(target, ".")
-	if !ok || kind == "" || keyf == "" {
-		// Reject targets that cannot resolve or can alias keyless Kind presence.
+	label, keyf, ok := strings.Cut(target, ".")
+	if !ok || label == "" || keyf == "" {
+		// Reject targets that cannot resolve or can alias keyless label presence.
 		panic("schema: Ref target must be \"kind.keyArg\": " + target)
 	}
-	n.Refs = append(
-		n.Refs,
-		Ref{FromArg: fromArg, TargetKind: kind, TargetKey: keyf},
+	n.Relations = append(n.Relations, Relation{
+		Tag: label, FromArg: fromArg, TargetKey: keyf,
+		Scope: ScopeTree, Want: Present,
+	})
+	return n
+}
+
+// Requires declares that any instance carrying the label must exist while this node exists.
+func (n *Node) Requires(label string) *Node {
+	if label == "" {
+		panic("schema: Requires kind must be non-empty: " + n.Template)
+	}
+	n.Relations = append(
+		n.Relations,
+		Relation{Tag: label, Scope: ScopeTree, Want: Present},
 	)
 	return n
 }
 
-// Requires declares that any instance of Kind must exist while this node exists.
-func (n *Node) Requires(kind string) *Node {
-	if kind == "" {
-		panic("schema: Requires kind must be non-empty: " + n.Template)
+// Tag adds non-identity labels that Relations can target; identity, pairing, and diffing ignore them.
+func (n *Node) Tag(names ...string) *Node {
+	if len(names) == 0 {
+		panic("schema: Tag needs at least one name: " + n.Template)
 	}
-	n.RequiresKinds = append(n.RequiresKinds, kind)
+	for _, name := range names {
+		if name == "" {
+			panic("schema: Tag name must be non-empty: " + n.Template)
+		}
+	}
+	n.TagNames = append(n.TagNames, names...)
 	return n
+}
+
+// ExcludeTag forbids any sibling carrying the label while this node exists.
+func (n *Node) ExcludeTag(names ...string) *Node {
+	if len(names) == 0 {
+		panic("schema: ExcludeTag needs at least one name: " + n.Template)
+	}
+	for _, name := range names {
+		if name == "" {
+			panic("schema: ExcludeTag name must be non-empty: " + n.Template)
+		}
+		n.Relations = append(
+			n.Relations,
+			Relation{Tag: name, Scope: ScopeSiblings, Want: Absent},
+		)
+	}
+	return n
+}
+
+// Labels returns every label Relations can match on this definition: the Kind name plus all Tags.
+func (n *Node) Labels() []string {
+	if n.KindName == "" {
+		return n.TagNames
+	}
+	return append([]string{n.KindName}, n.TagNames...)
+}
+
+// HasLabel reports whether name is this definition's Kind or one of its Tags.
+func (n *Node) HasLabel(name string) bool {
+	return name != "" &&
+		(n.KindName == name || slices.Contains(n.TagNames, name))
 }
 
 // Unique restricts exclusive resource identity to captured key arguments so remediation frees the resource before moving it.

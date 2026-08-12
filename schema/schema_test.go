@@ -28,11 +28,14 @@ func TestBuilderStructure(t *testing.T) {
 	assert.Equal(t, ZeroToN, iface.Cardinality)
 	assert.True(t, iface.Children[0].Idempotent)
 
-	ref := iface.Children[1].Refs
+	ref := iface.Children[1].Relations
 	require.Len(t, ref, 1)
 	assert.Equal(
 		t,
-		Ref{FromArg: "vlan", TargetKind: "vlan", TargetKey: "id"},
+		Relation{
+			Tag: "vlan", FromArg: "vlan", TargetKey: "id",
+			Scope: ScopeTree, Want: Present,
+		},
 		ref[0],
 	)
 
@@ -189,7 +192,11 @@ func TestOrderingMetadata(t *testing.T) {
 	n := s.Node("router {{ proto:word }}").
 		Requires("feature").
 		Unique("proto")
-	assert.Equal(t, []string{"feature"}, n.RequiresKinds)
+	assert.Equal(
+		t,
+		[]Relation{{Tag: "feature", Scope: ScopeTree, Want: Present}},
+		n.Relations,
+	)
 	assert.Equal(t, []string{"proto"}, n.UniqueArgs)
 
 	called := 0
@@ -752,6 +759,37 @@ func TestRefUnknownFromArgPanics(t *testing.T) {
 
 func TestRequiresEmptyKindPanics(t *testing.T) {
 	assert.Panics(t, func() { New().Node("x").Requires("") })
+}
+
+func TestTagStacksAndRejectsEmpty(t *testing.T) {
+	n := New().Node("switchport").Tag("l2").Tag("mode", "access")
+	assert.Equal(t, []string{"l2", "mode", "access"}, n.TagNames)
+	assert.Panics(t, func() { New().Node("x").Tag() })
+	assert.Panics(t, func() { New().Node("x").Tag("") })
+	assert.Panics(t, func() { New().Node("x").ExcludeTag() })
+	assert.Panics(t, func() { New().Node("x").ExcludeTag("") })
+}
+
+func TestExcludeTagBuildsSiblingAbsentRelations(t *testing.T) {
+	n := New().Node("ip address {{ a:word }}").
+		Tag("l3").
+		ExcludeTag("l2", "mgmt")
+	assert.Equal(t, []Relation{
+		{Tag: "l2", Scope: ScopeSiblings, Want: Absent},
+		{Tag: "mgmt", Scope: ScopeSiblings, Want: Absent},
+	}, n.Relations)
+}
+
+func TestLabelsCombineKindAndTags(t *testing.T) {
+	n := New().Node("vlan {{ id:uint }}").Kind("vlan").Tag("l2domain")
+	assert.Equal(t, []string{"vlan", "l2domain"}, n.Labels())
+	assert.True(t, n.HasLabel("vlan"))
+	assert.True(t, n.HasLabel("l2domain"))
+	assert.False(t, n.HasLabel("l3"))
+	assert.False(t, n.HasLabel(""))
+
+	kindless := New().Node("switchport").Tag("l2")
+	assert.Equal(t, []string{"l2"}, kindless.Labels())
 }
 
 func TestToggleMemberRejectsKeyAndCard(t *testing.T) {

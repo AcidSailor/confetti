@@ -499,6 +499,18 @@ func TestRequiresKeylessKindSurvives(t *testing.T) {
 	assert.Equal(t, "router bgp\n", out)
 }
 
+func TestRequiresTagLabelOrdersOnAdd(t *testing.T) {
+	// A Tag provides the same existential label a Kind does, so the edge fires.
+	s := schema.New()
+	s.Node("router {{ proto:word }}").Card(schema.ZeroToN).Requires("gate")
+	s.Node("gate on").Card(schema.ZeroToOne).Tag("gate")
+	out, d := orderedDiff(t, s,
+		"",
+		"router bgp\ngate on\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "gate on\nrouter bgp\n", out)
+}
+
 func TestRequiresPartialKeyOverlapIsNotSurvival(t *testing.T) {
 	// A composite-key definer is replaced (10,a)->(20,a): no whole instance
 	// survives, so the Requires edge must still fire despite the shared z=a.

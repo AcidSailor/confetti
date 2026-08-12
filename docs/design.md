@@ -29,7 +29,8 @@ confetti (root)   Engine: option wiring + the pipelines below
 │                 the import fold (Respell → ListContinues → Members)
 ├── tree          the config tree; Node stores op tags, lines, and block bodies
 ├── validate      ImportCheck (values, cardinality, dup keys, toggles,
-│                 required children) and CommitCheck (refs, Requires)
+│                 required children) and CommitCheck (relations: refs,
+│                 Requires, tag exclusions)
 ├── render        tree → canonical text
 ├── transform     text rules (DropLines, PerLineSub) + tree transform seam
 ├── remediate     Diff: pair → collect ops → derive edges → schedule →
@@ -74,7 +75,7 @@ Layering rules:
 Import:    text transforms (outside block spans) → parse → fold
            (Respell → ListContinues → Members) → user tree transforms
            → ImportCheck
-CommitCheck: refs and Requires over an assembled tree
+CommitCheck: relations (refs, Requires, exclusions) over an assembled tree
            → custom validators (WithCommitChecks)
 Render:    user tree transforms → render → text transforms (outside blocks)
 Remediate: CommitCheck(intended) + Diff(running, intended)
@@ -210,6 +211,9 @@ The explanations record constraints that tests do not show.
 - **Declare exclusivity with `Unique`.** `Requires` is
   existential only. Use `OrderHook` for sequencing preferences that have no
   existence semantics.
+- **Absent relations derive no ordering edges.** `Diff` never commit-checks
+  its own intermediate states, so a mode transition (`no switchport` →
+  `ip address`) cannot trip the exclusion it converges toward.
 
 ### Import folds (dual-form, lists, respell)
 
@@ -292,6 +296,12 @@ cycle break warns about its partial-application risk and names the dependency.
   places the node in the Modify pairing category the delta machinery uses).
 - **`EmptyOnRemove` is per definition, not per Kind** because its mode-like,
   always-present section declares no Kind.
+- **Tags are non-identity labels.** A node's label set is its Kind plus its
+  Tags, and every relation (`Ref`, `Requires`, `ExcludeTag`) matches labels.
+  Identity, pairing, and diffing ignore Tags. Sibling-scope relations compare
+  the direct children of one parent, so tagged grandchildren stay out of the
+  comparison. `Toggles` remains the one-setting alternate-spelling primitive;
+  `ExcludeTag` models many-to-many mode splits such as L2 versus L3.
 - Blocks, lists, `Members`, `RespellAs`, and `Key` are mutually exclusive in
   documented combinations that cannot represent valid grammar. Invalid
   combinations panic in both call orders.

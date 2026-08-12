@@ -52,27 +52,34 @@ func (dv *differ) buildGraph() {
 	}
 }
 
-// definesOf returns one resource per Kind and key argument in a subtree so references can target one part of a composite key.
+// definesOf returns one resource per label and key argument in a subtree so references can target one part of a composite key.
 func definesOf(n *tree.Node) []resource {
 	var out []resource
 	n.Walk(func(x *tree.Node) {
 		def := x.Def
-		if def == nil || def.KindName == "" {
+		if def == nil {
 			return
 		}
-		// A keyless Kind still provides the presence required by Requires.
-		if len(def.KeyArgs) == 0 {
-			out = append(out, resource{kind: def.KindName})
-			return
-		}
-		for _, a := range def.KeyArgs {
-			out = append(
-				out,
-				resource{kind: def.KindName, arg: a, key: x.Fields[a]},
-			)
+		for _, label := range def.Labels() {
+			// A keyless label still provides the presence required by Requires.
+			if len(def.KeyArgs) == 0 {
+				out = append(out, resource{kind: label})
+				continue
+			}
+			for _, a := range def.KeyArgs {
+				out = append(
+					out,
+					resource{kind: label, arg: a, key: x.Fields[a]},
+				)
+			}
 		}
 	})
 	return out
+}
+
+// treePresence selects relations that assert tree-wide existence; only they derive ordering edges.
+func treePresence(r schema.Relation) bool {
+	return r.Scope == schema.ScopeTree && r.Want == schema.Present
 }
 
 // refsOf returns referenced resources in a subtree and expands semantic list values into separate references.
@@ -83,7 +90,10 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 		if def == nil {
 			return
 		}
-		for _, r := range def.Refs {
+		for _, r := range def.Relations {
+			if !treePresence(r) || r.FromArg == "" {
+				continue
+			}
 			if ls := def.ListSpec; ls.Arg != "" && ls.Arg == r.FromArg {
 				items, ok := resolveListArg(x, ls, d, "ref-ordering edges")
 				if !ok {
@@ -91,7 +101,7 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 				}
 				for _, it := range items {
 					out = append(out, resource{
-						kind: r.TargetKind, arg: r.TargetKey, key: it,
+						kind: r.Tag, arg: r.TargetKey, key: it,
 					})
 				}
 				continue
@@ -99,7 +109,7 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 			out = append(
 				out,
 				resource{
-					kind: r.TargetKind,
+					kind: r.Tag,
 					arg:  r.TargetKey,
 					key:  x.Fields[r.FromArg],
 				},
@@ -351,35 +361,39 @@ func requirementsOf(n *tree.Node) []requirement {
 		if def == nil {
 			return
 		}
-		for _, k := range def.RequiresKinds {
-			out = append(out, requirement{tmpl: def.Template, kind: k})
+		for _, r := range def.Relations {
+			if treePresence(r) && r.FromArg == "" {
+				out = append(out, requirement{tmpl: def.Template, kind: r.Tag})
+			}
 		}
 	})
 	return out
 }
 
-// declaredKinds collects every Kind name any def declares, reusing the single schema enumeration in buildOrderIndex.
+// declaredKinds collects every label any def declares, reusing the single schema enumeration in buildOrderIndex.
 func declaredKinds(s *schema.Schema) map[string]bool {
 	kinds := map[string]bool{}
 	for n := range buildOrderIndex(s) {
-		if n.KindName != "" {
-			kinds[n.KindName] = true
+		for _, label := range n.Labels() {
+			kinds[label] = true
 		}
 	}
 	return kinds
 }
 
-// survivingKinds returns Kinds with the same complete identity in running and intended.
+// survivingKinds returns labels with the same complete identity in running and intended.
 func survivingKinds(running, intended *tree.Config) map[string]bool {
 	collect := func(c *tree.Config) map[resource]bool {
 		set := map[resource]bool{}
 		tree.Walk(c, func(n *tree.Node) {
 			def := n.Def
-			if def == nil || def.KindName == "" {
+			if def == nil {
 				return
 			}
-			// A keyless Kind survives when it is present in both configurations.
-			set[resource{kind: def.KindName, key: ident.KeyValue(n)}] = true
+			// A keyless label survives when it is present in both configurations.
+			for _, label := range def.Labels() {
+				set[resource{kind: label, key: ident.KeyValue(n)}] = true
+			}
 		})
 		return set
 	}
