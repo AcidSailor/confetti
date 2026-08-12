@@ -191,3 +191,19 @@ func TestCanonicalPrefersKeywords(t *testing.T) {
 	assert.Equal(t, "", Canonical(nil, "", Keywords{}))
 	assert.Equal(t, "1-3", Canonical([]string{"1", "2", "3"}, "", Keywords{}))
 }
+
+func TestIntersectsCanonicalWithoutExpandingRanges(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"1-65536", "32768-70000", true},
+		{"1-100", "101-200", false},
+		{"1-3,blue", "blue,9", true},
+		{"red", "blue", false},
+		{"", "", false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, IntersectsCanonical(tt.a, tt.b, ""), "%q and %q", tt.a, tt.b)
+	}
+}

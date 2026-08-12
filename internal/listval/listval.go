@@ -122,6 +122,41 @@ func Canonical(items []string, sep string, kw Keywords) string {
 	return compressSorted(sorted, sep)
 }
 
+// IntersectsCanonical reports whether two values produced by Canonical share an
+// item. It compares numeric runs as intervals, avoiding expansion of compact
+// ranges back into their individual members.
+func IntersectsCanonical(a, b, sep string) bool {
+	left := strings.Split(a, sepOr(sep))
+	right := strings.Split(b, sepOr(sep))
+	for _, x := range left {
+		xlo, xhi, xnum := canonicalInterval(x)
+		for _, y := range right {
+			ylo, yhi, ynum := canonicalInterval(y)
+			if xnum && ynum {
+				if xlo <= yhi && ylo <= xhi {
+					return true
+				}
+			} else if !xnum && !ynum && x == y && x != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func canonicalInterval(s string) (lo, hi int, ok bool) {
+	if n, plain := plain(s); plain {
+		return n, n, true
+	}
+	a, b, found := strings.Cut(s, "-")
+	if !found {
+		return 0, 0, false
+	}
+	lo, aok := plain(a)
+	hi, bok := plain(b)
+	return lo, hi, aok && bok
+}
+
 // exceptRest reports raw as "<Except> <list>", returning the list part.
 func exceptRest(raw string, kw Keywords) (string, bool) {
 	if kw.Except == "" {

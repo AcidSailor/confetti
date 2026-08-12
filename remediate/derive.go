@@ -21,6 +21,15 @@ type resource struct {
 	key  string
 }
 
+// heldResource optionally carries a compact canonical list. Resources with
+// lists conflict when their base keys match and their member sets overlap.
+type heldResource struct {
+	resource
+	list   string
+	sep    string
+	isList bool
+}
+
 // edgeReasons stores the first recorded reason for each derived edge so lenient cycle warnings can identify the affected dependency.
 type edgeReasons map[[2]int]string
 
@@ -213,10 +222,10 @@ func refReason(r resource) string {
 }
 
 // resourcesHeld returns exclusive resources for keyed nodes by UniqueArgs or the full key. When the resource key
-// includes the node's List arg, it expands that arg into one resource per member instead of keying on its raw
-// text, so two spellings of the same member set (e.g. "1-100" and "1-50,51-100") pair as the same resources.
-func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []resource {
-	var out []resource
+// includes the node's List arg, it retains a compact semantic set alongside the other key parts so equivalent and
+// overlapping list spellings conflict without allocating a persistent resource for every member.
+func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
+	var out []heldResource
 	n.Walk(func(x *tree.Node) {
 		def := x.Def
 		if def == nil || len(def.KeyArgs) == 0 {
@@ -235,7 +244,7 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []resource {
 			for i, a := range args {
 				parts[i] = x.Fields[a]
 			}
-			out = append(out, resourceFor(def, strings.Join(parts, "\x00")))
+			out = append(out, heldResource{resource: resourceFor(def, strings.Join(parts, "\x00"))})
 			return
 		}
 		ls := def.ListSpec
@@ -257,10 +266,18 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []resource {
 				parts[i] = x.Fields[a]
 			}
 		}
-		for _, it := range items {
-			parts[listIdx] = it
-			out = append(out, resourceFor(def, strings.Join(parts, "\x00")))
-		}
+		// Keep the list out of the base key and retain one compressed semantic
+		// set per line. This bounds resource-map growth by the number of lines,
+		// rather than by the number of expanded range members.
+		parts[listIdx] = ""
+		out = append(out, heldResource{
+			resource: resourceFor(def, strings.Join(parts, "\x00")),
+			// Resolve has already applied list keywords; canonicalize the actual
+			// members without folding the complete domain back to the All token.
+			list:   listval.Canonical(items, ls.Sep, listval.Keywords{}),
+			sep:    ls.Sep,
+			isList: true,
+		})
 	})
 	return out
 }
@@ -276,14 +293,18 @@ func resourceFor(def *schema.Node, key string) resource {
 
 // deriveMoveEdges orders each resource release before a new claim on the same resource.
 func (dv *differ) deriveMoveEdges() {
-	freed := map[resource][]int{}
+	type release struct {
+		heldResource
+		op int
+	}
+	freed := map[resource][]release{}
 	for i, o := range dv.ops {
 		src := removedSubtree(o)
 		if src == nil {
 			continue
 		}
 		for _, r := range resourcesHeld(src, dv.d) {
-			freed[r] = append(freed[r], i)
+			freed[r.resource] = append(freed[r.resource], release{r, i})
 		}
 	}
 	for i, o := range dv.ops {
@@ -292,13 +313,23 @@ func (dv *differ) deriveMoveEdges() {
 			continue
 		}
 		for _, r := range resourcesHeld(src, dv.d) {
-			for _, j := range freed[r] {
-				if j != i {
-					dv.addEdge(j, i, moveReason(r))
+			for _, old := range freed[r.resource] {
+				if old.op != i && listsConflict(old.heldResource, r) {
+					dv.addEdge(old.op, i, moveReason(r.resource))
 				}
 			}
 		}
 	}
+}
+
+func listsConflict(a, b heldResource) bool {
+	if !a.isList || !b.isList {
+		return !a.isList && !b.isList
+	}
+	if a.list == "" || b.list == "" {
+		return false
+	}
+	return listval.IntersectsCanonical(a.list, b.list, a.sep)
 }
 
 // moveReason formats an exclusive resource for a cycle warning.

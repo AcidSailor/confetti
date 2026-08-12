@@ -251,7 +251,7 @@ func TestUniqueScopeDerivesMoveOnPartialKeyMatch(t *testing.T) {
 	assert.Equal(t, "no slot 1 owner alpha\nslot 1 owner beta\n", out)
 }
 
-func TestUniqueListArgExpandsToPerMemberResources(t *testing.T) {
+func TestUniqueListArgUsesCompactSemanticResources(t *testing.T) {
 	s := schema.New()
 	s.Node("priority {{ ids:word }} value {{ value:word }}").
 		Card(schema.ZeroToN).Kind("prio").Key("value").Unique("ids").
@@ -267,6 +267,15 @@ func TestUniqueListArgExpandsToPerMemberResources(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t,
 		"no priority 1-100 value 10\npriority 1-50,51-100 value 20\n", out)
+
+	// Partial overlap is also exclusive, without requiring either range to
+	// materialize as one held resource per member.
+	out, d = orderedDiff(t, s,
+		"priority 1-65536 value 10\n",
+		"priority 65536-70000 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"no priority 1-65536 value 10\npriority 65536-70000 value 20\n", out)
 }
 
 func TestUniqueListArgMalformedListWarnsNotSilent(t *testing.T) {
