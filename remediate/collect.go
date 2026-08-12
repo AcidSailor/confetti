@@ -47,7 +47,7 @@ type differ struct {
 	d                 *diag.Diagnostics
 	ops               []op
 	g                 *graph.Graph
-	// why records the first reason for each derived edge so lenient cycle warnings can name the affected dependency.
+	// why stores the first reason for each edge for lenient cycle warnings.
 	why map[[2]int]string
 }
 

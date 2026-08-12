@@ -209,7 +209,7 @@ func definerIndex(ops []op, pick func(op) *tree.Node) map[resource]int {
 	return idx
 }
 
-// addEdge records an ordering edge and formats the reason cycle warnings report, keeping the first reason per edge.
+// addEdge records an ordering edge and its first cycle-warning reason.
 func (dv *differ) addEdge(from, to int, reason string, args ...any) {
 	dv.g.AddEdge(from, to)
 	if k := [2]int{from, to}; dv.why[k] == "" {
@@ -361,7 +361,7 @@ func (a heldResource) conflicts(b heldResource) bool {
 	return !a.isList && !b.isList
 }
 
-// String names the exclusive resource and its value for a cycle warning.
+// String formats the exclusive resource and value for cycle warnings.
 func (a heldResource) String() string {
 	name := a.label
 	if name == "" && a.def != nil {
