@@ -120,9 +120,13 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 	return out
 }
 
-// addedSubtree returns the subtree an operation creates, or nil when it creates none; a Replace creates its intended half.
+// addedSubtree returns the subtree an operation creates, including the new half of a Replace or cross-definition Modify.
 func addedSubtree(o op) *tree.Node {
 	if o.action == graph.Add || o.action == graph.Replace {
+		return o.src
+	}
+	if o.action == graph.Modify && o.runSrc != nil &&
+		o.src.Def != o.runSrc.Def {
 		return o.src
 	}
 	return nil
@@ -194,15 +198,17 @@ func conflictLabel(a, b *schema.Node) (string, bool) {
 // deriveExclusionEdges orders the removal of a conflicting sibling before the operation installing its excluder so a mode transition clears the old mode first.
 func (dv *differ) deriveExclusionEdges() {
 	for i, add := range dv.ops {
-		if add.action == graph.Remove || add.src == nil {
+		added := addedSubtree(add)
+		if added == nil {
 			continue
 		}
 		for j, rm := range dv.ops {
-			if i == j || rm.action != graph.Remove || rm.src == nil ||
+			removed := removedSubtree(rm)
+			if i == j || removed == nil ||
 				!slices.Equal(rm.secs, add.secs) {
 				continue
 			}
-			if label, ok := conflictLabel(add.src.Def, rm.src.Def); ok {
+			if label, ok := conflictLabel(added.Def, removed.Def); ok {
 				dv.addEdge(j, i, excludeReason(label))
 			}
 		}

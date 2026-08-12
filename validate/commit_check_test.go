@@ -338,3 +338,16 @@ func TestCommitCheckHalfSpecifiedRelationIsError(t *testing.T) {
 	require.True(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "matches arg \"v\" against no target key")
 }
+
+func TestCommitCheckInvalidRelationEnumsAreErrors(t *testing.T) {
+	s := schema.New()
+	n := s.Node("feature").Tag("feature")
+	n.Relations = append(n.Relations,
+		schema.Relation{Label: "feature", Scope: schema.Scope(2)},
+		schema.Relation{Label: "feature", Want: schema.Polarity(2)},
+	)
+	d := checkText(t, s, "feature\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `invalid scope 2`)
+	assert.Contains(t, d.String(), `invalid polarity 2`)
+}

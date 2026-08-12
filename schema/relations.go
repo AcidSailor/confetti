@@ -68,6 +68,14 @@ func (n *Node) checkRelation(
 	keysOf map[string]map[string]bool,
 	d *diag.Diagnostics,
 ) {
+	if rel.Scope != ScopeTree && rel.Scope != ScopeSiblings {
+		d.Add(diag.Error, "%s: relation on label %q has invalid scope %d",
+			n.Template, rel.Label, rel.Scope)
+	}
+	if rel.Want != Present && rel.Want != Absent {
+		d.Add(diag.Error, "%s: relation on label %q has invalid polarity %d",
+			n.Template, rel.Label, rel.Want)
+	}
 	if rel.Label == "" {
 		d.Add(diag.Error, "%s: relation has an empty label", n.Template)
 		return

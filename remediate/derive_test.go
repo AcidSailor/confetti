@@ -511,6 +511,34 @@ func TestRequiresTagLabelOrdersOnAdd(t *testing.T) {
 	assert.Equal(t, "gate on\nrouter bgp\n", out)
 }
 
+func TestCrossDefModifyIntroducesRequiredTag(t *testing.T) {
+	s := schema.New()
+	s.Node("router").Requires("gate")
+	s.Node("feature off").Kind("feature").MarkIdempotent()
+	s.Node("feature on").Kind("feature").MarkIdempotent().Tag("gate")
+	out, d := orderedDiff(t, s, "feature off\n", "router\nfeature on\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "feature on\nrouter\n", out)
+}
+
+func TestCrossDefModifyIntroducesReferencedTag(t *testing.T) {
+	s := schema.New()
+	s.Node("member {{ id:uint }}").Card(schema.ZeroToN).Key("id").
+		Ref("id", "gate.id")
+	s.Node("feature off {{ id:uint }}").Card(schema.ZeroToN).
+		Kind("feature").Key("id").MarkIdempotent()
+	s.Node("feature on {{ id:uint }}").Card(schema.ZeroToN).
+		Kind("feature").Key("id").MarkIdempotent().Tag("gate")
+	out, d := orderedDiff(
+		t,
+		s,
+		"feature off 10\n",
+		"member 10\nfeature on 10\n",
+	)
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "feature on 10\nmember 10\n", out)
+}
+
 func TestRequiresPartialKeyOverlapIsNotSurvival(t *testing.T) {
 	// A composite-key definer is replaced (10,a)->(20,a): no whole instance
 	// survives, so the Requires edge must still fire despite the shared z=a.
@@ -653,6 +681,72 @@ func TestExcludeTagOrdersRemovalBeforeAddReverse(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "interface Ethernet1\n  no ip address 10.0.0.1/24\n"+
 		"  switchport\n  switchport access vlan 20\n", out)
+}
+
+func TestExcludeTagOrdersSemanticRemovalBeforeAdd(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*schema.Node)
+		running   string
+		intended  string
+		first     string
+	}{
+		{
+			name: "replace",
+			configure: func(iface *schema.Node) {
+				iface.Child("mode l2").Kind("mode").Tag("l2").ExcludeTag("l3")
+				iface.Child("mode l3").Kind("mode").Tag("l3").ExcludeTag("l2")
+			},
+			running:  "mode l2\n",
+			intended: "extra l3\nmode l3\n",
+			first:    "no mode l2",
+		},
+		{
+			name: "modify",
+			configure: func(iface *schema.Node) {
+				iface.Child("mode l2").
+					Kind("mode").
+					MarkIdempotent().
+					Tag("l2").
+					ExcludeTag("l3")
+				iface.Child("mode l3").
+					Kind("mode").
+					MarkIdempotent().
+					Tag("l3").
+					ExcludeTag("l2")
+			},
+			running:  "mode l2\n",
+			intended: "extra l3\nmode l3\n",
+			first:    "mode l3\n",
+		},
+		{
+			name: "toggle",
+			configure: func(iface *schema.Node) {
+				l2 := iface.Child("mode l2").Tag("l2").ExcludeTag("l3")
+				iface.Child("mode l3").Tag("l3").ExcludeTag("l2").Toggles(l2)
+			},
+			running:  "mode l2\n",
+			intended: "extra l3\nmode l3\n",
+			first:    "mode l3\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := schema.New()
+			iface := s.Node("interface")
+			iface.Child("extra l3").Tag("l3").ExcludeTag("l2")
+			tt.configure(iface)
+			out, d := orderedDiff(t, s,
+				"interface\n  "+tt.running,
+				"interface\n  "+strings.ReplaceAll(tt.intended, "\n", "\n  "))
+			require.False(t, d.HasErrors(), d.String())
+			first := strings.Index(out, tt.first)
+			extra := strings.Index(out, "extra l3")
+			require.GreaterOrEqual(t, first, 0, out)
+			require.GreaterOrEqual(t, extra, 0, out)
+			assert.Less(t, first, extra, out)
+		})
+	}
 }
 
 func TestExcludeTagIgnoresOtherParentInstances(t *testing.T) {
