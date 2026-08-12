@@ -122,7 +122,7 @@ func Canonical(items []string, sep string, kw Keywords) string {
 	return compressSorted(sorted, sep)
 }
 
-// Members holds a Canonical value split into items, keeping numeric runs compact as intervals.
+// Members holds a semantic item set with numeric runs kept compact as intervals, so overlap needs no expansion.
 type Members []member
 
 // member is a closed numeric interval, or a literal item when num is false.
@@ -132,16 +132,19 @@ type member struct {
 	num    bool
 }
 
-// Split parses a Canonical value produced with sep into comparable members; an empty value holds none.
-func Split(canonical, sep string) Members {
-	if canonical == "" {
-		return nil
-	}
-	parts := strings.Split(canonical, sepOr(sep))
-	out := make(Members, 0, len(parts))
-	for _, p := range parts {
-		lo, hi, ok := interval(p)
-		out = append(out, member{lo: lo, hi: hi, text: p, num: ok})
+// Intervals folds a Resolve item set into closed numeric intervals, keeping other items literal; an empty set holds none.
+func Intervals(items []string) Members {
+	out := make(Members, 0, len(items))
+	for _, it := range items {
+		n, ok := num(it)
+		switch k := len(out) - 1; {
+		case !ok:
+			out = append(out, member{text: it})
+		case k >= 0 && out[k].num && out[k].hi+1 >= n:
+			out[k].hi = max(out[k].hi, n)
+		default:
+			out = append(out, member{lo: n, hi: n, num: true})
+		}
 	}
 	return out
 }
@@ -161,20 +164,6 @@ func (m Members) Intersects(o Members) bool {
 		}
 	}
 	return false
-}
-
-// interval reports an item as a closed numeric range; it counts by value, so zero-padded spellings match their plain form.
-func interval(s string) (lo, hi int, ok bool) {
-	if n, isNum := num(s); isNum {
-		return n, n, true
-	}
-	a, b, found := strings.Cut(s, "-")
-	if !found {
-		return 0, 0, false
-	}
-	lo, aok := num(a)
-	hi, bok := num(b)
-	return lo, hi, aok && bok
 }
 
 // exceptRest reports raw as "<Except> <list>", returning the list part.

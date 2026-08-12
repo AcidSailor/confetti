@@ -230,9 +230,11 @@ The explanations record constraints that tests do not show.
   are a no-op even when raw text differs. Keyword spellings survive on
   untouched slots. Canonicalization occurs only where a value is
   recomputed (merge union, continuation fold).
-- **List semantics have three views.** `Parts` returns explicit input items
+- **List semantics have four views.** `Parts` returns explicit input items
   for validation and reference checks. `Resolve` returns the semantic set for
   diff, union, and ordering. `Canonical` returns the shortest output spelling.
+  `Intervals` folds a `Resolve` set into comparable members so remediation can
+  test two lists for overlap without expanding either.
   `internal/listval` is the only comma-and-range codec.
 - **List deltas fall back to whole-line Modify when they cannot represent the
   change** because of expansion failure, non-list field differences, or

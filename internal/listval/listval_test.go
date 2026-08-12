@@ -195,8 +195,6 @@ func TestCanonicalPrefersKeywords(t *testing.T) {
 func TestMembersIntersectWithoutExpandingRanges(t *testing.T) {
 	tests := []struct {
 		a, b string
-		sepA string
-		sepB string
 		want bool
 		why  string
 	}{
@@ -210,37 +208,24 @@ func TestMembersIntersectWithoutExpandingRanges(t *testing.T) {
 		{a: "007", b: "7", want: true, why: "zero-padded spelling"},
 		{a: "007", b: "1-10", want: true, why: "zero-padded inside a range"},
 		{a: "0070", b: "1-10", want: false, why: "zero-padded outside a range"},
-		// Each side splits with its own separator, so a mismatch cannot hide an overlap.
-		{a: "1;5", sepA: ";", b: "5", want: true, why: "separators differ"},
-		{
-			a:    "1;5",
-			sepA: ";",
-			b:    "9",
-			want: false,
-			why:  "separators differ, disjoint",
-		},
 	}
 	for _, tt := range tests {
-		a := Split(tt.a, tt.sepA)
-		b := Split(tt.b, tt.sepB)
-		assert.Equal(
-			t,
-			tt.want,
-			a.Intersects(b),
-			"%s: %q and %q",
-			tt.why,
-			tt.a,
-			tt.b,
-		)
-		// Intersection is symmetric regardless of how each side was spelled.
-		assert.Equal(
-			t,
-			tt.want,
-			b.Intersects(a),
-			"%s reversed: %q and %q",
-			tt.why,
-			tt.b,
-			tt.a,
-		)
+		t.Run(tt.why, func(t *testing.T) {
+			a, b := members(t, tt.a), members(t, tt.b)
+			assert.Equal(t, tt.want, a.Intersects(b))
+			// Intersection is symmetric regardless of how each side was spelled.
+			assert.Equal(t, tt.want, b.Intersects(a))
+		})
 	}
+}
+
+// members expands a raw list into comparable members; an empty value holds none.
+func members(t *testing.T, raw string) Members {
+	t.Helper()
+	if raw == "" {
+		return nil
+	}
+	items, err := Expand(raw, "")
+	require.NoError(t, err)
+	return Intervals(items)
 }

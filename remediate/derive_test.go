@@ -354,10 +354,7 @@ func prioKeywordSchema() *schema.Schema {
 }
 
 func TestUniqueListArgKeywordSetsCompareByMembers(t *testing.T) {
-	// resourcesHeld resolves keywords to members and canonicalizes with empty
-	// Keywords. Passing the schema's own Keywords instead would fold All back to
-	// its token (losing the overlap below) and give None a spelling that
-	// conflicts with itself. No other test fails on that substitution.
+	// Members come from Resolve, so a keyword slot compares as the set it denotes, not as its token.
 	s := prioKeywordSchema()
 
 	// All covers its whole domain, so it overlaps any explicit subset.
@@ -388,14 +385,9 @@ func TestUniqueListArgKeywordSetsCompareByMembers(t *testing.T) {
 func TestUniqueListArgSeparatorMismatchConflictsBothDirections(t *testing.T) {
 	// Two defs share a Kind with different list separators. Because the List arg
 	// is blanked from the base key, both land in one bucket, so each side must be
-	// split with its own separator or the answer would depend on direction.
+	// resolved with its own separator or the answer would depend on direction.
 	build := func() *schema.Schema {
-		s := schema.New()
-		s.Node("priority {{ ids:word }} value {{ value:word }}").
-			Card(schema.ZeroToN).Kind("prio").Key("value").Unique("ids").
-			List("ids", "uint").
-			ListDelta("priority {{ ids }} value {{ value }}",
-				"no priority {{ ids }} value {{ value }}")
+		s := prioListSchema()
 		s.Node("backup {{ ids:word }} value {{ value:word }}").
 			Card(schema.ZeroToN).Kind("prio").Key("value").Unique("ids").
 			List("ids", "uint").ListSep(";").
@@ -403,8 +395,7 @@ func TestUniqueListArgSeparatorMismatchConflictsBothDirections(t *testing.T) {
 				"no backup {{ ids }} value {{ value }}")
 		return s
 	}
-	// Members 1 and 5 are non-consecutive so compressSorted cannot fold them
-	// into a range and hide the separator.
+	// Members 1 and 5 are non-consecutive so a wrong separator yields one literal item, not two.
 	out, d := orderedDiff(t, build(),
 		"backup 1;5 value 10\n", "priority 5 value 20\n")
 	require.False(t, d.HasErrors(), d.String())

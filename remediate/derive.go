@@ -21,7 +21,7 @@ type resource struct {
 	key  string
 }
 
-// heldResource is a resource plus, when a List arg is part of its key, that arg's members and the spelling diagnostics report.
+// heldResource is a resource plus, for a List arg, its members and the spelling moveReason prints.
 type heldResource struct {
 	resource
 	members listval.Members
@@ -85,18 +85,8 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 		}
 		for _, r := range def.Refs {
 			if ls := def.ListSpec; ls.Arg != "" && ls.Arg == r.FromArg {
-				items, err := listval.Resolve(
-					x.Fields[ls.Arg], ls.Sep, ls.Keywords(),
-				)
-				if err != nil {
-					d.AddAt(
-						x.Line,
-						diag.Warning,
-						"%s: unresolvable list %q: ref-ordering edges for this line skipped (%v)",
-						x.Path(),
-						x.Fields[ls.Arg],
-						err,
-					)
+				items, ok := resolveListArg(x, ls, d, "ref-ordering edges")
+				if !ok {
 					continue
 				}
 				for _, it := range items {
@@ -236,34 +226,6 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 		if def.ListSpec.Arg != "" {
 			listIdx = slices.Index(args, def.ListSpec.Arg)
 		}
-		if listIdx < 0 {
-			parts := make([]string, len(args))
-			for i, a := range args {
-				parts[i] = x.Fields[a]
-			}
-			key := strings.Join(parts, "\x00")
-			out = append(
-				out,
-				heldResource{
-					resource: resourceFor(def, key),
-					display:  key,
-				},
-			)
-			return
-		}
-		ls := def.ListSpec
-		items, err := listval.Resolve(x.Fields[ls.Arg], ls.Sep, ls.Keywords())
-		if err != nil {
-			d.AddAt(
-				x.Line,
-				diag.Warning,
-				"%s: unresolvable list %q: exclusive-resource ordering for this line skipped (%v)",
-				x.Path(),
-				x.Fields[ls.Arg],
-				err,
-			)
-			return
-		}
 		// Leave the list slot empty so equivalent and overlapping spellings share one base key.
 		parts := make([]string, len(args))
 		for i, a := range args {
@@ -272,18 +234,44 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 			}
 		}
 		key := strings.Join(parts, "\x00")
-		// Empty Keywords keeps members explicit: no fold back to All, and an empty set renders "" and holds nothing.
-		list := listval.Canonical(items, ls.Sep, listval.Keywords{})
-		parts[listIdx] = list
-		out = append(out, heldResource{
-			resource: resourceFor(def, key),
-			// Split once per line so conflict tests do not re-split per candidate pair.
-			members: listval.Split(list, ls.Sep),
-			display: strings.Join(parts, "\x00"),
-			isList:  true,
-		})
+		held := heldResource{resource: resourceFor(def, key), display: key}
+		if listIdx >= 0 {
+			ls := def.ListSpec
+			items, ok := resolveListArg(x, ls, d, "exclusive-resource ordering")
+			if !ok {
+				return
+			}
+			parts[listIdx] = listval.Canonical(items, ls.Sep, ls.Keywords())
+			held.members = listval.Intervals(items)
+			held.display = strings.Join(parts, "\x00")
+			held.isList = true
+		}
+		out = append(out, held)
 	})
 	return out
+}
+
+// resolveListArg returns a node's semantic list items, warning that the named ordering is skipped when the value cannot be resolved.
+func resolveListArg(
+	x *tree.Node,
+	ls schema.ListStrategy,
+	d *diag.Diagnostics,
+	skipped string,
+) ([]string, bool) {
+	items, err := listval.Resolve(x.Fields[ls.Arg], ls.Sep, ls.Keywords())
+	if err != nil {
+		d.AddAt(
+			x.Line,
+			diag.Warning,
+			"%s: unresolvable list %q: %s for this line skipped (%v)",
+			x.Path(),
+			x.Fields[ls.Arg],
+			skipped,
+			err,
+		)
+		return nil, false
+	}
+	return items, true
 }
 
 // resourceFor builds a resource for def keyed by key, falling back to the definition itself when the Kind is empty.
@@ -317,8 +305,7 @@ func (dv *differ) deriveMoveEdges() {
 			continue
 		}
 		for _, r := range resourcesHeld(src, dv.d) {
-			// list resources share one bucket per base key, so this scans
-			// releases × claims; interval-tree the bucket if a config makes it hurt.
+			// ponytail: releases × claims per bucket, and a Unique-only-list def buckets under the empty key; sort by low bound if a config makes it hurt.
 			for _, old := range freed[r.resource] {
 				if old.op != i && old.conflicts(r) {
 					dv.addEdge(old.op, i, moveReason(r))
@@ -330,10 +317,10 @@ func (dv *differ) deriveMoveEdges() {
 
 // conflicts reports a conflict for two non-list resources, or for two list resources whose members overlap; an empty set holds nothing and never conflicts.
 func (a heldResource) conflicts(b heldResource) bool {
-	if !a.isList || !b.isList {
-		return !a.isList && !b.isList
+	if a.isList && b.isList {
+		return a.members.Intersects(b.members)
 	}
-	return a.members.Intersects(b.members)
+	return !a.isList && !b.isList
 }
 
 // moveReason formats an exclusive resource for a cycle warning.
