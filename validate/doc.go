@@ -5,8 +5,9 @@
 // assembled tree. A relation matches labels: a node's Kind name plus its
 // Tags. Sibling-scope relations compare direct children of one parent only;
 // top-level nodes are siblings under the sentinel root. CommitCheck first
-// calls schema.ValidateRelations, so a relation that could never resolve is
-// reported against the schema rather than against the configuration.
+// calls schema.ValidateRelations, so a relation that could never resolve, or
+// that pairs a scope and a polarity no checker implements, is reported against
+// the schema rather than against the configuration.
 //
 // Invalid values, unresolved references, and duplicate keys are Errors in all
 // policies. diag.Policy controls only unknown input during parsing. An

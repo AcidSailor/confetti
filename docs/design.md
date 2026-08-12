@@ -216,8 +216,10 @@ The explanations record constraints that tests do not show.
   the exclusion it converges toward. The emitted order still has to be one a
   device accepts, so `deriveExclusionEdges` puts the removal of every
   conflicting sibling before the operation that installs its excluder
-  (`no switchport` before `ip address`). Every exclusion edge points from a
-  removal to an add, so exclusions alone cannot form a cycle.
+  (`no switchport` before `ip address`). Exclusion edges between a pure removal
+  and a pure add cannot cycle. An operation that both removes and adds
+  (`Replace`, cross-definition `Modify`) sits at either end, so a pair of them
+  can cycle and relies on the cycle break like any other derived edge.
 - **Absent relations derive no existence edges.** Only tree-scope `Present`
   relations reach `refsOf` and `requirementsOf`; an exclusion asserts what
   must not exist and so defines no definer to order against.

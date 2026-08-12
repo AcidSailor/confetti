@@ -42,9 +42,7 @@ const (
 	Absent
 )
 
-// Relation constrains this node against nodes carrying Label; a label is a Kind name or a Tag name.
-// Build relations with Ref, Requires, or ExcludeTag: the zero value is not a usable relation, and
-// FromArg and TargetKey are set together or not at all. See ValidateRelations.
+// Relation constrains this node against nodes carrying Label; build one with Ref, Requires, or ExcludeTag.
 type Relation struct {
 	Label     string   // The label to look for.
 	FromArg   string   // "" checks presence only; otherwise this capture must equal TargetKey.
@@ -511,7 +509,7 @@ func (n *Node) Labels() []string {
 		// Clone so a caller appending to the result cannot write into TagNames.
 		return slices.Clone(n.TagNames)
 	}
-	return append([]string{n.KindName}, n.TagNames...)
+	return slices.Concat([]string{n.KindName}, n.TagNames)
 }
 
 // HasLabel reports whether name is this definition's Kind or one of its Tags.

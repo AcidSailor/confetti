@@ -9,16 +9,22 @@ import (
 // target identifies one indexed key value: the label, its key argument, and the value.
 type target struct{ label, arg, val string }
 
+// checker holds the label index CommitCheck builds once and reports against.
+type checker struct {
+	// index holds every declared key value so tree-scope relations resolve against it.
+	index map[target]bool
+	// present records whether any instance carries each label.
+	present map[string]bool
+	d       *diag.Diagnostics
+}
+
 // CommitCheck validates relations (references, prerequisites, exclusions) against the assembled tree.
 func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 	// Report unresolvable relations here because a declaration a config never instantiates still constrains nothing.
 	if cfg.Schema != nil {
 		cfg.Schema.ValidateRelations(d)
 	}
-	// Index every declared key value under each label so tree-scope relations resolve against it.
-	index := map[target]bool{}
-	// Record whether any instance carries each label.
-	present := map[string]bool{}
+	c := checker{index: map[target]bool{}, present: map[string]bool{}, d: d}
 
 	tree.Walk(cfg, func(n *tree.Node) {
 		def := n.Def
@@ -26,9 +32,9 @@ func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 			return
 		}
 		for _, label := range def.Labels() {
-			present[label] = true
+			c.present[label] = true
 			for _, arg := range def.KeyArgs {
-				index[target{label, arg, n.Fields[arg]}] = true
+				c.index[target{label, arg, n.Fields[arg]}] = true
 			}
 		}
 	})
@@ -44,7 +50,7 @@ func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 				continue
 			}
 			for _, v := range vals {
-				checkRelation(cfg, n, rel, v, present, index, d)
+				c.check(n, rel, v)
 			}
 		}
 	})
@@ -66,81 +72,46 @@ func relValues(
 	return []string{n.Fields[rel.FromArg]}, true
 }
 
-// checkRelation reports a diagnostic when one relation value is unsatisfied or in conflict.
-func checkRelation(
-	cfg *tree.Config,
-	n *tree.Node,
-	rel schema.Relation,
-	v string,
-	present map[string]bool,
-	index map[target]bool,
-	d *diag.Diagnostics,
-) {
-	if rel.Want == schema.Present {
-		if relationSatisfied(n, rel, v, present, index) {
-			return
-		}
-		if rel.FromArg == "" {
-			d.AddAt(
+// check reports a diagnostic when one relation value is unsatisfied or in conflict.
+func (c checker) check(n *tree.Node, rel schema.Relation, v string) {
+	// ValidateRelations rejects every other scope and polarity pairing.
+	if rel.IsExclusion() {
+		if hit := findSibling(n, rel, v); hit != nil {
+			c.d.AddAt(
 				n.Line,
 				diag.Error,
-				"%s: requires a %s instance",
-				n.Path(), rel.Label,
+				"%s: mutually exclusive with %q (line %d) via label %q",
+				n.Path(), hit.Text, hit.Line, rel.Label,
 			)
-			return
 		}
-		d.AddAt(
+		return
+	}
+	if c.satisfied(rel, v) {
+		return
+	}
+	if rel.FromArg == "" {
+		c.d.AddAt(
 			n.Line,
 			diag.Error,
-			"%s: %s %q does not exist",
-			n.Path(), rel.Label, v,
+			"%s: requires a %s instance",
+			n.Path(), rel.Label,
 		)
 		return
 	}
-	if hit := findConflict(cfg, n, rel, v); hit != nil {
-		d.AddAt(
-			n.Line,
-			diag.Error,
-			"%s: mutually exclusive with %q (line %d) via label %q",
-			n.Path(), hit.Text, hit.Line, rel.Label,
-		)
-	}
+	c.d.AddAt(
+		n.Line,
+		diag.Error,
+		"%s: %s %q does not exist",
+		n.Path(), rel.Label, v,
+	)
 }
 
-// relationSatisfied reports whether any node in scope provides the label and value.
-func relationSatisfied(
-	n *tree.Node,
-	rel schema.Relation,
-	v string,
-	present map[string]bool,
-	index map[target]bool,
-) bool {
-	if rel.Scope == schema.ScopeSiblings {
-		return findSibling(n, rel, v) != nil
-	}
+// satisfied reports whether any node in the tree provides the label and value.
+func (c checker) satisfied(rel schema.Relation, v string) bool {
 	if rel.FromArg == "" {
-		return present[rel.Label]
+		return c.present[rel.Label]
 	}
-	return index[target{rel.Label, rel.TargetKey, v}]
-}
-
-// findConflict returns the first node other than n that matches rel within its scope.
-func findConflict(
-	cfg *tree.Config,
-	n *tree.Node,
-	rel schema.Relation,
-	v string,
-) *tree.Node {
-	if rel.Scope == schema.ScopeSiblings {
-		return findSibling(n, rel, v)
-	}
-	var hit *tree.Node
-	tree.Walk(cfg, func(x *tree.Node) {
-		if hit == nil && relMatches(x, n, rel, v) {
-			hit = x
-		}
-	})
-	return hit
+	return c.index[target{rel.Label, rel.TargetKey, v}]
 }
 
 // findSibling returns the first direct sibling of n that matches rel, or nil.

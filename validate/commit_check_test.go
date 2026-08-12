@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -350,4 +351,26 @@ func TestCommitCheckInvalidRelationEnumsAreErrors(t *testing.T) {
 	require.True(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), `invalid scope 2`)
 	assert.Contains(t, d.String(), `invalid polarity 2`)
+}
+
+func TestCommitCheckUnsupportedRelationShapesAreErrors(t *testing.T) {
+	// Only Ref, Requires, and ExcludeTag shapes have checkers, so the other two
+	// scope and polarity pairings must be rejected instead of silently ignored.
+	s := schema.New()
+	n := s.Node("feature").Tag("feature")
+	n.Relations = append(n.Relations,
+		schema.Relation{
+			Label: "feature",
+			Scope: schema.ScopeTree,
+			Want:  schema.Absent,
+		},
+		schema.Relation{
+			Label: "feature",
+			Scope: schema.ScopeSiblings,
+			Want:  schema.Present,
+		},
+	)
+	d := checkText(t, s, "feature\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Equal(t, 2, strings.Count(d.String(), "is unsupported"), d.String())
 }

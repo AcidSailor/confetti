@@ -39,17 +39,10 @@ func TestEngineImportRenderRoundTrip(t *testing.T) {
 
 // TestEngineCommitCheckExcludeTag is the issue #9 reproduction: an L2 line and an L3 line under one port.
 func TestEngineCommitCheckExcludeTag(t *testing.T) {
-	s := schema.New()
-	iface := s.Node("interface {{ name:word }}").
-		Card(schema.ZeroToN).Key("name")
-	iface.Child("switchport").Card(schema.ZeroToOne).
-		Tag("l2").ExcludeTag("l3")
-	iface.Child("switchport access vlan {{ vlan:uint }}").
-		Card(schema.ZeroToOne).Tag("l2").ExcludeTag("l3")
-	iface.Child("ip address {{ addr:word }}").
-		Card(schema.ZeroToOne).Tag("l3").ExcludeTag("l2")
-
-	e := confetti.New(s, confetti.WithPolicy(diag.Policy{Strict: true}))
+	e := confetti.New(
+		l2l3Schema(),
+		confetti.WithPolicy(diag.Policy{Strict: true}),
+	)
 	cfg, d := e.Import("interface Ethernet1/1\n  switchport\n" +
 		"  switchport access vlan 20\n  ip address 10.0.0.1/24\n")
 	require.False(t, d.HasErrors(), d.String())
