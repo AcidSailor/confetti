@@ -191,3 +191,39 @@ func TestCanonicalPrefersKeywords(t *testing.T) {
 	assert.Equal(t, "", Canonical(nil, "", Keywords{}))
 	assert.Equal(t, "1-3", Canonical([]string{"1", "2", "3"}, "", Keywords{}))
 }
+
+func TestMembersIntersectWithoutExpandingRanges(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+		why  string
+	}{
+		{a: "1-65536", b: "32768-70000", want: true, why: "overlapping ranges"},
+		{a: "1-100", b: "101-200", want: false, why: "adjacent but disjoint"},
+		{a: "1-3,blue", b: "blue,9", want: true, why: "shared lexical item"},
+		{a: "red", b: "blue", want: false, why: "distinct lexical items"},
+		{a: "", b: "", want: false, why: "empty sets hold nothing"},
+		{a: "", b: "1-3", want: false, why: "empty set against a range"},
+		// Expand gives zero-padded and plain numeric spellings the same identity.
+		{a: "007", b: "7", want: true, why: "zero-padded spelling"},
+		{a: "007", b: "1-10", want: true, why: "zero-padded inside a range"},
+		{a: "0070", b: "1-10", want: false, why: "zero-padded outside a range"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.why, func(t *testing.T) {
+			a, b := members(t, tt.a), members(t, tt.b)
+			assert.Equal(t, tt.want, a.Intersects(b))
+			assert.Equal(t, tt.want, b.Intersects(a))
+		})
+	}
+}
+
+func members(t *testing.T, raw string) Members {
+	t.Helper()
+	if raw == "" {
+		return nil
+	}
+	items, err := Expand(raw, "")
+	require.NoError(t, err)
+	return Intervals(items)
+}

@@ -122,6 +122,50 @@ func Canonical(items []string, sep string, kw Keywords) string {
 	return compressSorted(sorted, sep)
 }
 
+// Members represents a semantic item set as numeric intervals and literal items.
+type Members []member
+
+// member represents a closed numeric interval or a literal item when num is false.
+type member struct {
+	lo, hi int
+	text   string
+	num    bool
+}
+
+// Intervals converts resolved items to compact numeric intervals and literal items.
+func Intervals(items []string) Members {
+	out := make(Members, 0, len(items))
+	for _, it := range items {
+		n, ok := num(it)
+		switch k := len(out) - 1; {
+		case !ok:
+			out = append(out, member{text: it})
+		case k >= 0 && out[k].num && out[k].hi+1 >= n:
+			out[k].hi = max(out[k].hi, n)
+		default:
+			out = append(out, member{lo: n, hi: n, num: true})
+		}
+	}
+	return out
+}
+
+// Intersects reports whether two member sets overlap.
+func (m Members) Intersects(o Members) bool {
+	for _, x := range m {
+		for _, y := range o {
+			switch {
+			case x.num && y.num:
+				if x.lo <= y.hi && y.lo <= x.hi {
+					return true
+				}
+			case !x.num && !y.num && x.text == y.text:
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // exceptRest reports raw as "<Except> <list>", returning the list part.
 func exceptRest(raw string, kw Keywords) (string, bool) {
 	if kw.Except == "" {

@@ -251,6 +251,176 @@ func TestUniqueScopeDerivesMoveOnPartialKeyMatch(t *testing.T) {
 	assert.Equal(t, "no slot 1 owner alpha\nslot 1 owner beta\n", out)
 }
 
+// prioListSchema returns a keyed schema with a unique list argument.
+func prioListSchema() *schema.Schema {
+	s := schema.New()
+	s.Node("priority {{ ids:word }} value {{ value:word }}").
+		Card(schema.ZeroToN).Kind("prio").Key("value").Unique("ids").
+		List("ids", "uint").
+		ListDelta("priority {{ ids }} value {{ value }}",
+			"no priority {{ ids }} value {{ value }}")
+	return s
+}
+
+func TestUniqueListArgUsesCompactSemanticResources(t *testing.T) {
+	s := prioListSchema()
+	// Equivalent list spellings must order the release before the claim.
+	out, d := orderedDiff(t, s,
+		"priority 1-100 value 10\n",
+		"priority 1-50,51-100 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"no priority 1-100 value 10\npriority 1-50,51-100 value 20\n", out)
+
+	// Overlap requires ordering without expanding the ranges.
+	out, d = orderedDiff(t, s,
+		"priority 1-65536 value 10\n",
+		"priority 65536-70000 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"no priority 1-65536 value 10\npriority 65536-70000 value 20\n", out)
+}
+
+func TestUniqueListArgDisjointMembersDeriveNoMoveEdge(t *testing.T) {
+	// Disjoint member sets retain declaration order.
+	out, d := orderedDiff(t, prioListSchema(),
+		"priority 1-50 value 10\n",
+		"priority 51-100 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"priority 51-100 value 20\nno priority 1-50 value 10\n", out)
+}
+
+func TestUniqueListArgZeroPaddedMembersConflict(t *testing.T) {
+	// Numeric member identity ignores zero padding.
+	s := prioListSchema()
+	out, d := orderedDiff(t, s,
+		"priority 007 value 10\n",
+		"priority 7 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "no priority 007 value 10\npriority 7 value 20\n", out)
+
+	out, d = orderedDiff(t, s,
+		"priority 1-10 value 10\n",
+		"priority 007 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "no priority 1-10 value 10\npriority 007 value 20\n", out)
+}
+
+func TestUniqueListArgMultipleReleasesPrecedeOneClaim(t *testing.T) {
+	// Two lines each hold part of the claimed set; both releases must precede it.
+	out, d := orderedDiff(t, prioListSchema(),
+		"priority 1-50 value 10\npriority 51-100 value 20\n",
+		"priority 1-100 value 30\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"no priority 51-100 value 20\nno priority 1-50 value 10\n"+
+			"priority 1-100 value 30\n", out)
+}
+
+func TestUniqueListArgMoveEdgesDeterministic(t *testing.T) {
+	// TestOppositeMovesDeterministic covers scalar resources; this test covers lists.
+	var first string
+	for range 5 {
+		out, d := orderedDiff(t, prioListSchema(),
+			"priority 1-50 value 10\npriority 40-90 value 20\n",
+			"priority 30-60 value 30\npriority 80-99 value 40\n")
+		require.False(t, d.HasErrors(), d.String())
+		if first == "" {
+			first = out
+		}
+		assert.Equal(t, first, out)
+	}
+}
+
+// prioKeywordSchema uses a rest capture for multi-word Except values.
+func prioKeywordSchema() *schema.Schema {
+	s := schema.New()
+	s.Node("priority {{ value:word }} ids {{ ids:rest }}").
+		Card(schema.ZeroToN).Kind("prio").Key("value").Unique("ids").
+		List("ids", "uint").
+		ListKeywords("none", "all", "except", "1-10").
+		ListDelta("priority {{ value }} ids {{ ids }}",
+			"no priority {{ value }} ids {{ ids }}")
+	return s
+}
+
+func TestUniqueListArgKeywordSetsCompareByMembers(t *testing.T) {
+	// Resolve compares keyword spellings by their semantic member sets.
+	s := prioKeywordSchema()
+
+	// All overlaps every non-empty subset of its domain.
+	out, d := orderedDiff(t, s,
+		"priority 10 ids all\n",
+		"priority 20 ids 3-5\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"no priority 10 ids all\npriority 20 ids 3-5\n", out)
+
+	// Except does not overlap an excluded member.
+	out, d = orderedDiff(t, s,
+		"priority 10 ids except 5\n",
+		"priority 20 ids 5\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"priority 20 ids 5\nno priority 10 ids except 5\n", out)
+
+	// None does not overlap any set, including itself.
+	out, d = orderedDiff(t, s,
+		"priority 10 ids none\n",
+		"priority 20 ids none\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t,
+		"priority 20 ids none\nno priority 10 ids none\n", out)
+}
+
+func TestUniqueListArgSeparatorMismatchConflictsBothDirections(t *testing.T) {
+	// Each definition must resolve its list with its own separator in both directions.
+	build := func() *schema.Schema {
+		s := prioListSchema()
+		s.Node("backup {{ ids:word }} value {{ value:word }}").
+			Card(schema.ZeroToN).Kind("prio").Key("value").Unique("ids").
+			List("ids", "uint").ListSep(";").
+			ListDelta("backup {{ ids }} value {{ value }}",
+				"no backup {{ ids }} value {{ value }}")
+		return s
+	}
+	out, d := orderedDiff(t, build(),
+		"backup 1;5 value 10\n", "priority 5 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "no backup 1;5 value 10\npriority 5 value 20\n", out)
+
+	out, d = orderedDiff(t, build(),
+		"priority 5 value 10\n", "backup 1;5 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "no priority 5 value 10\nbackup 1;5 value 20\n", out)
+
+	out, d = orderedDiff(t, build(),
+		"priority 9 value 10\n", "backup 1;5 value 20\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "backup 1;5 value 20\nno priority 9 value 10\n", out)
+}
+
+func TestUniqueListArgMalformedListWarnsNotSilent(t *testing.T) {
+	out, d := orderedDiff(t, prioListSchema(), "priority 100-1 value 10\n", "")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "unresolvable list")
+	assert.Contains(t, d.String(), `"100-1"`)
+	assert.Equal(t, "no priority 100-1 value 10\n", out)
+}
+
+func TestMoveReasonNamesListMembers(t *testing.T) {
+	// Cycle warnings must retain list members that the bucket key excludes.
+	cfg := mustParse(t, prioListSchema(), "priority 1-50,51-100 value 10\n")
+	d := diag.New()
+	held := resourcesHeld(topNode(cfg, 0), d)
+	require.False(t, d.HasErrors(), d.String())
+	require.Len(t, held, 1)
+	assert.Equal(t, `exclusive resource prio "1-100"`, moveReason(held[0]))
+	// The bucket key excludes the list.
+	assert.Equal(t, "", held[0].key)
+}
+
 func TestOppositeMovesDeterministic(t *testing.T) {
 	var first string
 	for range 5 {

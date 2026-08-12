@@ -21,6 +21,14 @@ type resource struct {
 	key  string
 }
 
+// heldResource adds list members and cycle-warning text to a resource.
+type heldResource struct {
+	resource
+	members listval.Members
+	display string
+	isList  bool
+}
+
 // edgeReasons stores the first recorded reason for each derived edge so lenient cycle warnings can identify the affected dependency.
 type edgeReasons map[[2]int]string
 
@@ -77,18 +85,8 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 		}
 		for _, r := range def.Refs {
 			if ls := def.ListSpec; ls.Arg != "" && ls.Arg == r.FromArg {
-				items, err := listval.Resolve(
-					x.Fields[ls.Arg], ls.Sep, ls.Keywords(),
-				)
-				if err != nil {
-					d.AddAt(
-						x.Line,
-						diag.Warning,
-						"%s: unresolvable list %q: ref-ordering edges for this line skipped (%v)",
-						x.Path(),
-						x.Fields[ls.Arg],
-						err,
-					)
+				items, ok := resolveListArg(x, ls, d, "ref-ordering edges")
+				if !ok {
 					continue
 				}
 				for _, it := range items {
@@ -212,9 +210,9 @@ func refReason(r resource) string {
 	return fmt.Sprintf("ref %s.%s=%q", r.kind, r.arg, r.key)
 }
 
-// resourcesHeld returns exclusive resources for keyed nodes by UniqueArgs or the full key.
-func resourcesHeld(n *tree.Node) []resource {
-	var out []resource
+// resourcesHeld returns comparable exclusive resources and warns about unresolvable lists.
+func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
+	var out []heldResource
 	n.Walk(func(x *tree.Node) {
 		def := x.Def
 		if def == nil || len(def.KeyArgs) == 0 {
@@ -224,29 +222,81 @@ func resourcesHeld(n *tree.Node) []resource {
 		if u := def.UniqueArgs; len(u) > 0 {
 			args = u
 		}
+		listIdx := -1
+		if def.ListSpec.Arg != "" {
+			listIdx = slices.Index(args, def.ListSpec.Arg)
+		}
+		// Exclude the list from the bucket key so overlapping spellings share a bucket.
 		parts := make([]string, len(args))
 		for i, a := range args {
-			parts[i] = x.Fields[a]
+			if i != listIdx {
+				parts[i] = x.Fields[a]
+			}
 		}
-		r := resource{kind: def.KindName, key: strings.Join(parts, "\x00")}
-		if r.kind == "" {
-			r.def = def
+		key := strings.Join(parts, "\x00")
+		held := heldResource{resource: resourceFor(def, key), display: key}
+		if listIdx >= 0 {
+			ls := def.ListSpec
+			items, ok := resolveListArg(x, ls, d, "exclusive-resource ordering")
+			if !ok {
+				return
+			}
+			parts[listIdx] = listval.Canonical(items, ls.Sep, ls.Keywords())
+			held.members = listval.Intervals(items)
+			held.display = strings.Join(parts, "\x00")
+			held.isList = true
 		}
-		out = append(out, r)
+		out = append(out, held)
 	})
 	return out
 }
 
+// resolveListArg resolves a list argument and warns when ordering must skip the line.
+func resolveListArg(
+	x *tree.Node,
+	ls schema.ListStrategy,
+	d *diag.Diagnostics,
+	skipped string,
+) ([]string, bool) {
+	items, err := listval.Resolve(x.Fields[ls.Arg], ls.Sep, ls.Keywords())
+	if err != nil {
+		d.AddAt(
+			x.Line,
+			diag.Warning,
+			"%s: unresolvable list %q: %s for this line skipped (%v)",
+			x.Path(),
+			x.Fields[ls.Arg],
+			skipped,
+			err,
+		)
+		return nil, false
+	}
+	return items, true
+}
+
+// resourceFor returns a Kind-keyed resource or uses the definition when Kind is empty.
+func resourceFor(def *schema.Node, key string) resource {
+	r := resource{kind: def.KindName, key: key}
+	if r.kind == "" {
+		r.def = def
+	}
+	return r
+}
+
 // deriveMoveEdges orders each resource release before a new claim on the same resource.
 func (dv *differ) deriveMoveEdges() {
-	freed := map[resource][]int{}
+	type release struct {
+		heldResource
+		op int
+	}
+	freed := map[resource][]release{}
 	for i, o := range dv.ops {
 		src := removedSubtree(o)
 		if src == nil {
 			continue
 		}
-		for _, r := range resourcesHeld(src) {
-			freed[r] = append(freed[r], i)
+		for _, r := range resourcesHeld(src, dv.d) {
+			freed[r.resource] = append(freed[r.resource], release{r, i})
 		}
 	}
 	for i, o := range dv.ops {
@@ -254,24 +304,33 @@ func (dv *differ) deriveMoveEdges() {
 		if src == nil {
 			continue
 		}
-		for _, r := range resourcesHeld(src) {
-			for _, j := range freed[r] {
-				if j != i {
-					dv.addEdge(j, i, moveReason(r))
+		for _, r := range resourcesHeld(src, dv.d) {
+			// Compare every release and claim in the bucket.
+			for _, old := range freed[r.resource] {
+				if old.op != i && old.conflicts(r) {
+					dv.addEdge(old.op, i, moveReason(r))
 				}
 			}
 		}
 	}
 }
 
+// conflicts reports whether two held resources claim the same exclusive value.
+func (a heldResource) conflicts(b heldResource) bool {
+	if a.isList && b.isList {
+		return a.members.Intersects(b.members)
+	}
+	return !a.isList && !b.isList
+}
+
 // moveReason formats an exclusive resource for a cycle warning.
-func moveReason(r resource) string {
-	name := r.kind
-	if name == "" && r.def != nil {
-		name = r.def.Template
+func moveReason(h heldResource) string {
+	name := h.kind
+	if name == "" && h.def != nil {
+		name = h.def.Template
 	}
 	return fmt.Sprintf("exclusive resource %s %q",
-		name, strings.ReplaceAll(r.key, "\x00", ","))
+		name, strings.ReplaceAll(h.display, "\x00", ","))
 }
 
 // requirement is one Requires declaration found in an op's subtree.
