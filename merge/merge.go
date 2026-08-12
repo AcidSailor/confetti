@@ -98,11 +98,12 @@ func (m *merger) level(outParent, partParent *tree.Node, part int) {
 	}
 }
 
-// mergeIdent gives each non-keyed ZeroToOne definition one slot per level, regardless of value.
+// mergeIdent gives each non-keyed ZeroToOne definition one slot per level.
 func mergeIdent(n *tree.Node) ident.Ident {
 	def := n.Def
 	if def != nil && len(def.KeyArgs) == 0 &&
-		def.Cardinality == schema.ZeroToOne {
+		def.Cardinality == schema.ZeroToOne &&
+		ident.CategoryOf(n) != ident.KindedSingle {
 		// Use the canonical toggle member so all declared partners share one slot.
 		return ident.Ident{Def: def.ToggleCanonical()}
 	}

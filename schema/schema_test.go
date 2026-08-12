@@ -842,3 +842,14 @@ func TestListContinuesSelfUnion(t *testing.T) {
 		c.ListDelta("vlan add {{ v }}", "vlan remove {{ v }}")
 	})
 }
+
+func TestKeyEmptyMatchingTypePanics(t *testing.T) {
+	s := New()
+	require.NoError(t, s.Registry.Register(value.Type{
+		Name:    "maybe",
+		Pattern: `[a-z]*`,
+	}))
+	assert.Panics(t, func() {
+		s.Node("neighbor{{ g:maybe }}").Key("g")
+	})
+}

@@ -13,7 +13,8 @@ type Category int
 const (
 	Unmatched        Category = iota // def == nil
 	Keyed                            // len(KeyArgs()) > 0
-	IdempotentSingle                 // idempotent && card in {ZeroToOne, One}
+	KindedSingle                     // A Kind identifies one unkeyed slot.
+	IdempotentSingle                 // The definition identifies one reissuable slot.
 	FullLine                         // everything else
 )
 
@@ -25,15 +26,32 @@ func CategoryOf(n *tree.Node) Category {
 		return Unmatched
 	case len(def.KeyArgs) > 0:
 		return Keyed
-	case def.Idempotent &&
-		(def.Cardinality == schema.ZeroToOne || def.Cardinality == schema.One):
+	case KindedSingleDef(def):
+		return KindedSingle
+	case def.Idempotent && SingleOccupancy(def):
 		return IdempotentSingle
 	default:
 		return FullLine
 	}
 }
 
-// Ident pairs keyed nodes by Kind and key across sibling templates, and other nodes by definition; block bodies are excluded.
+// SingleOccupancy reports whether at most one instance of the definition can exist per level.
+func SingleOccupancy(def *schema.Node) bool {
+	return def.Cardinality == schema.ZeroToOne || def.Cardinality == schema.One
+}
+
+// SlotDef reports whether a definition has one negatable, unkeyed slot per level.
+func SlotDef(def *schema.Node) bool {
+	return def != nil && len(def.KeyArgs) == 0 &&
+		!def.EmptyOnRemove && SingleOccupancy(def)
+}
+
+// KindedSingleDef reports whether a definition pairs by Kind alone.
+func KindedSingleDef(def *schema.Node) bool {
+	return SlotDef(def) && def.KindName != "" && len(def.ToggleGroup) == 0
+}
+
+// Ident is a node's pairing identity.
 type Ident struct {
 	Def  *schema.Node
 	Kind string
@@ -50,6 +68,8 @@ func Of(n *tree.Node) Ident {
 			return Ident{Kind: k, Key: KeyValue(n)}
 		}
 		return Ident{Def: n.Def, Key: KeyValue(n)}
+	case KindedSingle:
+		return Ident{Kind: n.Def.KindName}
 	case IdempotentSingle:
 		// Exclude the value so instances of the same slot pair.
 		return Ident{Def: n.Def}

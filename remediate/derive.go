@@ -2,6 +2,7 @@ package remediate
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/acidsailor/confetti/diag"
@@ -34,6 +35,7 @@ func (r edgeReasons) put(from, to int, why string) {
 func (dv *differ) buildGraph() {
 	dv.g = graph.New(opViews(dv.ops))
 	dv.why = edgeReasons{}
+	dv.deriveSlotCleanupEdges()
 	dv.deriveRefEdges()
 	dv.deriveMoveEdges()
 	dv.deriveRequireEdges()
@@ -109,20 +111,46 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 	return out
 }
 
-// addedSubtree returns the subtree an operation creates, or nil when it creates none.
+// addedSubtree returns the subtree an operation creates, or nil when it creates none; a Replace creates its intended half.
 func addedSubtree(o op) *tree.Node {
-	if o.action == graph.Add {
+	if o.action == graph.Add || o.action == graph.Replace {
 		return o.src
 	}
 	return nil
 }
 
-// removedSubtree returns the subtree an operation deletes, or nil when it deletes none.
+// removedSubtree returns the subtree an operation deletes, including the old half of a Replace or cross-definition Modify.
 func removedSubtree(o op) *tree.Node {
-	if o.action == graph.Remove {
+	switch o.action {
+	case graph.Remove:
 		return o.src
+	case graph.Replace:
+		return o.runSrc
+	case graph.Modify:
+		if o.runSrc != nil && o.src.Def != o.runSrc.Def {
+			return o.runSrc
+		}
 	}
 	return o.flipRun
+}
+
+// deriveSlotCleanupEdges orders extra stale spellings before the operation that reissues their Kind-paired slot.
+func (dv *differ) deriveSlotCleanupEdges() {
+	for i, rm := range dv.ops {
+		if rm.action != graph.Remove ||
+			ident.CategoryOf(rm.src) != ident.KindedSingle {
+			continue
+		}
+		id := ident.Of(rm.src)
+		for j, add := range dv.ops {
+			if i == j || add.action == graph.Remove ||
+				ident.CategoryOf(add.src) != ident.KindedSingle ||
+				id != ident.Of(add.src) || !slices.Equal(rm.secs, add.secs) {
+				continue
+			}
+			dv.addEdge(i, j, "single-occupancy slot cleanup")
+		}
+	}
 }
 
 // definerIndex maps each resource defined by the selected subtrees to the operation with the smallest baseline key.
@@ -161,7 +189,12 @@ func (dv *differ) deriveRefEdges() {
 			}
 		}
 		// A Remove op deletes o.src; every other action can retarget away from runSrc or a superseded toggle partner.
-		for _, src := range []*tree.Node{o.runSrc, removedSubtree(o)} {
+		// Do not visit a Replace running subtree twice.
+		rm := removedSubtree(o)
+		if rm == o.runSrc {
+			rm = nil
+		}
+		for _, src := range [2]*tree.Node{o.runSrc, rm} {
 			if src == nil {
 				continue
 			}
@@ -217,10 +250,11 @@ func (dv *differ) deriveMoveEdges() {
 		}
 	}
 	for i, o := range dv.ops {
-		if o.action != graph.Add {
+		src := addedSubtree(o)
+		if src == nil {
 			continue
 		}
-		for _, r := range resourcesHeld(o.src) {
+		for _, r := range resourcesHeld(src) {
 			for _, j := range freed[r] {
 				if j != i {
 					dv.addEdge(j, i, moveReason(r))
@@ -309,10 +343,11 @@ func (dv *differ) deriveRequireEdges() {
 	// Index the first add for each Kind by the smallest baseline key.
 	addByKind := map[string]int{}
 	for i, o := range ops {
-		if o.action != graph.Add {
+		src := addedSubtree(o)
+		if src == nil {
 			continue
 		}
-		for _, r := range definesOf(o.src) {
+		for _, r := range definesOf(src) {
 			if j, ok := addByKind[r.kind]; !ok ||
 				ops[i].key.compare(ops[j].key) < 0 {
 				addByKind[r.kind] = i
@@ -358,15 +393,12 @@ func (dv *differ) deriveRequireEdges() {
 		}
 	}
 	for i, o := range ops {
-		for _, rq := range requirementsOf(o.src) {
-			if !validRequirement(rq) {
-				continue
-			}
-			if survivors[rq.kind] {
-				continue
-			}
-			switch o.action {
-			case graph.Add, graph.Modify, graph.Replace:
+		// The removal walk covers prerequisites for Remove operations.
+		if o.action != graph.Remove {
+			for _, rq := range requirementsOf(o.src) {
+				if !validRequirement(rq) || survivors[rq.kind] {
+					continue
+				}
 				if j, ok := addByKind[rq.kind]; ok {
 					if j != i {
 						dv.addEdge(j, i, requireReason(rq))
@@ -378,14 +410,14 @@ func (dv *differ) deriveRequireEdges() {
 					"%s: requires a %q but the goal defines none",
 					opPath(o), rq.kind,
 				)
-			case graph.Remove:
-				addRemovalEdges(i, rq)
 			}
 		}
-		if o.flipRun == nil {
+		// Remove prerequisites only after the operations that supersede their users.
+		rm := removedSubtree(o)
+		if rm == nil {
 			continue
 		}
-		for _, rq := range requirementsOf(o.flipRun) {
+		for _, rq := range requirementsOf(rm) {
 			if validRequirement(rq) && !survivors[rq.kind] {
 				addRemovalEdges(i, rq)
 			}

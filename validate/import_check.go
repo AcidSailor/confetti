@@ -68,6 +68,7 @@ func checkCardinality(
 
 	count := map[*schema.Node]int{}
 	seenKey := map[ident.Ident]bool{}
+	kindSeen := map[string]*tree.Node{}
 	// Map each canonical toggle member to the first present group member.
 	toggleSeen := map[*schema.Node]*tree.Node{}
 
@@ -108,7 +109,7 @@ func checkCardinality(
 				)
 			}
 			seenKey[id] = true
-		case def.Cardinality == schema.ZeroToOne || def.Cardinality == schema.One:
+		case ident.SingleOccupancy(def):
 			if count[def] > 1 {
 				d.AddAt(
 					c.Line,
@@ -117,19 +118,40 @@ func checkCardinality(
 					c.Path(),
 				)
 			}
+			// Same-definition duplicates were reported above.
+			if ident.KindedSingleDef(def) {
+				first, ok := kindSeen[def.KindName]
+				switch {
+				case !ok:
+					kindSeen[def.KindName] = c
+				case first.Def != def:
+					d.AddAt(
+						c.Line,
+						diag.Error,
+						"%s: duplicate spelling of slot %q (line %d)",
+						c.Path(),
+						first.Text,
+						first.Line,
+					)
+				}
+			}
 		}
 		checkCardinality(c, def.Children, d)
 	}
 
 	for _, sn := range allowed {
-		if sn.Cardinality == schema.One && len(sn.KeyArgs) == 0 &&
-			count[sn] == 0 {
-			d.Add(
-				diag.Error,
-				"%s: missing required %q",
-				parentPath(parent), sn.Template,
-			)
+		if sn.Cardinality != schema.One || len(sn.KeyArgs) > 0 ||
+			count[sn] > 0 {
+			continue
 		}
+		if ident.KindedSingleDef(sn) && kindSeen[sn.KindName] != nil {
+			continue
+		}
+		d.Add(
+			diag.Error,
+			"%s: missing required %q",
+			parentPath(parent), sn.Template,
+		)
 	}
 }
 

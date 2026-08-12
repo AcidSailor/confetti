@@ -57,16 +57,38 @@ func (dv *differ) collect(
 	prefix pathKey,
 ) {
 	d := dv.d
-	runByIdent := indexByIdent(runParent.Children, d)
-	intByIdent := indexByIdent(intParent.Children, d)
+	runByIdent := indexByIdent(runParent.Children)
+	runGroups := groupByIdent(runParent.Children)
+	intByIdent := indexByIdent(intParent.Children)
+	pairedRun := map[*tree.Node]bool{}
+	cleanupSlots := map[ident.Ident]bool{}
 
 	var intents []createIntent
 	for _, ic := range intParent.Children {
-		rc, ok := runByIdent[ident.Of(ic)]
-		switch {
-		case !ok:
+		id := ident.Of(ic)
+		// Apply only the first spelling of an ambiguous intended slot.
+		if first := intByIdent[id]; first != ic {
+			d.AddAt(ic.Line, dv.p.Severity(),
+				"%s: duplicate spelling of %q; only the first is applied",
+				ic.Path(), first.Text)
+			continue
+		}
+		group := runGroups[id]
+		if len(group) == 0 {
 			intents = append(intents, createIntent{src: ic, kind: ckAdd})
+			continue
+		}
+		rc, cleanup := runningCounterpart(group, ic)
+		pairedRun[rc] = true
+		cleanupSlots[id] = cleanup
+		switch {
 		case ic.Def != rc.Def && (ident.IsSection(ic) || ident.IsSection(rc)):
+			intents = append(intents,
+				createIntent{src: ic, run: rc, kind: ckReplace})
+		// A changed non-idempotent section header requires negation, not reissue.
+		case ident.IsSection(ic) && ic.Text != rc.Text &&
+			!ic.Def.Idempotent &&
+			ident.CategoryOf(ic) == ident.KindedSingle:
 			intents = append(intents,
 				createIntent{src: ic, run: rc, kind: ckReplace})
 		case ident.IsSection(ic):
@@ -92,14 +114,44 @@ func (dv *differ) collect(
 
 	var removes []*tree.Node
 	for _, rc := range runParent.Children {
-		if _, ok := intByIdent[ident.Of(rc)]; !ok {
+		id := ident.Of(rc)
+		if pairedRun[rc] {
+			continue
+		}
+		if cleanupSlots[id] {
+			if sameValue(rc, intByIdent[id]) {
+				continue
+			}
+			removes = append(removes, rc)
+			continue
+		}
+		if first := runByIdent[id]; first != rc {
+			// Negate each unpaired spelling of a live Kind slot.
+			if ident.CategoryOf(rc) == ident.KindedSingle &&
+				rc.Text != first.Text {
+				removes = append(removes, rc)
+				continue
+			}
+			// Negating another duplicate category would delete the kept slot.
+			d.AddAt(rc.Line, diag.Warning,
+				"%s: duplicate of %q ignored by diff (first occurrence wins)",
+				rc.Path(), first.Text)
+			continue
+		}
+		if _, ok := intByIdent[id]; !ok {
 			removes = append(removes, rc)
 		}
 	}
 	removes, flips := dropToggles(intents, removes, d)
+	dv.checkSplitSingles(intents, removes)
 
 	for i, ci := range intents {
 		k := append(slices.Clone(prefix), levelKey{0, dv.order[ci.src.Def], i})
+		// Cross-definition reissues delete the running definition.
+		if (ci.kind == ckModify || ci.kind == ckListDelta) &&
+			ci.src.Def != ci.run.Def && dv.refuseProtected(ci) {
+			continue
+		}
 		switch ci.kind {
 		case ckAdd:
 			dv.ops = append(dv.ops, op{
@@ -147,12 +199,7 @@ func (dv *differ) collect(
 			child := append(slices.Clone(secs), ci.src)
 			dv.collect(ci.run, ci.src, child, k)
 		case ckReplace:
-			// Refuse replacement when either paired definition is protected because replacement includes deletion.
-			runProtected := ci.run.Def != nil && ci.run.Def.Protected
-			srcProtected := ci.src.Def != nil && ci.src.Def.Protected
-			if runProtected || srcProtected {
-				d.Add(diag.Error, "%s: refusing to replace protected %q",
-					ci.run.Path(), ci.run.Text)
+			if dv.refuseProtected(ci) {
 				continue
 			}
 			// Refuse replacement of a running EmptyOnRemove section because it has no header negation form.
@@ -179,15 +226,72 @@ func (dv *differ) collect(
 			continue
 		}
 		// Refuse deletion of a protected node or descendant in both policies after toggle flips are removed.
-		if p := protectedIn(rc); p != nil {
-			d.Add(diag.Error, "%s: refusing to delete protected %q",
-				p.Path(), p.Text)
+		if dv.refuseDelete(rc) {
 			continue
 		}
 		dv.ops = append(dv.ops, op{
 			node: buildRemove(rc, d), src: rc,
 			action: graph.Remove, secs: secs, key: k,
 		})
+	}
+}
+
+// refuseProtected reports the protected node an intent would destroy and returns true when the intent must be dropped.
+func (dv *differ) refuseProtected(ci createIntent) bool {
+	p := protectedIn(ci.run)
+	if p == nil && ci.src.Def != nil && ci.src.Def.Protected {
+		p = ci.src
+	}
+	if p == nil {
+		return false
+	}
+	dv.d.Add(diag.Error, "%s: refusing to replace protected %q",
+		p.Path(), p.Text)
+	return true
+}
+
+// refuseDelete reports the protected node a removal would destroy and returns true when the removal must be dropped.
+func (dv *differ) refuseDelete(n *tree.Node) bool {
+	p := protectedIn(n)
+	if p == nil {
+		return false
+	}
+	dv.d.Add(diag.Error, "%s: refusing to delete protected %q",
+		p.Path(), p.Text)
+	return true
+}
+
+// checkSplitSingles reports separate Add and Remove operations for one slot.
+func (dv *differ) checkSplitSingles(
+	intents []createIntent,
+	removes []*tree.Node,
+) {
+	// Only negatable, unkeyed slots can split.
+	slots := make([]*tree.Node, 0, len(removes))
+	for _, rc := range removes {
+		if ident.SlotDef(rc.Def) {
+			slots = append(slots, rc)
+		}
+	}
+	for _, ci := range intents {
+		def := ci.src.Def
+		if ci.kind != ckAdd || !ident.SlotDef(def) {
+			continue
+		}
+		for _, rc := range slots {
+			rdef := rc.Def
+			// A declared toggle add supersedes its partner's removal.
+			if slices.Contains(def.ToggleGroup, rdef) {
+				continue
+			}
+			if rdef == def ||
+				(def.KindName != "" && rdef.KindName == def.KindName) {
+				dv.d.AddAt(ci.src.Line, dv.p.Severity(),
+					"%s: add and remove split single-occupancy slot %q;"+
+						" give the definition a Kind or MarkIdempotent",
+					ci.src.Path(), rc.Text)
+			}
+		}
 	}
 }
 
@@ -214,9 +318,7 @@ func (dv *differ) expandRemove(
 			dv.expandRemove(cc, child, k)
 			continue
 		}
-		if p := protectedIn(cc); p != nil {
-			d.Add(diag.Error, "%s: refusing to delete protected %q",
-				p.Path(), p.Text)
+		if dv.refuseDelete(cc) {
 			continue
 		}
 		dv.ops = append(dv.ops, op{

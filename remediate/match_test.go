@@ -135,10 +135,8 @@ func TestIndexByIdentFirstWins(t *testing.T) {
 		s,
 		"vlan 10\nvlan 10\n",
 	) // ImportCheck is not run here, so the duplicate reaches the index.
-	d := diag.New()
-	idx := indexByIdent(cfg.Root.Children, d)
+	idx := indexByIdent(cfg.Root.Children)
 	require.Len(t, idx, 1)
 	assert.Same(t, cfg.Root.Children[0], idx[ident.Of(cfg.Root.Children[0])])
-	// the loser is invisible to pairing, so it must be named, not silent
-	assert.Contains(t, d.String(), "duplicate")
+	assert.NotSame(t, cfg.Root.Children[1], idx[ident.Of(cfg.Root.Children[1])])
 }
