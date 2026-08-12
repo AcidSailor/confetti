@@ -19,9 +19,9 @@ jobs:
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write # Push the branch Claude works on
+      pull-requests: write # Open the PR from that branch
+      issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
@@ -41,8 +41,9 @@ jobs:
           plugin_marketplaces: "https://github.com/anthropics/claude-plugins-official.git"
           plugins: "pr-review-toolkit@claude-plugins-official"
 
-          # Read-only commands the review agents need to inspect the diff and CI
-          claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh run view:*),Bash(git diff:*),Bash(git log:*),Bash(go test:*),Bash(go vet:*),Bash(go build:*)"'
+          # Inspect the diff and CI, build/test, and publish the work as a PR.
+          # golangci-lint is not installed here on purpose — ci.yml runs `task ci` on the PR.
+          claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr create:*),Bash(gh run view:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(go test:*),Bash(go vet:*),Bash(go build:*),Bash(gofmt:*)"'
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
