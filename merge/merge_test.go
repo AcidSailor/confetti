@@ -683,3 +683,83 @@ func TestMergeResolverNodeWithoutDefinitionIsAnError(t *testing.T) {
 	assert.Contains(t, d.String(), "without a definition")
 	assert.Contains(t, got, "description uplink")
 }
+
+func TestMergeResolverMustKeepSlotIdentity(t *testing.T) {
+	// A fresh node carrying another key would leave the slot map naming a node that no longer fills it.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("vlan {{ id:uint }} name {{ name:word }}").
+		Card(schema.ZeroToN).Kind("vlan").Key("id")
+	rekey := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+		n := earlier.CloneValue()
+		n.Fields = map[string]string{"id": "20", "name": "x"}
+		n.Text = n.Def.Render(n.Fields)
+		return n, schema.Overridden
+	}
+	got, d := mergeText(t, s, merge.Options{Resolve: rekey},
+		"vlan 10 name a\n",
+		"vlan 10 name b\nvlan 20 name d\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "changed the slot's identity")
+	// The earlier value survives and the output holds no duplicate key.
+	assert.Equal(t, "vlan 10 name a\nvlan 20 name d\n", got)
+}
+
+func TestMergeResolverNodeAlreadyInTreeIsAnError(t *testing.T) {
+	// Adopting a node another tree owns would splice two trees together; both outcomes must report it.
+	for _, out := range []schema.Outcome{schema.Overridden, schema.Combined} {
+		s := schema.New()
+		testtypes.Fill(s.Registry)
+		i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+		i.Child("description {{ text:rest }}").
+			Card(schema.ZeroToOne).MarkIdempotent()
+		donor := parsePart(t, s, "interface eth1\n  description donor\n")
+		borrowed := donor.Root.Children[0].Children[0]
+		lend := func(_, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+			return borrowed, out
+		}
+		got, d := mergeText(t, s, merge.Options{Resolve: lend},
+			"interface eth1\n  description uplink\n",
+			"interface eth1\n  description downlink\n")
+		assert.True(t, d.HasErrors())
+		assert.Contains(t, d.String(), "already in a tree")
+		assert.Contains(t, got, "description uplink")
+	}
+}
+
+func TestMergeResolverCannotReplaceSectionWithFreshNode(t *testing.T) {
+	// A fresh node has no children, so letting it win a section would erase both stanzas.
+	rehead := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+		n := earlier.CloneValue()
+		n.Fields = map[string]string{"asn": "65003"}
+		n.Text = n.Def.Render(n.Fields)
+		return n, schema.Overridden
+	}
+	got, d := mergeText(t, testSchema(), merge.Options{Resolve: rehead},
+		"router bgp 65001\n  neighbor 10.0.0.1 remote-as 65001\n",
+		"router bgp 65002\n  neighbor 10.0.0.2 remote-as 65002\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "childless fresh node")
+	assert.Equal(t,
+		"router bgp 65001\n  neighbor 10.0.0.1 remote-as 65001\n", got)
+}
+
+func TestMergeCombinedKeepingEarlierReportsLostValue(t *testing.T) {
+	// Combined promises both values survive; handing back earlier leaves a leaf's later value in no node at all.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+	i.Child("description {{ text:rest }}").
+		Card(schema.ZeroToOne).
+		MarkIdempotent().
+		MergeFunc(func(earlier, _ *schema.Node) (*schema.Node, schema.Outcome) {
+			return earlier, schema.Combined
+		})
+	got, d := mergeText(t, s, declared,
+		"interface eth1\n  description uplink\n",
+		"interface eth1\n  description downlink\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "combined without part 2's value")
+	assert.Contains(t, d.String(), `(was "description downlink")`)
+	assert.Contains(t, got, "description uplink")
+}
