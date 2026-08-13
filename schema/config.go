@@ -38,7 +38,7 @@ func (o Op) String() string {
 // Node stores one parsed configuration line and its children.
 type Node struct {
 	Text       string
-	Def        *Def              // The matched schema node, or nil when unknown.
+	Def        *Def              // The matched definition, or nil when unknown.
 	Fields     map[string]string // Captured argument values; live, not a copy.
 	RealIndent int               // Raw parsed indentation column.
 	Line       int               // A 1-based source line, or zero when absent.

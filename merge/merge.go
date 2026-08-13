@@ -224,7 +224,7 @@ func (m *merger) slot(
 	if outcome == schema.Combined {
 		// Merging children across definitions produces a tree its own schema cannot re-parse.
 		prevDef := oc.Def
-		if node.Def != prevDef &&
+		if (oc.Def != pc.Def || node.Def != oc.Def) &&
 			(ident.IsSection(oc) || ident.IsSection(pc)) {
 			m.d.Add(diag.Error,
 				"%s: resolver combined sections bound to different definitions",
@@ -263,8 +263,12 @@ func (m *merger) slot(
 
 // freshNodeValid reports whether a resolver-constructed node keeps its identity through later stages, reporting an Error when it cannot.
 func (m *merger) freshNodeValid(outParent, node, pc *schema.Node) bool {
+	// Contested slots always carry definitions, so a definition-free fresh node can only lose identity.
 	if node.Def == nil {
-		return true
+		m.d.Add(diag.Error,
+			"%s: resolver returned a node without a definition",
+			pc.Path())
+		return false
 	}
 	// A text that does not render from its fields corrupts every later stage.
 	if node.Text != node.Def.Render(node.Fields) {

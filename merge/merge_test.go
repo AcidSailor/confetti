@@ -594,7 +594,7 @@ func TestMergeFuncCustomCombination(t *testing.T) {
 		s := schema.New()
 		testtypes.Fill(s.Registry)
 		i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
-		var desc *schema.Def = i.Child("description {{ text:rest }}").Card(schema.ZeroToOne).
+		desc := i.Child("description {{ text:rest }}").Card(schema.ZeroToOne).
 			MarkIdempotent()
 		desc.MergeFunc(
 			func(earlier, later *schema.Node) (*schema.Node, schema.Outcome) {
@@ -648,5 +648,38 @@ func TestMergeFuncRefusesExplicitly(t *testing.T) {
 		"interface eth1\n  description downlink\n")
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "conflicts with")
+	assert.Contains(t, got, "description uplink")
+}
+
+func TestMergeCombinedKeepingEarlierAcrossDefsIsAnError(t *testing.T) {
+	// Returning the earlier node as Combined across definitions must not silently drop the later stanza.
+	s := schema.New()
+	a := s.Node("mode {{ id:word }} a").Card(schema.ZeroToN).
+		Kind("mode").Key("id")
+	a.Child("a-child").Card(schema.ZeroToOne)
+	b := s.Node("mode {{ id:word }} b").Card(schema.ZeroToN).
+		Kind("mode").Key("id")
+	b.Child("b-child").Card(schema.ZeroToOne)
+	combine := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+		return earlier, schema.Combined
+	}
+	got, d := mergeText(t, s, merge.Options{Resolve: combine},
+		"mode 1 a\n  a-child\n",
+		"mode 1 b\n  b-child\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "different definitions")
+	assert.Equal(t, "mode 1 a\n  a-child\n", got)
+}
+
+func TestMergeResolverNodeWithoutDefinitionIsAnError(t *testing.T) {
+	// A fresh definition-free node would pair by raw text and drift identity on the next Diff.
+	bad := func(_, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+		return schema.NewNode("description merged"), schema.Overridden
+	}
+	got, d := mergeText(t, testSchema(), merge.Options{Resolve: bad},
+		"interface eth1\n  description uplink\n",
+		"interface eth1\n  description downlink\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "without a definition")
 	assert.Contains(t, got, "description uplink")
 }
