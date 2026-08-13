@@ -7,7 +7,6 @@ import (
 	"github.com/acidsailor/confetti/internal/lcp"
 	"github.com/acidsailor/confetti/remediate"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 const (
@@ -62,7 +61,7 @@ func renderChange(b *strings.Builder, c remediate.Change, depth int) {
 }
 
 // writeTree writes a signed node and its complete subtree.
-func writeTree(b *strings.Builder, sign string, n *tree.Node, depth int) {
+func writeTree(b *strings.Builder, sign string, n *schema.Node, depth int) {
 	writeLine(b, sign, depth, lineText(n))
 	if def := n.Def; def != nil && def.Block.Kind != schema.BlockNone {
 		// Preserve the block body at column zero after the sign.
@@ -80,7 +79,7 @@ func writeTree(b *strings.Builder, sign string, n *tree.Node, depth int) {
 }
 
 // lineText renders a matched node canonically and returns raw text for a node without a definition.
-func lineText(n *tree.Node) string {
+func lineText(n *schema.Node) string {
 	if def := n.Def; def != nil {
 		return def.Render(n.Fields)
 	}

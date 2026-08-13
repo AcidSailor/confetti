@@ -11,7 +11,6 @@ import (
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/transform"
-	"github.com/acidsailor/confetti/tree"
 	"github.com/acidsailor/confetti/validate"
 )
 
@@ -24,7 +23,7 @@ type Engine struct {
 	exportText   []transform.TextRule
 	importTree   []transform.TreeTransform
 	exportTree   []transform.TreeTransform
-	commitChecks []func(*tree.Config, *diag.Diagnostics)
+	commitChecks []func(*schema.Config, *diag.Diagnostics)
 }
 
 // Option configures an Engine.
@@ -61,7 +60,7 @@ func WithExportTree(ts ...transform.TreeTransform) Option {
 }
 
 // WithCommitChecks appends whole-tree validators, which report into d and must not modify cfg, after the built-in commit check.
-func WithCommitChecks(fns ...func(*tree.Config, *diag.Diagnostics)) Option {
+func WithCommitChecks(fns ...func(*schema.Config, *diag.Diagnostics)) Option {
 	for _, fn := range fns {
 		if fn == nil {
 			panic("confetti: WithCommitChecks with nil func")
@@ -80,7 +79,7 @@ func New(s *schema.Schema, opts ...Option) *Engine {
 }
 
 // Import transforms, parses, folds, and validates configuration text.
-func (e *Engine) Import(text string) (*tree.Config, *diag.Diagnostics) {
+func (e *Engine) Import(text string) (*schema.Config, *diag.Diagnostics) {
 	d := diag.New()
 	text = applyTextOutsideBlocks(e.schema, e.importText, text)
 	cfg := parse.Parse(e.schema, text, e.unknown, d)
@@ -118,13 +117,13 @@ func applyTextOutsideBlocks(
 }
 
 // CommitCheck runs built-in and registered checks against an assembled tree.
-func (e *Engine) CommitCheck(cfg *tree.Config) *diag.Diagnostics {
+func (e *Engine) CommitCheck(cfg *schema.Config) *diag.Diagnostics {
 	d := diag.New()
 	e.commitCheck(cfg, d)
 	return d
 }
 
-func (e *Engine) commitCheck(cfg *tree.Config, d *diag.Diagnostics) {
+func (e *Engine) commitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	validate.CommitCheck(cfg, d)
 	// Each validator collects into its own Diagnostics so it cannot drop what earlier checks recorded.
 	for _, fn := range e.commitChecks {
@@ -135,7 +134,7 @@ func (e *Engine) commitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 }
 
 // Render applies tree transforms, renders canonical text, and applies text rules outside raw blocks.
-func (e *Engine) Render(cfg *tree.Config) (string, *diag.Diagnostics) {
+func (e *Engine) Render(cfg *schema.Config) (string, *diag.Diagnostics) {
 	d := diag.New()
 	transform.ApplyTree(e.exportTree, cfg)
 	out := render.Render(cfg)
@@ -145,7 +144,7 @@ func (e *Engine) Render(cfg *tree.Config) (string, *diag.Diagnostics) {
 
 // Remediate checks intended and returns the operation-tagged difference from running to intended.
 func (e *Engine) Remediate(
-	running, intended *tree.Config,
+	running, intended *schema.Config,
 ) (*remediate.Result, *diag.Diagnostics) {
 	d := diag.New()
 	e.commitCheck(intended, d)
@@ -156,7 +155,7 @@ func (e *Engine) Remediate(
 
 // Rollback checks running and returns the inverse of Remediate with the same argument order; restoration uses canonical parsed content, not original bytes.
 func (e *Engine) Rollback(
-	running, intended *tree.Config,
+	running, intended *schema.Config,
 ) (*remediate.Result, *diag.Diagnostics) {
 	d := diag.New()
 	e.commitCheck(running, d)
@@ -167,7 +166,7 @@ func (e *Engine) Rollback(
 
 // Compare returns a git-diff-style view without commit-checking either input.
 func (e *Engine) Compare(
-	running, intended *tree.Config,
+	running, intended *schema.Config,
 ) (string, *diag.Diagnostics) {
 	res, d := remediate.Diff(running, intended, e.cycle)
 	return compare.Render(res.Changes), d
@@ -176,7 +175,7 @@ func (e *Engine) Compare(
 // Merge combines fragments in order without running a commit check; opts selects the conflict resolution per call because two callers of one engine can want different resolutions.
 func (e *Engine) Merge(
 	opts merge.Options,
-	parts ...*tree.Config,
-) (*tree.Config, *diag.Diagnostics) {
+	parts ...*schema.Config,
+) (*schema.Config, *diag.Diagnostics) {
 	return merge.Merge(e.schema, opts, parts...)
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/acidsailor/confetti/parse"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 func testSchema() *schema.Schema {
@@ -50,7 +49,7 @@ var (
 	declared = merge.Options{}
 )
 
-func parsePart(t *testing.T, s *schema.Schema, text string) *tree.Config {
+func parsePart(t *testing.T, s *schema.Schema, text string) *schema.Config {
 	t.Helper()
 	d := diag.New()
 	cfg := parse.Parse(s, text, parse.Reject, d)
@@ -66,7 +65,7 @@ func mergeText(
 	texts ...string,
 ) (string, *diag.Diagnostics) {
 	t.Helper()
-	parts := make([]*tree.Config, len(texts))
+	parts := make([]*schema.Config, len(texts))
 	for i, txt := range texts {
 		parts[i] = parsePart(t, s, txt)
 	}
@@ -500,7 +499,7 @@ func TestMergeCallerKeepLastResolvesUnknownConflicts(t *testing.T) {
 
 func TestMergeResolverTextMustRenderFromFields(t *testing.T) {
 	// A fresh resolver node whose text ignores its fields is rejected and the earlier value kept.
-	bad := func(earlier, _ *tree.Node, _ schema.MergeKind) (*tree.Node, merge.Outcome) {
+	bad := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, merge.Outcome) {
 		n := earlier.CloneValue()
 		n.Fields["text"] = "patched"
 		return n, merge.Overridden
@@ -542,8 +541,8 @@ func TestMergeResolverTextMustBindOwnDefinition(t *testing.T) {
 	i.Child("switchport mode trunk").Card(schema.ZeroToOne).Kind("mode")
 	gen := i.Child("switchport mode {{ m:word }}").
 		Card(schema.ZeroToOne).Kind("mode")
-	bad := func(_, _ *tree.Node, _ schema.MergeKind) (*tree.Node, merge.Outcome) {
-		n := tree.NewNode("")
+	bad := func(_, _ *schema.Node, _ schema.MergeKind) (*schema.Node, merge.Outcome) {
+		n := schema.NewNode("")
 		n.Def = gen
 		n.Fields = map[string]string{"m": "trunk"}
 		n.Text = gen.Render(n.Fields)
@@ -566,7 +565,7 @@ func TestMergeCombinedAcrossDefinitionsIsAnError(t *testing.T) {
 	b := s.Node("mode {{ id:word }} b").Card(schema.ZeroToN).
 		Kind("mode").Key("id")
 	b.Child("b-child").Card(schema.ZeroToOne)
-	combine := func(_, later *tree.Node, _ schema.MergeKind) (*tree.Node, merge.Outcome) {
+	combine := func(_, later *schema.Node, _ schema.MergeKind) (*schema.Node, merge.Outcome) {
 		return later, merge.Combined
 	}
 	got, d := mergeText(t, s, merge.Options{Resolve: combine},

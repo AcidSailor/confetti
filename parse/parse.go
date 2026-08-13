@@ -6,7 +6,6 @@ import (
 
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // Unknown selects how a command the grammar does not model is reported; the node is dropped from the tree under both values.
@@ -19,21 +18,21 @@ const (
 
 // blockCapture accumulates raw lines for an open block node until its terminator.
 type blockCapture struct {
-	node *tree.Node
+	node *schema.Node
 	body []string
 }
 
-// Parse builds a tree.Config from already-text-transformed config text.
+// Parse builds a schema.Config from already-text-transformed config text.
 func Parse(
 	s *schema.Schema,
 	text string,
 	unknown Unknown,
 	d *diag.Diagnostics,
-) *tree.Config {
-	cfg := tree.NewConfig(s)
+) *schema.Config {
+	cfg := schema.NewConfig(s)
 	sc := newScanner(s)
 	// nodes parallels the scanner stack; a nil entry marks an unknown frame.
-	nodes := []*tree.Node{cfg.Root}
+	nodes := []*schema.Node{cfg.Root}
 	dropped := 0
 	var blk *blockCapture
 
@@ -60,7 +59,9 @@ func Parse(
 			}
 			nodes = append(nodes[:st.depth-1], nil)
 		case stepMatched:
-			tn := liveParent(nodes[:st.depth-1]).AddChild(tree.NewNode(st.txt))
+			tn := liveParent(
+				nodes[:st.depth-1],
+			).AddChild(schema.NewNode(st.txt))
 			tn.Def, tn.Fields, tn.RealIndent = st.def, st.fields, st.indent
 			tn.Line = st.lineNo
 			if st.opensBlock {
@@ -94,7 +95,7 @@ func Parse(
 }
 
 // liveParent returns the nearest stack node that is not an unknown frame.
-func liveParent(nodes []*tree.Node) *tree.Node {
+func liveParent(nodes []*schema.Node) *schema.Node {
 	for _, n := range slices.Backward(nodes) {
 		if n != nil {
 			return n

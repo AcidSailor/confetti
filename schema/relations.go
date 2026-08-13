@@ -3,10 +3,10 @@ package schema
 import "github.com/acidsailor/confetti/diag"
 
 // Walk visits every definition reachable from the schema roots exactly once.
-func (s *Schema) Walk(fn func(*Node)) {
-	seen := map[*Node]bool{}
-	var walk func([]*Node)
-	walk = func(nodes []*Node) {
+func (s *Schema) Walk(fn func(*Def)) {
+	seen := map[*Def]bool{}
+	var walk func([]*Def)
+	walk = func(nodes []*Def) {
 		for _, n := range nodes {
 			if seen[n] {
 				continue
@@ -38,7 +38,7 @@ func (r Relation) IsExclusion() bool {
 func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 	kinds := map[string]bool{}
 	keysOf := map[string]map[string]bool{}
-	s.Walk(func(n *Node) {
+	s.Walk(func(n *Def) {
 		if n.KindName != "" {
 			kinds[n.KindName] = true
 		}
@@ -51,7 +51,7 @@ func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 			}
 		}
 	})
-	s.Walk(func(n *Node) {
+	s.Walk(func(n *Def) {
 		// A label cannot be both identity-bearing and non-identity metadata.
 		for _, name := range n.TagNames {
 			if kinds[name] {
@@ -67,7 +67,7 @@ func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 }
 
 // checkRelation reports one relation whose label or key match cannot resolve against any definition.
-func (n *Node) checkRelation(
+func (n *Def) checkRelation(
 	rel Relation,
 	keysOf map[string]map[string]bool,
 	d *diag.Diagnostics,

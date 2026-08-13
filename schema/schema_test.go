@@ -242,7 +242,7 @@ func TestToggleGroupThreeWay(t *testing.T) {
 	a := s.Node("duplex auto").Card(ZeroToOne)
 	f := s.Node("duplex full").Card(ZeroToOne)
 	h := s.Node("duplex half").Card(ZeroToOne).Toggles(a, f)
-	for _, m := range []*Node{a, f, h} {
+	for _, m := range []*Def{a, f, h} {
 		assert.Len(t, m.ToggleGroup, 3)
 		// Each member uses the first Toggles argument as canonical.
 		assert.Same(t, a, m.ToggleCanonical())
@@ -472,7 +472,7 @@ func TestListContinuesDeclaration(t *testing.T) {
 }
 
 func TestListSeamsPanics(t *testing.T) {
-	base := func(s *Schema) *Node {
+	base := func(s *Schema) *Def {
 		return s.Node("vlan {{ v:word }}").List("v", "uint")
 	}
 	tests := []struct {
@@ -671,7 +671,7 @@ func TestEmptyOnRemoveProtectedPanics(t *testing.T) {
 }
 
 func TestRespellAsRails(t *testing.T) {
-	mk := func() (*Schema, *Node) {
+	mk := func() (*Schema, *Def) {
 		s := New()
 		n := s.Node("acl {{ id:uint }} {{ act:word }}").Card(ZeroToN)
 		return s, n
@@ -720,7 +720,7 @@ func TestRespellAsRails(t *testing.T) {
 	assert.Panics(t, func() { blk.RespellAs("b2 {{ d }}") })
 }
 
-func mkNode(t *testing.T) *Node {
+func mkNode(t *testing.T) *Def {
 	t.Helper()
 	return New().Node("orphan {{ v:word }}").Card(ZeroToN)
 }
@@ -906,7 +906,7 @@ func TestTagAndExcludeTagHoldInBothCallOrders(t *testing.T) {
 		Kind("addr").Tag("l3").ExcludeTag("l2")
 	second := New().Node("ip address {{ a:word }}").
 		ExcludeTag("l2").Tag("l3").Kind("addr")
-	for _, n := range []*Node{first, second} {
+	for _, n := range []*Def{first, second} {
 		assert.Equal(t, want, n.Relations)
 		assert.Equal(t, []string{"addr", "l3"}, n.Labels())
 	}
@@ -933,8 +933,8 @@ func TestWalkVisitsSharedChildrenOnce(t *testing.T) {
 	s := New()
 	shared := s.Node("shutdown")
 	s.Node("interface {{ n:word }}").Adopt(shared)
-	seen := map[*Node]int{}
-	s.Walk(func(n *Node) { seen[n]++ })
+	seen := map[*Def]int{}
+	s.Walk(func(n *Def) { seen[n]++ })
 	for n, c := range seen {
 		assert.Equal(t, 1, c, n.Template)
 	}

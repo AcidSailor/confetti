@@ -4,10 +4,11 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/acidsailor/confetti/schema"
+
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/graph"
 	"github.com/acidsailor/confetti/internal/lcp"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // schedule applies Kahn's algorithm, preferring the longest shared section path and then the smallest baseline key; Abort cycles fail, while Break cycles drop the greatest keyed edge.
@@ -19,7 +20,7 @@ func (dv *differ) schedule() []int {
 		indeg[e[1]]++
 	}
 	emitted := make([]bool, n)
-	var stack []*tree.Node // section path of the last emitted op
+	var stack []*schema.Node // section path of the last emitted op
 	out := make([]int, 0, n)
 	for len(out) < n {
 		best, bestAff := -1, -1

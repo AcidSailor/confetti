@@ -8,7 +8,6 @@ import (
 	"github.com/acidsailor/confetti/graph"
 	"github.com/acidsailor/confetti/internal/ident"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // levelKey sorts creates by ascending rank and sequence, and removes by descending rank and sequence.
@@ -28,21 +27,21 @@ func (a pathKey) compare(b pathKey) int {
 
 // op is one pending remediation change plus everything ordering needs.
 type op struct {
-	node    *tree.Node // built remediation node (OpAdd subtree / OpRemove leaf / OpModify leaf)
-	pre     *tree.Node // negate half of a replace pair, emitted immediately before node
-	src     *tree.Node // originating node: intended for creates, running for removes
-	runSrc  *tree.Node // running counterpart for Modify/Replace (nil otherwise)
-	flipRun *tree.Node // superseded toggle partner whose removed subtree also drives dependencies
+	node    *schema.Node // built remediation node (OpAdd subtree / OpRemove leaf / OpModify leaf)
+	pre     *schema.Node // negate half of a replace pair, emitted immediately before node
+	src     *schema.Node // originating node: intended for creates, running for removes
+	runSrc  *schema.Node // running counterpart for Modify/Replace (nil otherwise)
+	flipRun *schema.Node // superseded toggle partner whose removed subtree also drives dependencies
 	action  graph.Action
 	// secs contains kept ancestor sections from outermost to innermost; scheduling compares only pointer identity.
-	secs []*tree.Node
+	secs []*schema.Node
 	key  pathKey // baseline order
 }
 
 // differ carries one Diff invocation's shared state through collect, derive, and schedule.
 type differ struct {
-	running, intended *tree.Config
-	order             map[*schema.Node]int
+	running, intended *schema.Config
+	order             map[*schema.Def]int
 	cycle             Cycle
 	d                 *diag.Diagnostics
 	ops               []op
@@ -53,15 +52,15 @@ type differ struct {
 
 // collect pairs running and intended children and appends flat operations for later scheduling and materialization.
 func (dv *differ) collect(
-	runParent, intParent *tree.Node,
-	secs []*tree.Node,
+	runParent, intParent *schema.Node,
+	secs []*schema.Node,
 	prefix pathKey,
 ) {
 	d := dv.d
 	runByIdent := indexByIdent(runParent.Children)
 	runGroups := groupByIdent(runParent.Children)
 	intByIdent := indexByIdent(intParent.Children)
-	pairedRun := map[*tree.Node]bool{}
+	pairedRun := map[*schema.Node]bool{}
 	cleanupSlots := map[ident.Ident]bool{}
 
 	var intents []createIntent
@@ -113,7 +112,7 @@ func (dv *differ) collect(
 		// Equal leaves and unchanged keyed leaves need no operation.
 	}
 
-	var removes []*tree.Node
+	var removes []*schema.Node
 	for _, rc := range runParent.Children {
 		id := ident.Of(rc)
 		if pairedRun[rc] {
@@ -165,13 +164,13 @@ func (dv *differ) collect(
 			})
 		case ckModify:
 			dv.ops = append(dv.ops, op{
-				node: cloneNode(ci.src, tree.OpModify),
+				node: cloneNode(ci.src, schema.OpModify),
 				src:  ci.src, runSrc: ci.run,
 				action: graph.Modify, secs: secs, key: k,
 			})
 		case ckListDelta:
 			ls := ci.src.Def.ListSpec
-			var pre, node *tree.Node
+			var pre, node *schema.Node
 			if len(ci.removeItems) > 0 {
 				pre = deltaLeaf(ls.RemoveTmpl, ci.src.Fields,
 					ls, ci.removeItems)
@@ -192,7 +191,7 @@ func (dv *differ) collect(
 			// Emit a changed non-key header before its child operations, then recurse into the section.
 			if ci.src.Text != ci.run.Text {
 				dv.ops = append(dv.ops, op{
-					node: cloneNode(ci.src, tree.OpModify),
+					node: cloneNode(ci.src, schema.OpModify),
 					src:  ci.src, runSrc: ci.run,
 					action: graph.Modify, secs: secs, key: k,
 				})
@@ -252,7 +251,7 @@ func (dv *differ) refuseProtected(ci createIntent) bool {
 }
 
 // refuseDelete reports the protected node a removal would destroy and returns true when the removal must be dropped.
-func (dv *differ) refuseDelete(n *tree.Node) bool {
+func (dv *differ) refuseDelete(n *schema.Node) bool {
 	p := protectedIn(n)
 	if p == nil {
 		return false
@@ -265,10 +264,10 @@ func (dv *differ) refuseDelete(n *tree.Node) bool {
 // checkSplitSingles reports separate Add and Remove operations for one slot.
 func (dv *differ) checkSplitSingles(
 	intents []createIntent,
-	removes []*tree.Node,
+	removes []*schema.Node,
 ) {
 	// Only negatable, unkeyed slots can split.
-	slots := make([]*tree.Node, 0, len(removes))
+	slots := make([]*schema.Node, 0, len(removes))
 	for _, rc := range removes {
 		if ident.SlotDef(rc.Def) {
 			slots = append(slots, rc)
@@ -299,8 +298,8 @@ func (dv *differ) checkSplitSingles(
 
 // expandRemove converts each child of an EmptyOnRemove section into a separate removal while retaining the header as context.
 func (dv *differ) expandRemove(
-	rc *tree.Node,
-	secs []*tree.Node,
+	rc *schema.Node,
+	secs []*schema.Node,
 	prefix pathKey,
 ) {
 	d := dv.d
@@ -331,7 +330,7 @@ func (dv *differ) expandRemove(
 }
 
 // protectedIn returns the first protected node in the subtree, including n.
-func protectedIn(n *tree.Node) *tree.Node {
+func protectedIn(n *schema.Node) *schema.Node {
 	if def := n.Def; def != nil && def.Protected {
 		return n
 	}
@@ -344,7 +343,7 @@ func protectedIn(n *tree.Node) *tree.Node {
 }
 
 // secTexts renders kept section headers as the grouping key shared by graph, compare, and the change log.
-func secTexts(secs []*tree.Node) []string {
+func secTexts(secs []*schema.Node) []string {
 	out := make([]string, len(secs))
 	for i, s := range secs {
 		out[i] = s.Text

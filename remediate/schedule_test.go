@@ -9,12 +9,12 @@ import (
 
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/graph"
-	"github.com/acidsailor/confetti/tree"
+	"github.com/acidsailor/confetti/schema"
 )
 
 // mkOp hand-builds an op for scheduler tests (no schema needed).
-func mkOp(text string, secs []*tree.Node, key pathKey, act graph.Action) op {
-	n := tree.NewNode(text)
+func mkOp(text string, secs []*schema.Node, key pathKey, act graph.Action) op {
+	n := schema.NewNode(text)
 	return op{node: n, src: n, action: act, secs: secs, key: key}
 }
 
@@ -62,8 +62,8 @@ func TestScheduleEdgeOverridesKey(t *testing.T) {
 }
 
 func TestScheduleAffinityFinishesOpenSection(t *testing.T) {
-	secA := []*tree.Node{tree.NewNode("section A")}
-	secB := []*tree.Node{tree.NewNode("section B")}
+	secA := []*schema.Node{schema.NewNode("section A")}
+	secB := []*schema.Node{schema.NewNode("section B")}
 	// After b1 unblocks a2, affinity must finish section B before returning to section A.
 	ops := []op{
 		mkOp("a1", secA, pathKey{{0, 1, 0}, {0, 1, 0}}, graph.Add),

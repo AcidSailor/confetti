@@ -1,4 +1,4 @@
-// Package render converts a tree.Config to canonical text. Matched nodes use
+// Package render converts a schema.Config to canonical text. Matched nodes use
 // their schema definition with normalized spacing and two-space indentation.
 // Unmatched nodes use their raw text. Raw block bodies and terminators are
 // preserved exactly. A schema.SectionExit token closes each section that

@@ -11,7 +11,6 @@ import (
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/parse"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 func miniSchema() *schema.Schema {
@@ -222,8 +221,8 @@ func TestImportCheckToggleGroupSingleMemberClean(t *testing.T) {
 func TestValidateSkipsNilDefNodes(t *testing.T) {
 	// ImportCheck and CommitCheck ignore unmatched nodes in hand-built or merged trees.
 	s := miniSchema()
-	cfg := tree.NewConfig(s)
-	cfg.Root.AddChild(tree.NewNode("bogus unmatched line"))
+	cfg := schema.NewConfig(s)
+	cfg.Root.AddChild(schema.NewNode("bogus unmatched line"))
 	d := diag.New()
 	ImportCheck(cfg, d)
 	CommitCheck(cfg, d)

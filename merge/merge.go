@@ -7,7 +7,6 @@ import (
 	"github.com/acidsailor/confetti/internal/ident"
 	"github.com/acidsailor/confetti/internal/listval"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // Outcome reports how a Resolve call settled a contested slot.
@@ -24,7 +23,7 @@ const (
 // the incoming part node, and declared is the merge kind resolved from the
 // slot's schema definitions. A resolver must not modify either argument; it
 // returns earlier, later, or a fresh parentless node.
-type Resolve func(earlier, later *tree.Node, declared schema.MergeKind) (*tree.Node, Outcome)
+type Resolve func(earlier, later *schema.Node, declared schema.MergeKind) (*schema.Node, Outcome)
 
 // Options configures one Merge call; a nil Resolve uses Declared.
 type Options struct {
@@ -35,9 +34,9 @@ type Options struct {
 // union a list slot, take the later header of a same-definition section and
 // recurse, and keep the later value otherwise.
 func Declared(
-	earlier, later *tree.Node,
+	earlier, later *schema.Node,
 	declared schema.MergeKind,
-) (*tree.Node, Outcome) {
+) (*schema.Node, Outcome) {
 	if n, out, ok := resolveDeclared(earlier, later, declared); ok {
 		return n, out
 	}
@@ -49,9 +48,9 @@ func Declared(
 
 // Refuse applies the slot's declared merge kind and refuses everything Declared would resolve by keeping the later value.
 func Refuse(
-	earlier, later *tree.Node,
+	earlier, later *schema.Node,
 	declared schema.MergeKind,
-) (*tree.Node, Outcome) {
+) (*schema.Node, Outcome) {
 	if n, out, ok := resolveDeclared(earlier, later, declared); ok {
 		return n, out
 	}
@@ -60,9 +59,9 @@ func Refuse(
 
 // resolveDeclared settles the slots whose resolution the schema itself sanctions.
 func resolveDeclared(
-	earlier, later *tree.Node,
+	earlier, later *schema.Node,
 	declared schema.MergeKind,
-) (*tree.Node, Outcome, bool) {
+) (*schema.Node, Outcome, bool) {
 	switch declared {
 	case schema.MergeKeepFirst:
 		return earlier, Overridden, true
@@ -77,24 +76,24 @@ func resolveDeclared(
 
 // KeepFirst keeps the earlier part's value regardless of the declared kind.
 func KeepFirst(
-	earlier, _ *tree.Node,
+	earlier, _ *schema.Node,
 	_ schema.MergeKind,
-) (*tree.Node, Outcome) {
+) (*schema.Node, Outcome) {
 	return earlier, Overridden
 }
 
 // KeepLast keeps the later part's value regardless of the declared kind.
 func KeepLast(
-	_, later *tree.Node,
+	_, later *schema.Node,
 	_ schema.MergeKind,
-) (*tree.Node, Outcome) {
+) (*schema.Node, Outcome) {
 	return later, Overridden
 }
 
 // UnionLists combines two spellings of one list slot into a fresh canonical
 // node; ok is false when they are not two spellings of one list slot, which
 // is not by itself a conflict.
-func UnionLists(earlier, later *tree.Node) (node *tree.Node, ok bool) {
+func UnionLists(earlier, later *schema.Node) (node *schema.Node, ok bool) {
 	def := earlier.Def
 	if def == nil || def != later.Def ||
 		!slices.Equal(earlier.Block, later.Block) {
@@ -134,10 +133,10 @@ func UnionLists(earlier, later *tree.Node) (node *tree.Node, ok bool) {
 func Merge(
 	s *schema.Schema,
 	opts Options,
-	parts ...*tree.Config,
-) (*tree.Config, *diag.Diagnostics) {
+	parts ...*schema.Config,
+) (*schema.Config, *diag.Diagnostics) {
 	d := diag.New()
-	out := tree.NewConfig(s)
+	out := schema.NewConfig(s)
 	for _, p := range parts {
 		if p.Schema != s {
 			d.Add(diag.Error, "merge: part uses a different schema")
@@ -150,7 +149,7 @@ func Merge(
 	}
 	m := &merger{
 		schema:  s,
-		origin:  map[*tree.Node]int{},
+		origin:  map[*schema.Node]int{},
 		resolve: resolve,
 		d:       d,
 	}
@@ -164,13 +163,13 @@ func Merge(
 type merger struct {
 	schema  *schema.Schema
 	resolve Resolve
-	origin  map[*tree.Node]int // Map each output node to its 1-based source part.
+	origin  map[*schema.Node]int // Map each output node to its 1-based source part.
 	d       *diag.Diagnostics
 }
 
 // level folds one part level into the output level and recurses into shared sections.
-func (m *merger) level(outParent, partParent *tree.Node, part int) {
-	byIdent := map[ident.Ident]*tree.Node{}
+func (m *merger) level(outParent, partParent *schema.Node, part int) {
+	byIdent := map[ident.Ident]*schema.Node{}
 	for _, oc := range outParent.Children {
 		id := mergeIdent(oc)
 		if _, ok := byIdent[id]; !ok {
@@ -206,10 +205,10 @@ func (m *merger) level(outParent, partParent *tree.Node, part int) {
 
 // slot resolves one contested slot in place and returns a replacement node when the later or a fresh value wins whole.
 func (m *merger) slot(
-	outParent, oc, pc *tree.Node,
+	outParent, oc, pc *schema.Node,
 	declared schema.MergeKind,
 	part int,
-) *tree.Node {
+) *schema.Node {
 	node, outcome := m.resolve(oc, pc, declared)
 	switch outcome {
 	case Refused:
@@ -267,7 +266,7 @@ func (m *merger) slot(
 }
 
 // freshNodeValid reports whether a resolver-constructed node keeps its identity through later stages, reporting an Error when it cannot.
-func (m *merger) freshNodeValid(outParent, node, pc *tree.Node) bool {
+func (m *merger) freshNodeValid(outParent, node, pc *schema.Node) bool {
 	if node.Def == nil {
 		return true
 	}
@@ -294,7 +293,7 @@ func (m *merger) freshNodeValid(outParent, node, pc *tree.Node) bool {
 }
 
 // declaredKind resolves a slot's merge kind, preferring the earlier definition's non-default declaration.
-func declaredKind(earlier, later *tree.Node) schema.MergeKind {
+func declaredKind(earlier, later *schema.Node) schema.MergeKind {
 	if d := earlier.Def; d != nil && d.Merge != schema.MergeDefault {
 		return d.Merge
 	}
@@ -305,7 +304,7 @@ func declaredKind(earlier, later *tree.Node) schema.MergeKind {
 }
 
 // mergeIdent gives each non-keyed ZeroToOne definition one slot per level.
-func mergeIdent(n *tree.Node) ident.Ident {
+func mergeIdent(n *schema.Node) ident.Ident {
 	def := n.Def
 	if def != nil && len(def.KeyArgs) == 0 &&
 		def.Cardinality == schema.ZeroToOne &&
@@ -317,7 +316,7 @@ func mergeIdent(n *tree.Node) ident.Ident {
 }
 
 // cloneSubtree deep-clones a part subtree, recording each clone's origin part.
-func (m *merger) cloneSubtree(src *tree.Node, part int) *tree.Node {
+func (m *merger) cloneSubtree(src *schema.Node, part int) *schema.Node {
 	n := src.CloneValue()
 	m.origin[n] = part
 	for _, c := range src.Children {

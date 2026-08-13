@@ -10,14 +10,13 @@ import (
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // findNode returns a source node for pointer-identity assertions.
-func findNode(t *testing.T, cfg *tree.Config, text string) *tree.Node {
+func findNode(t *testing.T, cfg *schema.Config, text string) *schema.Node {
 	t.Helper()
-	var got *tree.Node
-	tree.Walk(cfg, func(n *tree.Node) {
+	var got *schema.Node
+	schema.Walk(cfg, func(n *schema.Node) {
 		if got == nil && n.Text == text {
 			got = n
 		}

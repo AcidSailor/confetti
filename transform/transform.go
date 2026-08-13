@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/acidsailor/confetti/tree"
+	"github.com/acidsailor/confetti/schema"
 )
 
 // TextRule transforms one line of raw configuration text before parsing or after rendering.
@@ -14,7 +14,7 @@ type TextRule interface {
 
 // TreeTransform mutates a parsed tree.
 type TreeTransform interface {
-	Apply(cfg *tree.Config)
+	Apply(cfg *schema.Config)
 }
 
 type perLineSub struct {
@@ -66,7 +66,7 @@ func ApplyText(rules []TextRule, text string) string {
 }
 
 // ApplyTree runs tree transforms left-to-right.
-func ApplyTree(transforms []TreeTransform, cfg *tree.Config) {
+func ApplyTree(transforms []TreeTransform, cfg *schema.Config) {
 	for _, t := range transforms {
 		t.Apply(cfg)
 	}

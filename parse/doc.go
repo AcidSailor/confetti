@@ -1,4 +1,4 @@
-// Package parse converts configuration text to a tree.Config. It uses an
+// Package parse converts configuration text to a schema.Config. It uses an
 // indentation stack and schema.MatchChild. An unknown line creates an isolated
 // stack frame for its children. Fold canonicalizes alternate spellings after
 // parsing. At each level, it applies RespellAs, list continuations, and

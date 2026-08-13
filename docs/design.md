@@ -22,12 +22,12 @@ This document defines the current design.
 
 ```
 confetti (root)   Engine: option wiring + the pipelines below
-├── schema        grammar-as-data: node templates, kinds/keys/refs, negate/
-│                 block/list/toggle/fold strategies, MatchChild
+├── schema        grammar-as-data (Def templates, kinds/keys/refs, negate/
+│                 block/list/toggle/fold/merge strategies, MatchChild) plus
+│                 the config tree it parses into (Node, Config, op tags)
 ├── value         value-type registry (builtins: word, rest, uint)
 ├── parse         text → tree (indent stack, block capture, BlockSpans) and
 │                 the import fold (Respell → ListContinues → Members)
-├── tree          the config tree; Node stores op tags, lines, and block bodies
 ├── validate      ImportCheck (values, cardinality, dup keys, toggles,
 │                 required children) and CommitCheck (relations: refs,
 │                 Requires, tag exclusions)
@@ -51,10 +51,10 @@ confetti (root)   Engine: option wiring + the pipelines below
 Layering rules:
 
 - **`graph` is a leaf package** with no confetti imports. The import graph
-  enforces this rule: `tree` imports `schema`, and `schema` uses `graph` types
-  in the `OrderHook` signature. Importing either package from `graph` would
-  cause a cycle. `remediate` keeps detailed per-operation state in a parallel
-  slice indexed by operation index.
+  enforces this rule: `schema` uses `graph` types in the `OrderHook`
+  signature, so importing `schema` from `graph` would cause a cycle.
+  `remediate` keeps detailed per-operation state in a parallel slice indexed
+  by operation index.
 - **Presentation stays out of `remediate`**: `compare` renders the change log,
   while `remediate` produces it. This matches the boundary between `render`
   and the operation-tagged tree.
@@ -147,9 +147,8 @@ The explanations record constraints that tests do not show.
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
   `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
   platform-independent.
-- **Whole-tree validators belong to `Engine`.** They consume `*tree.Config`,
-  and `tree` imports `schema`; storing them in `Schema` would create an import
-  cycle. `WithCommitChecks` appends validators after the built-in
+- **Whole-tree validators belong to `Engine`.** They consume
+  `*schema.Config`, which keeps the schema package free of engine policy. `WithCommitChecks` appends validators after the built-in
   `CommitCheck`, in registration order. They run for `CommitCheck`,
   `Remediate` (intended), and `Rollback` (running). `Render`, `Compare`, and
   `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
@@ -163,8 +162,8 @@ The explanations record constraints that tests do not show.
 
 ### Pairing and diff semantics
 
-- **Remediation output is a `*tree.Config` of new operation-tagged nodes.**
-  The existing renderer produces executable CLI, and `tree.Walk` with `Op()`
+- **Remediation output is a `*schema.Config` of new operation-tagged
+  nodes.** The existing renderer produces executable CLI, and `schema.Walk`
   supports inspection. `OpNone` must remain the zero value because every
   tree node has an operation field. `OpRemove` nodes
   carry `def == nil`: a negated line does not match its positive definition,

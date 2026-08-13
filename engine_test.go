@@ -16,7 +16,6 @@ import (
 	"github.com/acidsailor/confetti/remediate"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/transform"
-	"github.com/acidsailor/confetti/tree"
 )
 
 func engineSchema() *schema.Schema {
@@ -73,9 +72,9 @@ type fakeTreeTransform struct {
 	ran      *bool
 }
 
-func (f fakeTreeTransform) Apply(cfg *tree.Config) {
+func (f fakeTreeTransform) Apply(cfg *schema.Config) {
 	*f.ran = true
-	tree.Walk(cfg, func(n *tree.Node) {
+	schema.Walk(cfg, func(n *schema.Node) {
 		if n.Text == f.from {
 			n.Text = f.to
 		}
@@ -116,9 +115,9 @@ type addNodeTransform struct {
 	ran  *bool
 }
 
-func (a addNodeTransform) Apply(cfg *tree.Config) {
+func (a addNodeTransform) Apply(cfg *schema.Config) {
 	*a.ran = true
-	cfg.Root.Children[0].AddChild(tree.NewNode(a.text))
+	cfg.Root.Children[0].AddChild(schema.NewNode(a.text))
 }
 
 func TestEngineExportTreeTransformRuns(t *testing.T) {

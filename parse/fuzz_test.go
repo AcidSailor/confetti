@@ -7,7 +7,6 @@ import (
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // FuzzParse asserts the indent-stack walk never panics for arbitrary input
@@ -49,7 +48,7 @@ func FuzzParse(f *testing.F) {
 				t.Fatalf("Parse returned nil config for %q", in)
 			}
 			// Every node has a panic-free Path and normalized text.
-			tree.Walk(cfg, func(n *tree.Node) {
+			schema.Walk(cfg, func(n *schema.Node) {
 				_ = n.Path()
 				if got := normalize(n.Text); got != n.Text {
 					t.Fatalf(

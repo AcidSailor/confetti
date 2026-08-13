@@ -678,14 +678,14 @@ func TestExcludeTagOrdersRemovalBeforeAddReverse(t *testing.T) {
 func TestExcludeTagOrdersSemanticRemovalBeforeAdd(t *testing.T) {
 	tests := []struct {
 		name      string
-		configure func(*schema.Node)
+		configure func(*schema.Def)
 		running   string
 		intended  string
 		first     string
 	}{
 		{
 			name: "replace",
-			configure: func(iface *schema.Node) {
+			configure: func(iface *schema.Def) {
 				iface.Child("mode l2").Kind("mode").Tag("l2").ExcludeTag("l3")
 				iface.Child("mode l3").Kind("mode").Tag("l3").ExcludeTag("l2")
 			},
@@ -695,7 +695,7 @@ func TestExcludeTagOrdersSemanticRemovalBeforeAdd(t *testing.T) {
 		},
 		{
 			name: "modify",
-			configure: func(iface *schema.Node) {
+			configure: func(iface *schema.Def) {
 				iface.Child("mode l2").
 					Kind("mode").
 					MarkIdempotent().
@@ -713,7 +713,7 @@ func TestExcludeTagOrdersSemanticRemovalBeforeAdd(t *testing.T) {
 		},
 		{
 			name: "toggle",
-			configure: func(iface *schema.Node) {
+			configure: func(iface *schema.Def) {
 				l2 := iface.Child("mode l2").Tag("l2").ExcludeTag("l3")
 				iface.Child("mode l3").Tag("l3").ExcludeTag("l2").Toggles(l2)
 			},

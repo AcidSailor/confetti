@@ -12,10 +12,9 @@ import (
 	"github.com/acidsailor/confetti/parse"
 	"github.com/acidsailor/confetti/remediate"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
-func mustParse(t *testing.T, s *schema.Schema, text string) *tree.Config {
+func mustParse(t *testing.T, s *schema.Schema, text string) *schema.Config {
 	t.Helper()
 	d := diag.New()
 	cfg := parse.Parse(s, text, parse.Reject, d)
@@ -31,11 +30,15 @@ func TestRenderSignsAndContext(t *testing.T) {
 	iface := []string{"interface Ethernet1/1"}
 	changes := []remediate.Change{
 		{
-			Action: graph.Modify, Running: tree.NewNode("description OLD"),
-			Intended: tree.NewNode("description NEW"), Path: iface,
+			Action: graph.Modify, Running: schema.NewNode("description OLD"),
+			Intended: schema.NewNode("description NEW"), Path: iface,
 		},
-		{Action: graph.Remove, Running: tree.NewNode("shutdown"), Path: iface},
-		{Action: graph.Add, Intended: tree.NewNode("vlan 99")},
+		{
+			Action:  graph.Remove,
+			Running: schema.NewNode("shutdown"),
+			Path:    iface,
+		},
+		{Action: graph.Add, Intended: schema.NewNode("vlan 99")},
 	}
 	want := "  interface Ethernet1/1\n" +
 		"-   description OLD\n" +
@@ -51,9 +54,13 @@ func TestRenderRegroupsSplitSections(t *testing.T) {
 	e11 := []string{"interface Ethernet1/1"}
 	e12 := []string{"interface Ethernet1/2"}
 	changes := []remediate.Change{
-		{Action: graph.Add, Intended: tree.NewNode("description A"), Path: e11},
-		{Action: graph.Add, Intended: tree.NewNode("mtu 9000"), Path: e12},
-		{Action: graph.Add, Intended: tree.NewNode("no shutdown"), Path: e11},
+		{
+			Action:   graph.Add,
+			Intended: schema.NewNode("description A"),
+			Path:     e11,
+		},
+		{Action: graph.Add, Intended: schema.NewNode("mtu 9000"), Path: e12},
+		{Action: graph.Add, Intended: schema.NewNode("no shutdown"), Path: e11},
 	}
 	want := "  interface Ethernet1/1\n" +
 		"+   description A\n" +
@@ -69,12 +76,12 @@ func TestRenderSharedAncestorPrefix(t *testing.T) {
 	changes := []remediate.Change{
 		{
 			Action:   graph.Add,
-			Intended: tree.NewNode("router-id 1.1.1.1"),
+			Intended: schema.NewNode("router-id 1.1.1.1"),
 			Path:     bgp,
 		},
 		{
 			Action:   graph.Add,
-			Intended: tree.NewNode("max-paths ebgp 8"),
+			Intended: schema.NewNode("max-paths ebgp 8"),
 			Path:     af,
 		},
 	}
@@ -88,9 +95,9 @@ func TestRenderSharedAncestorPrefix(t *testing.T) {
 func TestRenderRemovedSectionShowsSubtree(t *testing.T) {
 	// The artifact negates only the header; the view shows every
 	// disappearing line through the paired running-side node.
-	sec := tree.NewNode("interface Ethernet1/1")
-	sec.AddChild(tree.NewNode("description A"))
-	sec.AddChild(tree.NewNode("shutdown"))
+	sec := schema.NewNode("interface Ethernet1/1")
+	sec.AddChild(schema.NewNode("description A"))
+	sec.AddChild(schema.NewNode("shutdown"))
 	changes := []remediate.Change{{Action: graph.Remove, Running: sec}}
 	want := "- interface Ethernet1/1\n" +
 		"-   description A\n" +

@@ -4,13 +4,12 @@ import (
 	"strings"
 
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 const indentUnit = "  " // Use canonical two-space indentation.
 
 // Render emits canonical text in tree order.
-func Render(cfg *tree.Config) string {
+func Render(cfg *schema.Config) string {
 	var b strings.Builder
 	for _, n := range cfg.Root.Children {
 		renderNode(&b, n, 0)
@@ -18,7 +17,7 @@ func Render(cfg *tree.Config) string {
 	return b.String()
 }
 
-func renderNode(b *strings.Builder, n *tree.Node, depth int) {
+func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	def := n.Def
 	indent := strings.Repeat(indentUnit, depth)
 	b.WriteString(indent)

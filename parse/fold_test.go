@@ -9,7 +9,6 @@ import (
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 	"github.com/acidsailor/confetti/value"
 )
 
@@ -27,7 +26,7 @@ func memberSchema() *schema.Schema {
 	return s
 }
 
-func foldConfig(t *testing.T, s *schema.Schema, in string) *tree.Config {
+func foldConfig(t *testing.T, s *schema.Schema, in string) *schema.Config {
 	t.Helper()
 	d := diag.New()
 	cfg := Parse(s, in, Reject, d)
@@ -36,7 +35,7 @@ func foldConfig(t *testing.T, s *schema.Schema, in string) *tree.Config {
 	return cfg
 }
 
-func topTexts(cfg *tree.Config) []string {
+func topTexts(cfg *schema.Config) []string {
 	texts := make([]string, 0, len(cfg.Root.Children))
 	for _, n := range cfg.Root.Children {
 		texts = append(texts, n.Text)
@@ -179,7 +178,7 @@ func contSchema() *schema.Schema {
 	return s
 }
 
-func ifaceKids(t *testing.T, cfg *tree.Config) []string {
+func ifaceKids(t *testing.T, cfg *schema.Config) []string {
 	t.Helper()
 	require.Len(t, cfg.Root.Children, 1)
 	kids := cfg.Root.Children[0].Children
@@ -356,7 +355,7 @@ func compositeSchema() *schema.Schema {
 	return s
 }
 
-func kidTexts(n *tree.Node) []string {
+func kidTexts(n *schema.Node) []string {
 	texts := make([]string, 0, len(n.Children))
 	for _, c := range n.Children {
 		texts = append(texts, c.Text)
@@ -699,9 +698,9 @@ func TestFoldStepsOverUnmatchedNodes(t *testing.T) {
 			"  allowed vlan add 20\n",
 		Drop, d)
 	top := cfg.Root.Children
-	raw := tree.NewNode("mystery knob 42")
+	raw := schema.NewNode("mystery knob 42")
 	cfg.Root.InsertChildBefore(top[1], raw)
-	rawKid := tree.NewNode("mystery leaf 7")
+	rawKid := schema.NewNode("mystery leaf 7")
 	top[2].InsertChildBefore(top[2].Children[1], rawKid)
 
 	Fold(cfg, d)

@@ -7,29 +7,28 @@ import (
 	"github.com/acidsailor/confetti/internal/ident"
 	"github.com/acidsailor/confetti/internal/listval"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // Fold canonicalizes RespellAs, ListContinues, and Members spellings in that order and leaves a line unchanged when it cannot fold atomically.
-func Fold(cfg *tree.Config, d *diag.Diagnostics) {
+func Fold(cfg *schema.Config, d *diag.Diagnostics) {
 	foldLevel(cfg.Root, cfg.Schema.Roots, d)
 }
 
 // levelFold carries one level's parent, sibling candidates, and diagnostics through the fold passes.
 type levelFold struct {
-	parent     *tree.Node
-	candidates []*schema.Node
+	parent     *schema.Node
+	candidates []*schema.Def
 	d          *diag.Diagnostics
 }
 
 func foldLevel(
-	parent *tree.Node,
-	candidates []*schema.Node,
+	parent *schema.Node,
+	candidates []*schema.Def,
 	d *diag.Diagnostics,
 ) {
 	lf := &levelFold{parent: parent, candidates: candidates, d: d}
 	// Apply RespellAs first.
-	var respells []*tree.Node
+	var respells []*schema.Node
 	for _, c := range parent.Children {
 		if def := c.Def; def != nil && def.Respell != nil {
 			respells = append(respells, c)
@@ -40,7 +39,7 @@ func foldLevel(
 	}
 
 	// Apply list continuations second.
-	var conts []*tree.Node
+	var conts []*schema.Node
 	for _, c := range parent.Children {
 		if def := c.Def; def != nil && def.ListContinuation != nil {
 			conts = append(conts, c)
@@ -51,8 +50,8 @@ func foldLevel(
 	}
 
 	// Scan the complete level before membership folding so earlier membership lines can find later canonical instances.
-	var members []*tree.Node
-	seen := map[ident.Ident]*tree.Node{}
+	var members []*schema.Node
+	seen := map[ident.Ident]*schema.Node{}
 	for _, c := range parent.Children {
 		def := c.Def
 		if def == nil {
@@ -80,7 +79,7 @@ func foldLevel(
 }
 
 // foldContinuation unions one continuation into its sibling base slot and creates the slot when absent.
-func (lf *levelFold) foldContinuation(m *tree.Node) {
+func (lf *levelFold) foldContinuation(m *schema.Node) {
 	parent, candidates, d := lf.parent, lf.candidates, lf.d
 	def := m.Def
 	base := def.ListContinuation
@@ -90,7 +89,7 @@ func (lf *levelFold) foldContinuation(m *tree.Node) {
 		return // Leave the malformed list for ImportCheck.
 	}
 
-	var slot *tree.Node
+	var slot *schema.Node
 	for _, c := range parent.Children {
 		if c.Def == base && continuationFieldsMatch(m, c, mls.Arg) {
 			if slot != nil && base != def {
@@ -147,7 +146,7 @@ func (lf *levelFold) foldContinuation(m *tree.Node) {
 	parent.ReplaceChild(m)
 }
 
-func continuationFieldsMatch(m, slot *tree.Node, listArg string) bool {
+func continuationFieldsMatch(m, slot *schema.Node, listArg string) bool {
 	slotFields := slot.Fields
 	for arg, mv := range m.Fields {
 		if arg == listArg {
@@ -162,8 +161,8 @@ func continuationFieldsMatch(m, slot *tree.Node, listArg string) bool {
 
 // synthesizeBase converts a continuation into a matched base slot when no base exists at the level.
 func (lf *levelFold) synthesizeBase(
-	m *tree.Node,
-	base *schema.Node,
+	m *schema.Node,
+	base *schema.Def,
 	items []string,
 ) {
 	parent, candidates, d := lf.parent, lf.candidates, lf.d
@@ -194,14 +193,17 @@ func (lf *levelFold) synthesizeBase(
 		)
 		return
 	}
-	nn := tree.NewNode(text)
+	nn := schema.NewNode(text)
 	nn.Def, nn.Fields, nn.RealIndent = base, fields, m.RealIndent
 	nn.Line = m.Line
 	parent.ReplaceChild(m, nn)
 }
 
 // foldOne commits a membership fold only when every item synthesizes successfully.
-func (lf *levelFold) foldOne(m *tree.Node, seen map[ident.Ident]*tree.Node) {
+func (lf *levelFold) foldOne(
+	m *schema.Node,
+	seen map[ident.Ident]*schema.Node,
+) {
 	parent, candidates, d := lf.parent, lf.candidates, lf.d
 	def := m.Def
 	kind := def.MembersKind
@@ -222,7 +224,7 @@ func (lf *levelFold) foldOne(m *tree.Node, seen map[ident.Ident]*tree.Node) {
 	if err != nil {
 		return // Leave the malformed list for ImportCheck.
 	}
-	var repl []*tree.Node
+	var repl []*schema.Node
 	for _, it := range items {
 		// Copy non-list fields and use the item for the remaining key component.
 		f := maps.Clone(m.Fields)
@@ -245,7 +247,7 @@ func (lf *levelFold) foldOne(m *tree.Node, seen map[ident.Ident]*tree.Node) {
 			)
 			return
 		}
-		nn := tree.NewNode(text)
+		nn := schema.NewNode(text)
 		nn.Def, nn.Fields, nn.RealIndent = canon, fields, m.RealIndent
 		nn.Line = m.Line
 		// Drop a duplicate only when it agrees on every synthesized field; conflicting ones stay for ImportCheck.
@@ -275,11 +277,11 @@ func fieldsSubset(sub, super map[string]string) bool {
 
 // resolveCanonical returns the first sibling of Kind with one key argument supplied by the membership list.
 func resolveCanonical(
-	candidates []*schema.Node,
+	candidates []*schema.Def,
 	kind string,
-	member *schema.Node,
+	member *schema.Def,
 	fields map[string]string,
-) (*schema.Node, string) {
+) (*schema.Def, string) {
 	// Exclude the membership list argument because foldOne removes it before rendering.
 	lsArg := member.ListSpec.Arg
 	for _, c := range candidates {
@@ -306,7 +308,7 @@ func resolveCanonical(
 }
 
 // foldRespell atomically rewrites one alternate spelling into a matched canonical header and children.
-func (lf *levelFold) foldRespell(m *tree.Node) {
+func (lf *levelFold) foldRespell(m *schema.Node) {
 	parent, candidates, d := lf.parent, lf.candidates, lf.d
 	def := m.Def
 	rs := def.Respell
@@ -321,7 +323,7 @@ func (lf *levelFold) foldRespell(m *tree.Node) {
 	}
 	type bind struct {
 		text   string
-		cdef   *schema.Node
+		cdef   *schema.Def
 		fields map[string]string
 	}
 	binds := make([]bind, 0, len(rs.Children))
@@ -337,7 +339,7 @@ func (lf *levelFold) foldRespell(m *tree.Node) {
 		binds = append(binds, bind{text, cdef, cfields})
 	}
 	// Merge hosts by header text because the header can omit captured arguments.
-	var host *tree.Node
+	var host *schema.Node
 	for _, c := range parent.Children {
 		if c != m && c.Def == hdef && c.Text == headerText {
 			host = c
@@ -345,7 +347,7 @@ func (lf *levelFold) foldRespell(m *tree.Node) {
 		}
 	}
 	if host == nil {
-		host = tree.NewNode(headerText)
+		host = schema.NewNode(headerText)
 		host.Def, host.Fields, host.RealIndent = hdef, hfields, m.RealIndent
 		host.Line = m.Line
 		parent.ReplaceChild(m, host)
@@ -363,11 +365,11 @@ func (lf *levelFold) foldRespell(m *tree.Node) {
 		if dup {
 			continue
 		}
-		nn := tree.NewNode(b.text)
+		nn := schema.NewNode(b.text)
 		nn.Def, nn.Fields, nn.RealIndent = b.cdef, b.fields, host.RealIndent+2
 		nn.Line = m.Line
 		// Preserve source order by inserting before the first child from a later nonzero source line.
-		var before *tree.Node
+		var before *schema.Node
 		for _, c := range host.Children {
 			if c.Line > m.Line {
 				before = c

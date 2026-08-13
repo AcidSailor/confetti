@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/acidsailor/confetti/graph"
-	"github.com/acidsailor/confetti/tree"
+	"github.com/acidsailor/confetti/schema"
 )
 
 func TestDiffListDeltaMixed(t *testing.T) {
@@ -23,8 +23,8 @@ func TestDiffListDeltaMixed(t *testing.T) {
 		out)
 	// Both delta leaves are OpModify text leaves (def==nil, like negations).
 	var tagged int
-	tree.Walk(res.Tree, func(n *tree.Node) {
-		if n.Op == tree.OpModify {
+	schema.Walk(res.Tree, func(n *schema.Node) {
+		if n.Op == schema.OpModify {
 			tagged++
 			assert.Nil(t, n.Def)
 		}

@@ -16,7 +16,6 @@ import (
 	"github.com/acidsailor/confetti/remediate"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 const cleanConfig = "vlan 10\n" +
@@ -258,9 +257,9 @@ func indexOf(haystack, needle string) int {
 }
 
 // engineOpsByText indexes facade results by operation text.
-func engineOpsByText(res *remediate.Result) map[string]tree.Op {
-	ops := map[string]tree.Op{}
-	tree.Walk(res.Tree, func(n *tree.Node) { ops[n.Text] = n.Op })
+func engineOpsByText(res *remediate.Result) map[string]schema.Op {
+	ops := map[string]schema.Op{}
+	schema.Walk(res.Tree, func(n *schema.Node) { ops[n.Text] = n.Op })
 	return ops
 }
 
@@ -300,16 +299,16 @@ func TestRollbackOpsMirrorRemediate(t *testing.T) {
 	bops := engineOpsByText(back)
 
 	// forward Add <-> rollback Remove, and vice versa
-	assert.Equal(t, tree.OpAdd, fops["vlan 20"])
-	assert.Equal(t, tree.OpRemove, bops["no vlan 20"])
-	assert.Equal(t, tree.OpRemove, fops["no vlan 10"])
-	assert.Equal(t, tree.OpAdd, bops["vlan 10"])
+	assert.Equal(t, schema.OpAdd, fops["vlan 20"])
+	assert.Equal(t, schema.OpRemove, bops["no vlan 20"])
+	assert.Equal(t, schema.OpRemove, fops["no vlan 10"])
+	assert.Equal(t, schema.OpAdd, bops["vlan 10"])
 	// idempotent slot: Modify both ways, new value vs old value
-	assert.Equal(t, tree.OpModify, fops["switchport access vlan 20"])
-	assert.Equal(t, tree.OpModify, bops["switchport access vlan 10"])
+	assert.Equal(t, schema.OpModify, fops["switchport access vlan 20"])
+	assert.Equal(t, schema.OpModify, bops["switchport access vlan 10"])
 	// toggle dedup is direction-blind: exactly one forward line each way
-	assert.Equal(t, tree.OpAdd, fops["no shutdown"])
-	assert.Equal(t, tree.OpAdd, bops["shutdown"])
+	assert.Equal(t, schema.OpAdd, fops["no shutdown"])
+	assert.Equal(t, schema.OpAdd, bops["shutdown"])
 }
 
 func TestRollbackCommitChecksRunningGoal(t *testing.T) {
@@ -780,8 +779,8 @@ func TestCommitCheckPerItemListRef(t *testing.T) {
 }
 
 func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
-	noUsersVlan := func(cfg *tree.Config, d *diag.Diagnostics) {
-		tree.Walk(cfg, func(n *tree.Node) {
+	noUsersVlan := func(cfg *schema.Config, d *diag.Diagnostics) {
+		schema.Walk(cfg, func(n *schema.Node) {
 			// Bind to the schema definition instead of any node carrying a text field.
 			if n.Parent == nil || n.Parent.Def == nil ||
 				n.Parent.Def.KindName != "vlan" {
@@ -827,7 +826,7 @@ func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
 
 func TestCommitChecksRunExactlyOncePerCommitPath(t *testing.T) {
 	calls := 0
-	count := func(*tree.Config, *diag.Diagnostics) { calls++ }
+	count := func(*schema.Config, *diag.Diagnostics) { calls++ }
 	e := confetti.New(alpha.Schema(),
 		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(count))
@@ -859,8 +858,8 @@ func TestCommitChecksRunExactlyOncePerCommitPath(t *testing.T) {
 }
 
 func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
-	mark := func(msg string) func(*tree.Config, *diag.Diagnostics) {
-		return func(_ *tree.Config, d *diag.Diagnostics) {
+	mark := func(msg string) func(*schema.Config, *diag.Diagnostics) {
+		return func(_ *schema.Config, d *diag.Diagnostics) {
 			d.Add(diag.Error, "%s", msg)
 		}
 	}
@@ -882,7 +881,7 @@ func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
 }
 
 func TestCommitCheckKeepsDiagnosticsFromClobberingValidator(t *testing.T) {
-	clobber := func(_ *tree.Config, d *diag.Diagnostics) { d.Items = nil }
+	clobber := func(_ *schema.Config, d *diag.Diagnostics) { d.Items = nil }
 	e := confetti.New(alpha.Schema(),
 		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(clobber))

@@ -10,14 +10,13 @@ import (
 	"github.com/acidsailor/confetti/internal/ident"
 	"github.com/acidsailor/confetti/internal/listval"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // resource identifies a labeled or exclusive value.
 type resource struct {
 	label string
 	arg   string
-	def   *schema.Node
+	def   *schema.Def
 	key   string
 }
 
@@ -44,9 +43,9 @@ func (dv *differ) buildGraph() {
 }
 
 // definesOf returns one resource per label and key argument in a subtree so references can target one part of a composite key.
-func definesOf(n *tree.Node) []resource {
+func definesOf(n *schema.Node) []resource {
 	var out []resource
-	n.Walk(func(x *tree.Node) {
+	n.Walk(func(x *schema.Node) {
 		def := x.Def
 		if def == nil {
 			return
@@ -69,9 +68,9 @@ func definesOf(n *tree.Node) []resource {
 }
 
 // refsOf returns referenced resources in a subtree and expands semantic list values into separate references.
-func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
+func refsOf(n *schema.Node, d *diag.Diagnostics) []resource {
 	var out []resource
-	n.Walk(func(x *tree.Node) {
+	n.Walk(func(x *schema.Node) {
 		def := x.Def
 		if def == nil {
 			return
@@ -106,7 +105,7 @@ func refsOf(n *tree.Node, d *diag.Diagnostics) []resource {
 }
 
 // addedSubtree returns the subtree created by an operation, including replacement and cross-definition modification results.
-func addedSubtree(o op) *tree.Node {
+func addedSubtree(o op) *schema.Node {
 	if o.action == graph.Add || o.action == graph.Replace {
 		return o.src
 	}
@@ -118,7 +117,7 @@ func addedSubtree(o op) *tree.Node {
 }
 
 // removedSubtree returns the subtree removed by an operation, including replaced and cross-definition modified inputs.
-func removedSubtree(o op) *tree.Node {
+func removedSubtree(o op) *schema.Node {
 	switch o.action {
 	case graph.Remove:
 		return o.src
@@ -152,7 +151,7 @@ func (dv *differ) deriveSlotCleanupEdges() {
 }
 
 // excludes returns the label by which a forbids b among siblings.
-func excludes(a, b *schema.Node) (string, bool) {
+func excludes(a, b *schema.Def) (string, bool) {
 	for _, r := range a.Relations {
 		if r.IsExclusion() && b.HasLabel(r.Label) {
 			return r.Label, true
@@ -162,7 +161,7 @@ func excludes(a, b *schema.Node) (string, bool) {
 }
 
 // conflictLabel returns a label that makes two sibling definitions mutually exclusive in either direction.
-func conflictLabel(a, b *schema.Node) (string, bool) {
+func conflictLabel(a, b *schema.Def) (string, bool) {
 	if a == nil || b == nil {
 		return "", false
 	}
@@ -193,7 +192,7 @@ func (dv *differ) deriveExclusionEdges() {
 }
 
 // definerIndex maps each resource defined by the selected subtrees to the operation with the smallest baseline key.
-func definerIndex(ops []op, pick func(op) *tree.Node) map[resource]int {
+func definerIndex(ops []op, pick func(op) *schema.Node) map[resource]int {
 	idx := map[resource]int{}
 	for i, o := range ops {
 		src := pick(o)
@@ -235,7 +234,7 @@ func (dv *differ) deriveRefEdges() {
 		if rm == o.runSrc {
 			rm = nil
 		}
-		for _, src := range [2]*tree.Node{o.runSrc, rm} {
+		for _, src := range [2]*schema.Node{o.runSrc, rm} {
 			if src == nil {
 				continue
 			}
@@ -249,9 +248,9 @@ func (dv *differ) deriveRefEdges() {
 }
 
 // resourcesHeld returns comparable exclusive resources and warns about unresolvable lists.
-func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
+func resourcesHeld(n *schema.Node, d *diag.Diagnostics) []heldResource {
 	var out []heldResource
-	n.Walk(func(x *tree.Node) {
+	n.Walk(func(x *schema.Node) {
 		def := x.Def
 		if def == nil || len(def.KeyArgs) == 0 {
 			return
@@ -291,7 +290,7 @@ func resourcesHeld(n *tree.Node, d *diag.Diagnostics) []heldResource {
 
 // resolveListArg resolves a list argument and warns when ordering must skip the line.
 func resolveListArg(
-	x *tree.Node,
+	x *schema.Node,
 	ls schema.ListStrategy,
 	d *diag.Diagnostics,
 	skipped string,
@@ -313,7 +312,7 @@ func resolveListArg(
 }
 
 // resourceFor returns a Kind-keyed resource or uses the definition when Kind is empty.
-func resourceFor(def *schema.Node, key string) resource {
+func resourceFor(def *schema.Def, key string) resource {
 	r := resource{label: def.KindName, key: key}
 	if r.label == "" {
 		r.def = def
@@ -377,9 +376,9 @@ type requirement struct {
 	label string
 }
 
-func requirementsOf(n *tree.Node) []requirement {
+func requirementsOf(n *schema.Node) []requirement {
 	var out []requirement
-	n.Walk(func(x *tree.Node) {
+	n.Walk(func(x *schema.Node) {
 		def := x.Def
 		if def == nil {
 			return
@@ -397,10 +396,10 @@ func requirementsOf(n *tree.Node) []requirement {
 }
 
 // survivingLabels returns labels provided by the same definition and key in both configurations.
-func survivingLabels(running, intended *tree.Config) map[string]bool {
-	collect := func(c *tree.Config) map[resource]bool {
+func survivingLabels(running, intended *schema.Config) map[string]bool {
+	collect := func(c *schema.Config) map[resource]bool {
 		set := map[resource]bool{}
-		tree.Walk(c, func(n *tree.Node) {
+		schema.Walk(c, func(n *schema.Node) {
 			def := n.Def
 			if def == nil {
 				return

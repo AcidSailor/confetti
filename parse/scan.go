@@ -9,7 +9,7 @@ import (
 // frame represents one section; a frame without schema children isolates descendants of an unknown line.
 type frame struct {
 	indent   int
-	children []*schema.Node
+	children []*schema.Def
 }
 
 type stepKind int
@@ -29,7 +29,7 @@ type step struct {
 	txt        string
 	indent     int
 	depth      int // stack depth after this line, including the root frame
-	def        *schema.Node
+	def        *schema.Def
 	fields     map[string]string
 	opensBlock bool
 }

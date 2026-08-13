@@ -1,11 +1,9 @@
-package tree
+package schema
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/acidsailor/confetti/schema"
 )
 
 func TestChildrenKeepSourceOrder(t *testing.T) {
@@ -19,7 +17,7 @@ func TestChildrenKeepSourceOrder(t *testing.T) {
 }
 
 func TestAddChildAndPath(t *testing.T) {
-	s := schema.New()
+	s := New()
 	cfg := NewConfig(s)
 	iface := cfg.Root.AddChild(NewNode("interface Ethernet1/1"))
 	ip := iface.AddChild(
@@ -53,7 +51,7 @@ func TestSetTextRetitlesInPlace(t *testing.T) {
 }
 
 func TestWalkVisitsAll(t *testing.T) {
-	s := schema.New()
+	s := New()
 	cfg := NewConfig(s)
 	iface := cfg.Root.AddChild(NewNode("interface Ethernet1/1"))
 	iface.AddChild(NewNode("shutdown"))

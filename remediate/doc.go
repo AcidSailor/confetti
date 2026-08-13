@@ -4,7 +4,7 @@
 // block bodies excluded), collects op-tagged changes, derives dependency
 // edges (refs, exclusive resources, Requires), topologically schedules
 // them. Creates ascend by declaration rank, and removes descend. Scheduling can
-// split sections. The result is a new *tree.Config that render can convert to
+// split sections. The result is a new *schema.Config that render can convert to
 // CLI. Result.Changes is a flat log with read-only references to source nodes.
 //
 // Diff is direction-independent: rollback is Diff(intended, running). The

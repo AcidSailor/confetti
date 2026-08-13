@@ -2,14 +2,14 @@ package remediate
 
 import (
 	"github.com/acidsailor/confetti/graph"
-	"github.com/acidsailor/confetti/tree"
+	"github.com/acidsailor/confetti/schema"
 )
 
 // Change describes one logical operation with read-only source-node references and outermost-first section context.
 type Change struct {
 	Action   graph.Action // Add | Remove | Modify | Replace
-	Running  *tree.Node   // node in the running tree; nil for a pure Add
-	Intended *tree.Node   // node in the intended tree; nil for a Remove
+	Running  *schema.Node // node in the running tree; nil for a pure Add
+	Intended *schema.Node // node in the intended tree; nil for a Remove
 	Path     []string
 }
 

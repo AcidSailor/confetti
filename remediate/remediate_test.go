@@ -11,7 +11,6 @@ import (
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 func remediation(t *testing.T, running, intended string) (string, *Result) {
@@ -47,8 +46,8 @@ func TestDiffModifyIdempotent(t *testing.T) { // E2
 		"interface Ethernet1/1\n  description B\n")
 	assert.Equal(t, "interface Ethernet1/1\n  description B\n", out)
 	var sawModify bool
-	tree.Walk(res.Tree, func(n *tree.Node) {
-		if n.Op == tree.OpModify && n.Text == "description B" {
+	schema.Walk(res.Tree, func(n *schema.Node) {
+		if n.Op == schema.OpModify && n.Text == "description B" {
 			sawModify = true
 		}
 	})
@@ -153,18 +152,18 @@ func TestDiffFullLineValueIsAddRemoveNotModify(t *testing.T) { // E6
 	ops := opsByText(res)
 	assert.Equal(
 		t,
-		tree.OpAdd,
+		schema.OpAdd,
 		ops["ip address 10.0.0.2 255.255.255.0 secondary"],
 	)
 	assert.Equal(
 		t,
-		tree.OpRemove,
+		schema.OpRemove,
 		ops["no ip address 10.0.0.1 255.255.255.0 secondary"],
 	)
-	tree.Walk(res.Tree, func(n *tree.Node) {
+	schema.Walk(res.Tree, func(n *schema.Node) {
 		assert.NotEqual(
 			t,
-			tree.OpModify,
+			schema.OpModify,
 			n.Op,
 			"full-line change must not Modify",
 		)
@@ -177,10 +176,10 @@ func TestDiffOpTagsAddRemoveSection(t *testing.T) {
 		"interface Ethernet1/1\n  shutdown\n",
 		"interface Ethernet1/1\n  description NEW\nvlan 99\n")
 	ops := opsByText(res)
-	assert.Equal(t, tree.OpAdd, ops["vlan 99"])
-	assert.Equal(t, tree.OpSection, ops["interface Ethernet1/1"])
-	assert.Equal(t, tree.OpAdd, ops["description NEW"])
-	assert.Equal(t, tree.OpRemove, ops["no shutdown"]) // shutdown removed
+	assert.Equal(t, schema.OpAdd, ops["vlan 99"])
+	assert.Equal(t, schema.OpSection, ops["interface Ethernet1/1"])
+	assert.Equal(t, schema.OpAdd, ops["description NEW"])
+	assert.Equal(t, schema.OpRemove, ops["no shutdown"]) // shutdown removed
 }
 
 func TestDiffUnmatchedNodeDefensive(t *testing.T) { // E11
@@ -188,23 +187,23 @@ func TestDiffUnmatchedNodeDefensive(t *testing.T) { // E11
 
 	// running-only unmatched (def==nil) node => OpRemove "no <text>" + a Warning.
 	// Import never produces def==nil nodes, so the tree is hand-built.
-	running := tree.NewConfig(s)
-	running.Root.AddChild(tree.NewNode("flux-capacitor on"))
-	res, d := Diff(running, tree.NewConfig(s), Break)
+	running := schema.NewConfig(s)
+	running.Root.AddChild(schema.NewNode("flux-capacitor on"))
+	res, d := Diff(running, schema.NewConfig(s), Break)
 	assert.Equal(t, "no flux-capacitor on\n", render.Render(res.Tree))
 	assert.Contains(t, d.String(), "negating unmatched line")
 
 	// intended-only unmatched node => OpAdd verbatim, no warning.
-	intended := tree.NewConfig(s)
-	intended.Root.AddChild(tree.NewNode("flux-capacitor on"))
-	res2, d2 := Diff(tree.NewConfig(s), intended, Break)
+	intended := schema.NewConfig(s)
+	intended.Root.AddChild(schema.NewNode("flux-capacitor on"))
+	res2, d2 := Diff(schema.NewConfig(s), intended, Break)
 	assert.Equal(t, "flux-capacitor on\n", render.Render(res2.Tree))
 	assert.NotContains(t, d2.String(), "negating unmatched line")
 }
 
-func opsByText(res *Result) map[string]tree.Op {
-	ops := map[string]tree.Op{}
-	tree.Walk(res.Tree, func(n *tree.Node) { ops[n.Text] = n.Op })
+func opsByText(res *Result) map[string]schema.Op {
+	ops := map[string]schema.Op{}
+	schema.Walk(res.Tree, func(n *schema.Node) { ops[n.Text] = n.Op })
 	return ops
 }
 
@@ -310,7 +309,7 @@ func TestDiffSectionHeaderFieldChange(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.False(t, res.Empty())
 	assert.Equal(t, "vlan 10 name BAR\n", render.Render(res.Tree))
-	assert.Equal(t, tree.OpModify, opsByText(res)["vlan 10 name BAR"])
+	assert.Equal(t, schema.OpModify, opsByText(res)["vlan 10 name BAR"])
 	// The change log pairs both headers, so compare can show - old / + new.
 	require.Len(t, res.Changes, 1)
 	c := res.Changes[0]
@@ -374,10 +373,10 @@ func TestDiffDuplicateIdempotentRunningValueWarns(t *testing.T) {
 }
 
 func TestResultEmptyUnknownOpIsNotEmpty(t *testing.T) {
-	// A future tree.Op value must never read as "no change".
-	out := tree.NewConfig(testSchema())
-	n := tree.NewNode("mystery line")
-	n.Op = tree.Op(99)
+	// A future schema.Op value must never read as "no change".
+	out := schema.NewConfig(testSchema())
+	n := schema.NewNode("mystery line")
+	n.Op = schema.Op(99)
 	out.Root.AddChild(n)
 	r := &Result{Tree: out}
 	assert.False(t, r.Empty())
@@ -412,7 +411,7 @@ func TestDiffBlockBodyChangeIsModify(t *testing.T) {
 	res, d := Diff(run, intd, Break)
 	require.False(t, d.HasErrors())
 	assert.Equal(t, "banner motd ^\nnew body\n^\n", render.Render(res.Tree))
-	assert.Equal(t, tree.OpModify, res.Tree.Root.Children[0].Op)
+	assert.Equal(t, schema.OpModify, res.Tree.Root.Children[0].Op)
 }
 
 func TestDiffBlockIdenticalIsNoop(t *testing.T) {
@@ -469,7 +468,7 @@ func TestDiffKeyedLeafIdempotentIsModify(t *testing.T) {
 		"ip route 10.0.0.0/8 via 2.2.2.2\n",
 		render.Render(res.Tree),
 	)
-	assert.Equal(t, tree.OpModify, res.Tree.Root.Children[0].Op)
+	assert.Equal(t, schema.OpModify, res.Tree.Root.Children[0].Op)
 }
 
 func TestDiffKeyedLeafReplacePair(t *testing.T) {
@@ -484,8 +483,8 @@ func TestDiffKeyedLeafReplacePair(t *testing.T) {
 		render.Render(res.Tree))
 	top := res.Tree.Root.Children
 	require.Len(t, top, 2)
-	assert.Equal(t, tree.OpRemove, top[0].Op)
-	assert.Equal(t, tree.OpAdd, top[1].Op)
+	assert.Equal(t, schema.OpRemove, top[0].Op)
+	assert.Equal(t, schema.OpAdd, top[1].Op)
 }
 
 func TestDiffKeyedLeafUnchangedIsNoop(t *testing.T) {
