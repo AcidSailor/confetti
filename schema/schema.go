@@ -919,3 +919,16 @@ func MatchChild(
 	}
 	return nil, nil, false
 }
+
+// BindsDef reports whether line re-parses among candidates to want, and returns the fields want captures from it.
+func BindsDef(
+	candidates []*Def,
+	want *Def,
+	line string,
+) (map[string]string, bool) {
+	def, fields, ok := MatchChild(candidates, line)
+	if !ok || def != want {
+		return nil, false
+	}
+	return fields, true
+}

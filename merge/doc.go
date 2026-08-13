@@ -4,7 +4,8 @@
 // (the default) follows the slot's schema merge strategy, including a
 // definition's MergeFunc, unions list slots, and keeps the later value
 // otherwise; Refuse reports an Error for everything the schema does not
-// sanction; KeepFirst and KeepLast ignore the schema. The
+// sanction. A caller resolver receives the same declared strategy and may
+// ignore it. The
 // severity follows the outcome: Refused is an Error and keeps the earlier
 // value, Overridden and a value-changing Combined are Warnings, and a
 // Combined that hands back the earlier node warns that a leaf's later value

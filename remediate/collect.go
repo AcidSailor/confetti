@@ -119,7 +119,7 @@ func (dv *differ) collect(
 			continue
 		}
 		if cleanupSlots[id] {
-			if sameValue(rc, intByIdent[id]) {
+			if rc.SameValue(intByIdent[id]) {
 				continue
 			}
 			removes = append(removes, rc)

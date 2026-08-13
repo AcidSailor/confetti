@@ -132,8 +132,8 @@ func (lf *levelFold) foldContinuation(m *schema.Node) {
 	f[bls.Arg] = raw
 	// Match the rewritten line against all candidates and require the base definition.
 	text := base.Render(f)
-	mdef, fields, ok := schema.MatchChild(candidates, text)
-	if !ok || mdef != base {
+	fields, ok := schema.BindsDef(candidates, base, text)
+	if !ok {
 		d.AddAt(m.Line, diag.Error,
 			"%s: cannot fold continuation: %q does not re-parse to template %q",
 			m.Path(), text, base.Template)
@@ -181,8 +181,8 @@ func (lf *levelFold) synthesizeBase(
 	delete(f, m.Def.ListSpec.Arg)
 	f[bls.Arg] = raw
 	text := base.Render(f)
-	def, fields, ok := schema.MatchChild(candidates, text)
-	if !ok || def != base {
+	fields, ok := schema.BindsDef(candidates, base, text)
+	if !ok {
 		d.AddAt(
 			m.Line,
 			diag.Error,
@@ -232,8 +232,8 @@ func (lf *levelFold) foldOne(
 		f[keyArg] = it
 		text := canon.Render(f)
 		// Match the rendered line against all candidates and require the canonical definition.
-		mdef, fields, ok := schema.MatchChild(candidates, text)
-		if !ok || mdef != canon {
+		fields, ok := schema.BindsDef(candidates, canon, text)
+		if !ok {
 			d.AddAt(
 				m.Line,
 				diag.Error,

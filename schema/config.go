@@ -70,6 +70,11 @@ func (n *Node) SetValueFrom(src *Node) {
 	n.Text = src.Text
 }
 
+// SameValue reports whether both nodes carry the same definition, rendered line, and block body.
+func (n *Node) SameValue(o *Node) bool {
+	return n.Def == o.Def && n.Text == o.Text && slices.Equal(n.Block, o.Block)
+}
+
 // AddChild attaches c under n and panics if c already has a parent.
 func (n *Node) AddChild(c *Node) *Node {
 	if c.Parent != nil {

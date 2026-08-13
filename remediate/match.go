@@ -1,8 +1,6 @@
 package remediate
 
 import (
-	"slices"
-
 	"github.com/acidsailor/confetti/schema"
 
 	"github.com/acidsailor/confetti/internal/ident"
@@ -29,11 +27,6 @@ func groupByIdent(nodes []*schema.Node) map[ident.Ident][]*schema.Node {
 	return m
 }
 
-// sameValue reports whether two nodes carry the same definition, rendered line, and block body.
-func sameValue(a, b *schema.Node) bool {
-	return a.Def == b.Def && a.Text == b.Text && slices.Equal(a.Block, b.Block)
-}
-
 // runningCounterpart selects the stale spelling to replace before slot cleanup.
 func runningCounterpart(
 	nodes []*schema.Node,
@@ -44,7 +37,7 @@ func runningCounterpart(
 		return first, false
 	}
 	for _, n := range nodes {
-		if !sameValue(n, intended) {
+		if !n.SameValue(intended) {
 			return n, true
 		}
 	}

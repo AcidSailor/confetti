@@ -137,9 +137,9 @@ func TestMergeKeyedLeafConflict(t *testing.T) {
 		Key("mode")
 	a := parsePart(t, s, "max-paths ebgp 4\n")
 	b := parsePart(t, s, "max-paths ebgp 8\n")
-	_, d := merge.Merge(s, merge.Options{Resolve: merge.Refuse}, a, b)
+	_, d := merge.Merge(s, refuse, a, b)
 	assert.True(t, d.HasErrors())
-	out, d2 := merge.Merge(s, merge.Options{}, a, b)
+	out, d2 := merge.Merge(s, declared, a, b)
 	assert.False(t, d2.HasErrors())
 	assert.Equal(t, "max-paths ebgp 8\n", render.Render(out))
 }
@@ -149,7 +149,7 @@ func TestMergeNeverMutatesInputs(t *testing.T) {
 	a := parsePart(t, s, "interface eth1\n  description uplink\n")
 	b := parsePart(t, s, "interface eth1\n  description downlink\n")
 	beforeA, beforeB := render.Render(a), render.Render(b)
-	merge.Merge(s, merge.Options{}, a, b)
+	merge.Merge(s, declared, a, b)
 	assert.Equal(t, beforeA, render.Render(a))
 	assert.Equal(t, beforeB, render.Render(b))
 }
@@ -158,7 +158,7 @@ func TestMergeSchemaMismatch(t *testing.T) {
 	s1, s2 := testSchema(), testSchema()
 	_, d := merge.Merge(
 		s1,
-		merge.Options{Resolve: merge.Refuse},
+		refuse,
 		parsePart(t, s2, "vlan 10\n"),
 	)
 	assert.True(t, d.HasErrors())
@@ -166,7 +166,7 @@ func TestMergeSchemaMismatch(t *testing.T) {
 
 func TestMergeZeroAndOneParts(t *testing.T) {
 	s := testSchema()
-	out, d := merge.Merge(s, merge.Options{Resolve: merge.Refuse})
+	out, d := merge.Merge(s, refuse)
 	assert.False(t, d.HasErrors())
 	assert.Empty(t, out.Root.Children)
 
@@ -188,10 +188,10 @@ func TestMergeZeroToOneSlotConflict(t *testing.T) {
 		s,
 		"router bgp 65001\n  neighbor 10.0.0.2 remote-as 65002\n",
 	)
-	_, d := merge.Merge(s, merge.Options{Resolve: merge.Refuse}, a, b)
+	_, d := merge.Merge(s, refuse, a, b)
 	assert.True(t, d.HasErrors())
 
-	out, d2 := merge.Merge(s, merge.Options{}, a, b)
+	out, d2 := merge.Merge(s, declared, a, b)
 	assert.False(t, d2.HasErrors())
 	rendered := render.Render(out)
 	// last part's header wins; children from both parts merge under it
@@ -214,7 +214,7 @@ func TestMergeRefusedSectionKeepsFirstStanzaWhole(t *testing.T) {
 		s,
 		"router bgp 65001\n  neighbor 10.0.0.2 remote-as 65002\n",
 	)
-	out, d := merge.Merge(s, merge.Options{Resolve: merge.Refuse}, a, b)
+	out, d := merge.Merge(s, refuse, a, b)
 	assert.True(t, d.HasErrors())
 	rendered := render.Render(out)
 	assert.Contains(t, rendered, "router bgp 65000") // first header stays
@@ -233,10 +233,10 @@ func TestMergeCrossDefKeyedConflict(t *testing.T) {
 		Card(schema.ZeroToN).Kind("vlan").Key("id").MarkIdempotent()
 	a := parsePart(t, s, "vlan 10 state enable\n")
 	b := parsePart(t, s, "vlan 10 name FOO state disable\n")
-	_, d := merge.Merge(s, merge.Options{Resolve: merge.Refuse}, a, b)
+	_, d := merge.Merge(s, refuse, a, b)
 	assert.True(t, d.HasErrors())
 
-	out, d2 := merge.Merge(s, merge.Options{}, a, b)
+	out, d2 := merge.Merge(s, declared, a, b)
 	assert.False(t, d2.HasErrors())
 	assert.Equal(t, "vlan 10 name FOO state disable\n", render.Render(out))
 }
@@ -254,14 +254,14 @@ func TestMergeCrossDefSectionsDoNotMixChildren(t *testing.T) {
 
 	strictOut, strictDiag := merge.Merge(
 		s,
-		merge.Options{Resolve: merge.Refuse},
+		refuse,
 		first,
 		second,
 	)
 	assert.True(t, strictDiag.HasErrors())
 	assert.Equal(t, "mode 1 a\n  a-child\n", render.Render(strictOut))
 
-	out, d := merge.Merge(s, merge.Options{}, first, second)
+	out, d := merge.Merge(s, declared, first, second)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "mode 1 b\n  b-child\n", render.Render(out))
 	reparsed := parsePart(t, s, render.Render(out))
@@ -281,7 +281,7 @@ func TestMergeToggleConflictRefused(t *testing.T) {
 	s := toggleSchema()
 	a := parsePart(t, s, "interface Ethernet1/1\n  shutdown\n")
 	b := parsePart(t, s, "interface Ethernet1/1\n  no shutdown\n")
-	out, d := merge.Merge(s, merge.Options{Resolve: merge.Refuse}, a, b)
+	out, d := merge.Merge(s, refuse, a, b)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "part 2 conflicts with part 1")
 	rendered := render.Render(out)
@@ -293,7 +293,7 @@ func TestMergeToggleConflictDeclaredLastWins(t *testing.T) {
 	s := toggleSchema()
 	a := parsePart(t, s, "interface Ethernet1/1\n  shutdown\n")
 	b := parsePart(t, s, "interface Ethernet1/1\n  no shutdown\n")
-	out, d := merge.Merge(s, merge.Options{}, a, b)
+	out, d := merge.Merge(s, declared, a, b)
 	assert.False(t, d.HasErrors())
 	assert.Contains(t, d.String(), "part 2 overrides part 1")
 	rendered := render.Render(out)
@@ -313,7 +313,7 @@ func TestMergeToggleGroupThreeWayConflict(t *testing.T) {
 
 	a := parsePart(t, s, "interface Ethernet1/1\n  duplex auto\n")
 	b := parsePart(t, s, "interface Ethernet1/1\n  duplex half\n")
-	_, d := merge.Merge(s, merge.Options{Resolve: merge.Refuse}, a, b)
+	_, d := merge.Merge(s, refuse, a, b)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "part 2 conflicts with part 1")
 }
@@ -323,7 +323,7 @@ func TestMergeToggleSameValueDedups(t *testing.T) {
 	s := toggleSchema()
 	a := parsePart(t, s, "interface Ethernet1/1\n  shutdown\n")
 	b := parsePart(t, s, "interface Ethernet1/1\n  shutdown\n")
-	out, d := merge.Merge(s, merge.Options{Resolve: merge.Refuse}, a, b)
+	out, d := merge.Merge(s, refuse, a, b)
 	require.False(t, d.HasErrors(), d.String())
 	rendered := render.Render(out)
 	assert.Equal(t, 1, strings.Count(rendered, "shutdown"))
@@ -476,10 +476,16 @@ func TestMergeKeepLastSectionOwnsWholeStanza(t *testing.T) {
 
 func TestMergeCallerResolverOverridesDeclaredKind(t *testing.T) {
 	// A caller resolver that ignores declared visibly overrides the schema.
+	keepFirst := func(
+		earlier, _ *schema.Node,
+		_ schema.MergeStrategy,
+	) (*schema.Node, schema.Outcome) {
+		return earlier, schema.Overridden
+	}
 	got, d := mergeText(
 		t,
 		keepSchema(),
-		merge.Options{Resolve: merge.KeepFirst},
+		merge.Options{Resolve: keepFirst},
 		"hostname sw1\n",
 		"hostname sw2\n",
 	)
@@ -489,7 +495,13 @@ func TestMergeCallerResolverOverridesDeclaredKind(t *testing.T) {
 }
 
 func TestMergeCallerKeepLastResolvesUnknownConflicts(t *testing.T) {
-	got, d := mergeText(t, testSchema(), merge.Options{Resolve: merge.KeepLast},
+	keepLast := func(
+		_, later *schema.Node,
+		_ schema.MergeStrategy,
+	) (*schema.Node, schema.Outcome) {
+		return later, schema.Overridden
+	}
+	got, d := mergeText(t, testSchema(), merge.Options{Resolve: keepLast},
 		"interface eth1\n  description uplink\n",
 		"interface eth1\n  description downlink\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -499,7 +511,7 @@ func TestMergeCallerKeepLastResolvesUnknownConflicts(t *testing.T) {
 
 func TestMergeResolverTextMustRenderFromFields(t *testing.T) {
 	// A fresh resolver node whose text ignores its fields is rejected and the earlier value kept.
-	bad := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+	bad := func(earlier, _ *schema.Node, _ schema.MergeStrategy) (*schema.Node, schema.Outcome) {
 		n := earlier.CloneValue()
 		n.Fields["text"] = "patched"
 		return n, schema.Overridden
@@ -541,7 +553,7 @@ func TestMergeResolverTextMustBindOwnDefinition(t *testing.T) {
 	i.Child("switchport mode trunk").Card(schema.ZeroToOne).Kind("mode")
 	gen := i.Child("switchport mode {{ m:word }}").
 		Card(schema.ZeroToOne).Kind("mode")
-	bad := func(_, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+	bad := func(_, _ *schema.Node, _ schema.MergeStrategy) (*schema.Node, schema.Outcome) {
 		n := schema.NewNode("")
 		n.Def = gen
 		n.Fields = map[string]string{"m": "trunk"}
@@ -565,7 +577,7 @@ func TestMergeCombinedAcrossDefinitionsIsAnError(t *testing.T) {
 	b := s.Node("mode {{ id:word }} b").Card(schema.ZeroToN).
 		Kind("mode").Key("id")
 	b.Child("b-child").Card(schema.ZeroToOne)
-	combine := func(_, later *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+	combine := func(_, later *schema.Node, _ schema.MergeStrategy) (*schema.Node, schema.Outcome) {
 		return later, schema.Combined
 	}
 	got, d := mergeText(t, s, merge.Options{Resolve: combine},
@@ -616,6 +628,38 @@ func TestMergeFuncCustomCombination(t *testing.T) {
 	}
 }
 
+func TestCallerResolverReachesDeclaredMergeFunc(t *testing.T) {
+	// A caller resolver receives the declared strategy whole, so it can delegate to the slot's MergeFunc.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+	desc := i.Child("description {{ text:rest }}").Card(schema.ZeroToOne).
+		MarkIdempotent()
+	desc.MergeFunc(
+		func(earlier, later *schema.Node) (*schema.Node, schema.Outcome) {
+			n := earlier.CloneValue()
+			n.Fields["text"] = earlier.Fields["text"] + " + " + later.Fields["text"]
+			n.Text = desc.Render(n.Fields)
+			return n, schema.Combined
+		},
+	)
+	// Honor the schema's own function where one is declared, and keep the earlier value elsewhere.
+	delegate := func(
+		earlier, later *schema.Node,
+		declared schema.MergeStrategy,
+	) (*schema.Node, schema.Outcome) {
+		if declared.Func != nil {
+			return declared.Func(earlier, later)
+		}
+		return earlier, schema.Overridden
+	}
+	got, d := mergeText(t, s, merge.Options{Resolve: delegate},
+		"interface eth1\n  description uplink\n",
+		"interface eth1\n  description downlink\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, got, "description uplink + downlink")
+}
+
 func TestMergeFuncResultIsValidated(t *testing.T) {
 	// A MergeFunc result flows through the same identity validation as any resolver node.
 	s := schema.New()
@@ -660,7 +704,7 @@ func TestMergeCombinedKeepingEarlierAcrossDefsIsAnError(t *testing.T) {
 	b := s.Node("mode {{ id:word }} b").Card(schema.ZeroToN).
 		Kind("mode").Key("id")
 	b.Child("b-child").Card(schema.ZeroToOne)
-	combine := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+	combine := func(earlier, _ *schema.Node, _ schema.MergeStrategy) (*schema.Node, schema.Outcome) {
 		return earlier, schema.Combined
 	}
 	got, d := mergeText(t, s, merge.Options{Resolve: combine},
@@ -673,7 +717,7 @@ func TestMergeCombinedKeepingEarlierAcrossDefsIsAnError(t *testing.T) {
 
 func TestMergeResolverNodeWithoutDefinitionIsAnError(t *testing.T) {
 	// A fresh definition-free node would pair by raw text and drift identity on the next Diff.
-	bad := func(_, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+	bad := func(_, _ *schema.Node, _ schema.MergeStrategy) (*schema.Node, schema.Outcome) {
 		return schema.NewNode("description merged"), schema.Overridden
 	}
 	got, d := mergeText(t, testSchema(), merge.Options{Resolve: bad},
@@ -690,7 +734,7 @@ func TestMergeResolverMustKeepSlotIdentity(t *testing.T) {
 	testtypes.Fill(s.Registry)
 	s.Node("vlan {{ id:uint }} name {{ name:word }}").
 		Card(schema.ZeroToN).Kind("vlan").Key("id")
-	rekey := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+	rekey := func(earlier, _ *schema.Node, _ schema.MergeStrategy) (*schema.Node, schema.Outcome) {
 		n := earlier.CloneValue()
 		n.Fields = map[string]string{"id": "20", "name": "x"}
 		n.Text = n.Def.Render(n.Fields)
@@ -715,7 +759,7 @@ func TestMergeResolverNodeAlreadyInTreeIsAnError(t *testing.T) {
 			Card(schema.ZeroToOne).MarkIdempotent()
 		donor := parsePart(t, s, "interface eth1\n  description donor\n")
 		borrowed := donor.Root.Children[0].Children[0]
-		lend := func(_, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+		lend := func(_, _ *schema.Node, _ schema.MergeStrategy) (*schema.Node, schema.Outcome) {
 			return borrowed, out
 		}
 		got, d := mergeText(t, s, merge.Options{Resolve: lend},
@@ -729,7 +773,7 @@ func TestMergeResolverNodeAlreadyInTreeIsAnError(t *testing.T) {
 
 func TestMergeResolverCannotReplaceSectionWithFreshNode(t *testing.T) {
 	// A fresh node has no children, so letting it win a section would erase both stanzas.
-	rehead := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+	rehead := func(earlier, _ *schema.Node, _ schema.MergeStrategy) (*schema.Node, schema.Outcome) {
 		n := earlier.CloneValue()
 		n.Fields = map[string]string{"asn": "65003"}
 		n.Text = n.Def.Render(n.Fields)

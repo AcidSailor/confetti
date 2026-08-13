@@ -129,7 +129,7 @@ The explanations record constraints that tests do not show.
   A fresh node must carry a definition, must not already belong to a tree,
   must keep the contested slot's pairing identity, must render its text from
   its fields, and that text must bind its own definition through
-  `schema.MatchChild` at its level. It must not win a section, because a
+  `schema.BindsDef` at its level. It must not win a section, because a
   fresh node has no children and would erase both stanzas. Merge reports an
   Error and keeps the earlier value for each of these. A `Combined` outcome
   across two definitions with a section on either side is an Error: children
@@ -156,8 +156,10 @@ The explanations record constraints that tests do not show.
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
   `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
   platform-independent.
-- **Whole-tree validators belong to `Engine`.** They consume
-  `*schema.Config`, which keeps the schema package free of engine policy. `WithCommitChecks` appends validators after the built-in
+- **Whole-tree validators belong to `Engine`.** A hook such as `OrderHook` or
+  `MergeFunc` is per-definition grammar and belongs to the definition that
+  declares it; a validator is per-Engine composition, so two Engines can share
+  one schema and still run different validator sets. `WithCommitChecks` appends validators after the built-in
   `CommitCheck`, in registration order. They run for `CommitCheck`,
   `Remediate` (intended), and `Rollback` (running). `Render`, `Compare`, and
   `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
