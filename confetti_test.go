@@ -54,7 +54,7 @@ func TestE2EDanglingRefThenFixed(t *testing.T) {
 	assert.False(t, e.CommitCheck(cfg2).HasErrors())
 }
 
-func TestE2EBrownfieldLenientVsStrict(t *testing.T) {
+func TestE2EBrownfieldDropVsReject(t *testing.T) {
 	in := "interface Ethernet1/1\n" +
 		"  flux-capacitor enable\n" +
 		"  no shutdown\n"
@@ -69,7 +69,7 @@ func TestE2EBrownfieldLenientVsStrict(t *testing.T) {
 
 	strict := alpha.Engine()
 	_, ds := strict.Import(in)
-	assert.True(t, ds.HasErrors()) // same input is a hard error under Strict
+	assert.True(t, ds.HasErrors()) // same input is a hard error under Reject
 }
 
 func remediateSchema() *schema.Schema {

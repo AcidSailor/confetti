@@ -47,7 +47,7 @@ type differ struct {
 	d                 *diag.Diagnostics
 	ops               []op
 	g                 *graph.Graph
-	// why stores the first reason for each edge for lenient cycle warnings.
+	// why stores the first reason for each edge for Break cycle warnings.
 	why map[[2]int]string
 }
 

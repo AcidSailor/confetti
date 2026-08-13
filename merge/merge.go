@@ -148,7 +148,12 @@ func Merge(
 	if resolve == nil {
 		resolve = Declared
 	}
-	m := &merger{origin: map[*tree.Node]int{}, resolve: resolve, d: d}
+	m := &merger{
+		schema:  s,
+		origin:  map[*tree.Node]int{},
+		resolve: resolve,
+		d:       d,
+	}
 	for i, p := range parts {
 		m.level(out.Root, p.Root, i+1)
 	}
@@ -157,6 +162,7 @@ func Merge(
 
 // merger carries one Merge invocation's resolver, origin index, and diagnostics.
 type merger struct {
+	schema  *schema.Schema
 	resolve Resolve
 	origin  map[*tree.Node]int // Map each output node to its 1-based source part.
 	d       *diag.Diagnostics
@@ -191,7 +197,7 @@ func (m *merger) level(outParent, partParent *tree.Node, part int) {
 			}
 			continue
 		}
-		if repl := m.slot(oc, pc, declared, part); repl != nil {
+		if repl := m.slot(outParent, oc, pc, declared, part); repl != nil {
 			outParent.ReplaceChild(oc, repl)
 			byIdent[id] = repl
 		}
@@ -200,7 +206,7 @@ func (m *merger) level(outParent, partParent *tree.Node, part int) {
 
 // slot resolves one contested slot in place and returns a replacement node when the later or a fresh value wins whole.
 func (m *merger) slot(
-	oc, pc *tree.Node,
+	outParent, oc, pc *tree.Node,
 	declared schema.MergeKind,
 	part int,
 ) *tree.Node {
@@ -217,23 +223,28 @@ func (m *merger) slot(
 	default:
 		panic("merge: resolver returned an unknown Outcome")
 	}
-	// A fresh node whose text does not render from its fields corrupts every later stage.
-	if node != oc && node != pc && node.Def != nil &&
-		node.Text != node.Def.Render(node.Fields) {
-		m.d.Add(diag.Error,
-			"%s: resolver text does not render from its fields",
-			pc.Path())
+	if node != oc && node != pc && !m.freshNodeValid(outParent, node, pc) {
 		return nil
 	}
 	if outcome == Combined {
+		// Merging children across definitions produces a tree its own schema cannot re-parse.
+		prevDef := oc.Def
+		if node.Def != prevDef &&
+			(ident.IsSection(oc) || ident.IsSection(pc)) {
+			m.d.Add(diag.Error,
+				"%s: resolver combined sections bound to different definitions",
+				pc.Path())
+			return nil
+		}
 		if node.Text != oc.Text {
 			m.d.Add(diag.Warning, "%s: part %d combines with part %d (was %q)",
 				pc.Path(), part, m.origin[oc], oc.Text)
+			m.origin[oc] = part
 		}
 		if node != oc {
 			oc.SetValueFrom(node)
 		}
-		if ident.IsSection(pc) && oc.Def == pc.Def {
+		if ident.IsSection(pc) && prevDef == pc.Def {
 			m.level(oc, pc, part)
 		}
 		return nil
@@ -253,6 +264,33 @@ func (m *merger) slot(
 	}
 	m.origin[node] = part
 	return node
+}
+
+// freshNodeValid reports whether a resolver-constructed node keeps its identity through later stages, reporting an Error when it cannot.
+func (m *merger) freshNodeValid(outParent, node, pc *tree.Node) bool {
+	if node.Def == nil {
+		return true
+	}
+	// A text that does not render from its fields corrupts every later stage.
+	if node.Text != node.Def.Render(node.Fields) {
+		m.d.Add(diag.Error,
+			"%s: resolver text does not render from its fields",
+			pc.Path())
+		return false
+	}
+	// The text must bind its own definition when parsed again, or the merged tree and its round-trip disagree on identity.
+	cands := m.schema.Roots
+	if outParent.Def != nil {
+		cands = outParent.Def.Children
+	}
+	if def, _, ok := schema.MatchChild(cands, node.Text); !ok ||
+		def != node.Def {
+		m.d.Add(diag.Error,
+			"%s: resolver text does not bind its own definition",
+			pc.Path())
+		return false
+	}
+	return true
 }
 
 // declaredKind resolves a slot's merge kind, preferring the earlier definition's non-default declaration.

@@ -110,7 +110,7 @@ func TestMergeDedupsIdenticalLines(t *testing.T) {
 	)
 }
 
-func TestMergeConflictStrict(t *testing.T) {
+func TestMergeConflictRefused(t *testing.T) {
 	got, d := mergeText(t, testSchema(), refuse,
 		"interface eth1\n  description uplink\n",
 		"interface eth1\n  description downlink\n")
@@ -121,7 +121,7 @@ func TestMergeConflictStrict(t *testing.T) {
 	assert.Contains(t, d.String(), "part 1")
 }
 
-func TestMergeConflictLenientLastWins(t *testing.T) {
+func TestMergeConflictDeclaredLastWins(t *testing.T) {
 	got, d := mergeText(t, testSchema(), declared,
 		"interface eth1\n  description uplink\n",
 		"interface eth1\n  description downlink\n")
@@ -278,7 +278,7 @@ func toggleSchema() *schema.Schema {
 	return s
 }
 
-func TestMergeToggleConflictStrict(t *testing.T) {
+func TestMergeToggleConflictRefused(t *testing.T) {
 	s := toggleSchema()
 	a := parsePart(t, s, "interface Ethernet1/1\n  shutdown\n")
 	b := parsePart(t, s, "interface Ethernet1/1\n  no shutdown\n")
@@ -290,7 +290,7 @@ func TestMergeToggleConflictStrict(t *testing.T) {
 	assert.NotContains(t, rendered, "no shutdown") // later part rejected
 }
 
-func TestMergeToggleConflictLenientLastWins(t *testing.T) {
+func TestMergeToggleConflictDeclaredLastWins(t *testing.T) {
 	s := toggleSchema()
 	a := parsePart(t, s, "interface Ethernet1/1\n  shutdown\n")
 	b := parsePart(t, s, "interface Ethernet1/1\n  no shutdown\n")
@@ -387,7 +387,7 @@ func kindSlotSchema() *schema.Schema {
 	return s
 }
 
-func TestMergeKindSlotLenientLastWins(t *testing.T) {
+func TestMergeKindSlotDeclaredLastWins(t *testing.T) {
 	got, d := mergeText(t, kindSlotSchema(), declared,
 		"router bgp 65000\n  default-originate\n",
 		"router bgp 65000\n  default-originate route-map RM\n")
@@ -396,7 +396,7 @@ func TestMergeKindSlotLenientLastWins(t *testing.T) {
 		"router bgp 65000\n  default-originate route-map RM\n", got)
 }
 
-func TestMergeKindSlotStrictConflicts(t *testing.T) {
+func TestMergeKindSlotRefusedConflicts(t *testing.T) {
 	got, d := mergeText(t, kindSlotSchema(), refuse,
 		"router bgp 65000\n  default-originate\n",
 		"router bgp 65000\n  default-originate route-map RM\n")
@@ -429,7 +429,7 @@ func TestMergeToggleWithKindStillSharesOneSlot(t *testing.T) {
 	assert.Contains(t, d.String(), "overrides")
 }
 
-func TestMergeKindSlotLenientWarnsOnOverride(t *testing.T) {
+func TestMergeKindSlotDeclaredWarnsOnOverride(t *testing.T) {
 	_, d := mergeText(t, kindSlotSchema(), declared,
 		"router bgp 65000\n  default-originate\n",
 		"router bgp 65000\n  default-originate route-map RM\n")
@@ -532,4 +532,59 @@ func TestMergeUnionSubsetIsSilent(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Empty(t, d.Items)
 	assert.Contains(t, got, "switchport trunk allowed vlan 10,20")
+}
+
+func TestMergeResolverTextMustBindOwnDefinition(t *testing.T) {
+	// A fresh node whose text parses to a more literal sibling would change identity on round-trip.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+	i.Child("switchport mode trunk").Card(schema.ZeroToOne).Kind("mode")
+	gen := i.Child("switchport mode {{ m:word }}").
+		Card(schema.ZeroToOne).Kind("mode")
+	bad := func(_, _ *tree.Node, _ schema.MergeKind) (*tree.Node, merge.Outcome) {
+		n := tree.NewNode("")
+		n.Def = gen
+		n.Fields = map[string]string{"m": "trunk"}
+		n.Text = gen.Render(n.Fields)
+		return n, merge.Overridden
+	}
+	got, d := mergeText(t, s, merge.Options{Resolve: bad},
+		"interface eth1\n  switchport mode access\n",
+		"interface eth1\n  switchport mode trunk\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "does not bind its own definition")
+	assert.Contains(t, got, "switchport mode access") // earlier kept
+}
+
+func TestMergeCombinedAcrossDefinitionsIsAnError(t *testing.T) {
+	// Combining sections bound to different definitions cannot share children.
+	s := schema.New()
+	a := s.Node("mode {{ id:word }} a").Card(schema.ZeroToN).
+		Kind("mode").Key("id")
+	a.Child("a-child").Card(schema.ZeroToOne)
+	b := s.Node("mode {{ id:word }} b").Card(schema.ZeroToN).
+		Kind("mode").Key("id")
+	b.Child("b-child").Card(schema.ZeroToOne)
+	combine := func(_, later *tree.Node, _ schema.MergeKind) (*tree.Node, merge.Outcome) {
+		return later, merge.Combined
+	}
+	got, d := mergeText(t, s, merge.Options{Resolve: combine},
+		"mode 1 a\n  a-child\n",
+		"mode 1 b\n  b-child\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "different definitions")
+	assert.Equal(t, "mode 1 a\n  a-child\n", got) // earlier stanza kept whole
+}
+
+func TestMergeCombinedOriginTracksLastContributor(t *testing.T) {
+	// Each combine warning names the part whose value it quotes.
+	_, d := mergeText(t, testSchema(), declared,
+		"router bgp 65000\n",
+		"router bgp 65001\n",
+		"router bgp 65002\n")
+	assert.Contains(t, d.String(),
+		`part 2 combines with part 1 (was "router bgp 65000")`)
+	assert.Contains(t, d.String(),
+		`part 3 combines with part 2 (was "router bgp 65001")`)
 }

@@ -120,6 +120,14 @@ The explanations record constraints that tests do not show.
 - **An Error prevents artifact output.** An `Abort`ed ordering cycle produces
   an empty tree and empty Changes. A Protected refusal produces no operation
   or Change. A partial artifact would be unsafe.
+- **A merge resolver cannot corrupt identity.** A resolver must not mutate
+  its arguments; it returns `earlier`, `later`, or a fresh parentless node.
+  A fresh node must render its text from its fields and that text must bind
+  its own definition through `schema.MatchChild` at its level, or Merge
+  reports an Error and keeps the earlier value. A `Combined` outcome across
+  two definitions with a section on either side is an Error: children of
+  different definitions cannot share a header. `Refused` keeps the earlier
+  stanza whole and merges nothing from the later part.
 
 ### Schema construction constraints
 
