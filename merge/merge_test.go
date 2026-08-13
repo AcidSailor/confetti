@@ -499,10 +499,10 @@ func TestMergeCallerKeepLastResolvesUnknownConflicts(t *testing.T) {
 
 func TestMergeResolverTextMustRenderFromFields(t *testing.T) {
 	// A fresh resolver node whose text ignores its fields is rejected and the earlier value kept.
-	bad := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, merge.Outcome) {
+	bad := func(earlier, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
 		n := earlier.CloneValue()
 		n.Fields["text"] = "patched"
-		return n, merge.Overridden
+		return n, schema.Overridden
 	}
 	got, d := mergeText(t, testSchema(), merge.Options{Resolve: bad},
 		"interface eth1\n  description uplink\n",
@@ -541,12 +541,12 @@ func TestMergeResolverTextMustBindOwnDefinition(t *testing.T) {
 	i.Child("switchport mode trunk").Card(schema.ZeroToOne).Kind("mode")
 	gen := i.Child("switchport mode {{ m:word }}").
 		Card(schema.ZeroToOne).Kind("mode")
-	bad := func(_, _ *schema.Node, _ schema.MergeKind) (*schema.Node, merge.Outcome) {
+	bad := func(_, _ *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
 		n := schema.NewNode("")
 		n.Def = gen
 		n.Fields = map[string]string{"m": "trunk"}
 		n.Text = gen.Render(n.Fields)
-		return n, merge.Overridden
+		return n, schema.Overridden
 	}
 	got, d := mergeText(t, s, merge.Options{Resolve: bad},
 		"interface eth1\n  switchport mode access\n",
@@ -565,8 +565,8 @@ func TestMergeCombinedAcrossDefinitionsIsAnError(t *testing.T) {
 	b := s.Node("mode {{ id:word }} b").Card(schema.ZeroToN).
 		Kind("mode").Key("id")
 	b.Child("b-child").Card(schema.ZeroToOne)
-	combine := func(_, later *schema.Node, _ schema.MergeKind) (*schema.Node, merge.Outcome) {
-		return later, merge.Combined
+	combine := func(_, later *schema.Node, _ schema.MergeKind) (*schema.Node, schema.Outcome) {
+		return later, schema.Combined
 	}
 	got, d := mergeText(t, s, merge.Options{Resolve: combine},
 		"mode 1 a\n  a-child\n",
@@ -586,4 +586,67 @@ func TestMergeCombinedOriginTracksLastContributor(t *testing.T) {
 		`part 2 combines with part 1 (was "router bgp 65000")`)
 	assert.Contains(t, d.String(),
 		`part 3 combines with part 2 (was "router bgp 65001")`)
+}
+
+func TestMergeFuncCustomCombination(t *testing.T) {
+	// A MergeFunc combines two accepted values into a fresh canonical node under both built-in resolvers.
+	build := func() *schema.Schema {
+		s := schema.New()
+		testtypes.Fill(s.Registry)
+		i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+		var desc *schema.Def = i.Child("description {{ text:rest }}").Card(schema.ZeroToOne).
+			MarkIdempotent()
+		desc.MergeFunc(
+			func(earlier, later *schema.Node) (*schema.Node, schema.Outcome) {
+				n := earlier.CloneValue()
+				n.Fields["text"] = earlier.Fields["text"] + " + " + later.Fields["text"]
+				n.Text = desc.Render(n.Fields)
+				return n, schema.Combined
+			},
+		)
+		return s
+	}
+	for _, opts := range []merge.Options{declared, refuse} {
+		got, d := mergeText(t, build(), opts,
+			"interface eth1\n  description uplink\n",
+			"interface eth1\n  description downlink\n")
+		require.False(t, d.HasErrors(), d.String())
+		assert.Contains(t, got, "description uplink + downlink")
+		assert.Contains(t, d.String(), "combines with")
+	}
+}
+
+func TestMergeFuncResultIsValidated(t *testing.T) {
+	// A MergeFunc result flows through the same identity validation as any resolver node.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+	i.Child("description {{ text:rest }}").Card(schema.ZeroToOne).
+		MergeFunc(func(earlier, _ *schema.Node) (*schema.Node, schema.Outcome) {
+			n := earlier.CloneValue()
+			n.Fields["text"] = "patched"
+			return n, schema.Overridden // Text no longer renders from fields.
+		})
+	got, d := mergeText(t, s, declared,
+		"interface eth1\n  description uplink\n",
+		"interface eth1\n  description downlink\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "does not render from its fields")
+	assert.Contains(t, got, "description uplink")
+}
+
+func TestMergeFuncRefusesExplicitly(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	i := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
+	i.Child("description {{ text:rest }}").Card(schema.ZeroToOne).
+		MergeFunc(func(_, _ *schema.Node) (*schema.Node, schema.Outcome) {
+			return nil, schema.Refused
+		})
+	got, d := mergeText(t, s, declared,
+		"interface eth1\n  description uplink\n",
+		"interface eth1\n  description downlink\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "conflicts with")
+	assert.Contains(t, got, "description uplink")
 }

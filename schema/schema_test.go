@@ -955,3 +955,19 @@ func TestMergeKindSetTwicePanicsBothOrders(t *testing.T) {
 				MergeKeepLast().MergeKeepFirst()
 		})
 }
+
+func TestMergeFuncNilPanics(t *testing.T) {
+	assert.PanicsWithValue(t,
+		"schema: MergeFunc with nil func: hostname {{ name:word }}",
+		func() { New().Node("hostname {{ name:word }}").MergeFunc(nil) })
+}
+
+func TestMergeFuncExcludesOtherKindsBothOrders(t *testing.T) {
+	fn := func(earlier, _ *Node) (*Node, Outcome) { return earlier, Overridden }
+	assert.Panics(t, func() {
+		New().Node("hostname {{ name:word }}").MergeFunc(fn).MergeKeepLast()
+	})
+	assert.Panics(t, func() {
+		New().Node("hostname {{ name:word }}").MergeKeepLast().MergeFunc(fn)
+	})
+}

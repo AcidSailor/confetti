@@ -75,7 +75,23 @@ const (
 	MergeDefault   MergeKind = iota // Union a list slot, recurse a section, else keep the later value.
 	MergeKeepFirst                  // The earlier part's value wins; a later section is discarded whole.
 	MergeKeepLast                   // The later part's value wins; it replaces an earlier section whole.
+	MergeCustom                     // Call Func for combinations no fixed kind expresses.
 )
+
+// Outcome reports how a merge resolution settled a contested slot.
+type Outcome int
+
+const (
+	Refused    Outcome = iota // The earlier value is kept and an Error is reported.
+	Overridden                // The returned node won and the other value was discarded.
+	Combined                  // Both values survive in the returned node.
+)
+
+// MergeStrategy defines how merge resolves this slot when two parts claim it.
+type MergeStrategy struct {
+	Kind MergeKind
+	Func func(earlier, later *Node) (*Node, Outcome) // Set by MergeFunc.
+}
 
 // BlockKind selects how a node captures a raw multi-line block.
 type BlockKind int
@@ -177,8 +193,8 @@ type Def struct {
 	UniqueArgs       []string
 	Idempotent       bool
 	Negate           NegateStrategy
-	Merge            MergeKind // How merge resolves this slot when two parts claim it.
-	SectionExitToken string    // The token emitted when this section closes.
+	Merge            MergeStrategy
+	SectionExitToken string // The token emitted when this section closes.
 	Block            BlockStrategy
 	ListSpec         ListStrategy
 	ListContinuation *Def         // The base list slot that receives these items.
@@ -363,16 +379,33 @@ func (n *Def) NegateDefault() *Def {
 }
 
 // MergeKeepFirst declares that a contested slot keeps the earlier part's value.
-func (n *Def) MergeKeepFirst() *Def { n.setMerge(MergeKeepFirst); return n }
+func (n *Def) MergeKeepFirst() *Def {
+	n.setMerge(MergeStrategy{Kind: MergeKeepFirst})
+	return n
+}
 
 // MergeKeepLast declares that a contested slot takes the later part's value.
-func (n *Def) MergeKeepLast() *Def { n.setMerge(MergeKeepLast); return n }
+func (n *Def) MergeKeepLast() *Def {
+	n.setMerge(MergeStrategy{Kind: MergeKeepLast})
+	return n
+}
 
-func (n *Def) setMerge(k MergeKind) {
-	if n.Merge != MergeDefault {
+// MergeFunc sets a non-nil custom resolution for combinations no fixed kind expresses; merge validates what it returns.
+func (n *Def) MergeFunc(
+	fn func(earlier, later *Node) (*Node, Outcome),
+) *Def {
+	if fn == nil {
+		panic("schema: MergeFunc with nil func: " + n.Template)
+	}
+	n.setMerge(MergeStrategy{Kind: MergeCustom, Func: fn})
+	return n
+}
+
+func (n *Def) setMerge(s MergeStrategy) {
+	if n.Merge.Kind != MergeDefault {
 		panic("schema: merge kind set twice: " + n.Template)
 	}
-	n.Merge = k
+	n.Merge = s
 }
 
 // EmptyOnRemove retains an always-present section header and removes each child; it excludes explicit negation, blocks, lists, and Protected.

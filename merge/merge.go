@@ -9,21 +9,12 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Outcome reports how a Resolve call settled a contested slot.
-type Outcome int
-
-const (
-	Refused    Outcome = iota // The earlier value is kept and an Error is reported.
-	Overridden                // The returned node won and the other value was discarded.
-	Combined                  // Both values survive in the returned node.
-)
-
 // Resolve decides what a slot holds when two parts both claim it with
 // different values. earlier is the node already in the output tree, later is
 // the incoming part node, and declared is the merge kind resolved from the
 // slot's schema definitions. A resolver must not modify either argument; it
 // returns earlier, later, or a fresh parentless node.
-type Resolve func(earlier, later *schema.Node, declared schema.MergeKind) (*schema.Node, Outcome)
+type Resolve func(earlier, later *schema.Node, declared schema.MergeKind) (*schema.Node, schema.Outcome)
 
 // Options configures one Merge call; a nil Resolve uses Declared.
 type Options struct {
@@ -36,58 +27,63 @@ type Options struct {
 func Declared(
 	earlier, later *schema.Node,
 	declared schema.MergeKind,
-) (*schema.Node, Outcome) {
+) (*schema.Node, schema.Outcome) {
 	if n, out, ok := resolveDeclared(earlier, later, declared); ok {
 		return n, out
 	}
 	if earlier.Def == later.Def && ident.IsSection(later) {
-		return later, Combined
+		return later, schema.Combined
 	}
-	return later, Overridden
+	return later, schema.Overridden
 }
 
 // Refuse applies the slot's declared merge kind and refuses everything Declared would resolve by keeping the later value.
 func Refuse(
 	earlier, later *schema.Node,
 	declared schema.MergeKind,
-) (*schema.Node, Outcome) {
+) (*schema.Node, schema.Outcome) {
 	if n, out, ok := resolveDeclared(earlier, later, declared); ok {
 		return n, out
 	}
-	return nil, Refused
+	return nil, schema.Refused
 }
 
 // resolveDeclared settles the slots whose resolution the schema itself sanctions.
 func resolveDeclared(
 	earlier, later *schema.Node,
 	declared schema.MergeKind,
-) (*schema.Node, Outcome, bool) {
+) (*schema.Node, schema.Outcome, bool) {
 	switch declared {
 	case schema.MergeKeepFirst:
-		return earlier, Overridden, true
+		return earlier, schema.Overridden, true
 	case schema.MergeKeepLast:
-		return later, Overridden, true
+		return later, schema.Overridden, true
+	case schema.MergeCustom:
+		if fn := declaredStrategy(earlier, later).Func; fn != nil {
+			n, out := fn(earlier, later)
+			return n, out, true
+		}
 	}
 	if n, ok := UnionLists(earlier, later); ok {
-		return n, Combined, true
+		return n, schema.Combined, true
 	}
-	return nil, Refused, false
+	return nil, schema.Refused, false
 }
 
 // KeepFirst keeps the earlier part's value regardless of the declared kind.
 func KeepFirst(
 	earlier, _ *schema.Node,
 	_ schema.MergeKind,
-) (*schema.Node, Outcome) {
-	return earlier, Overridden
+) (*schema.Node, schema.Outcome) {
+	return earlier, schema.Overridden
 }
 
 // KeepLast keeps the later part's value regardless of the declared kind.
 func KeepLast(
 	_, later *schema.Node,
 	_ schema.MergeKind,
-) (*schema.Node, Outcome) {
-	return later, Overridden
+) (*schema.Node, schema.Outcome) {
+	return later, schema.Overridden
 }
 
 // UnionLists combines two spellings of one list slot into a fresh canonical
@@ -186,7 +182,7 @@ func (m *merger) level(outParent, partParent *schema.Node, part int) {
 			byIdent[id] = clone
 			continue
 		}
-		declared := declaredKind(oc, pc)
+		declared := declaredStrategy(oc, pc).Kind
 		same := oc.Def == pc.Def && oc.Text == pc.Text &&
 			slices.Equal(oc.Block, pc.Block)
 		// A non-default section kind resolves even equal headers because it owns the whole stanza.
@@ -211,11 +207,11 @@ func (m *merger) slot(
 ) *schema.Node {
 	node, outcome := m.resolve(oc, pc, declared)
 	switch outcome {
-	case Refused:
+	case schema.Refused:
 		m.d.Add(diag.Error, "%s: part %d conflicts with part %d (was %q)",
 			pc.Path(), part, m.origin[oc], oc.Text)
 		return nil
-	case Overridden, Combined:
+	case schema.Overridden, schema.Combined:
 		if node == nil {
 			panic("merge: resolver returned a nil node without refusing")
 		}
@@ -225,7 +221,7 @@ func (m *merger) slot(
 	if node != oc && node != pc && !m.freshNodeValid(outParent, node, pc) {
 		return nil
 	}
-	if outcome == Combined {
+	if outcome == schema.Combined {
 		// Merging children across definitions produces a tree its own schema cannot re-parse.
 		prevDef := oc.Def
 		if node.Def != prevDef &&
@@ -292,15 +288,15 @@ func (m *merger) freshNodeValid(outParent, node, pc *schema.Node) bool {
 	return true
 }
 
-// declaredKind resolves a slot's merge kind, preferring the earlier definition's non-default declaration.
-func declaredKind(earlier, later *schema.Node) schema.MergeKind {
-	if d := earlier.Def; d != nil && d.Merge != schema.MergeDefault {
+// declaredStrategy resolves a slot's merge strategy, preferring the earlier definition's non-default declaration.
+func declaredStrategy(earlier, later *schema.Node) schema.MergeStrategy {
+	if d := earlier.Def; d != nil && d.Merge.Kind != schema.MergeDefault {
 		return d.Merge
 	}
 	if d := later.Def; d != nil {
 		return d.Merge
 	}
-	return schema.MergeDefault
+	return schema.MergeStrategy{}
 }
 
 // mergeIdent gives each non-keyed ZeroToOne definition one slot per level.
