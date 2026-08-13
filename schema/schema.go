@@ -68,11 +68,11 @@ type NegateStrategy struct {
 	Func     func(fields map[string]string, rendered string) string
 }
 
-// MergeKind selects how merge resolves a slot that two parts both claim.
+// MergeKind declares how a slot should resolve; the Merge call's resolver decides whether to honor it.
 type MergeKind int
 
 const (
-	MergeDefault   MergeKind = iota // Union a list slot, recurse a section, else keep the later value.
+	MergeDefault   MergeKind = iota // Under Declared: union a list slot, recurse a section, else keep the later value.
 	MergeKeepFirst                  // The earlier part's value wins; a later section is discarded whole.
 	MergeKeepLast                   // The later part's value wins; it replaces an earlier section whole.
 	MergeCustom                     // Call Func for combinations no fixed kind expresses.
@@ -84,7 +84,7 @@ type Outcome int
 const (
 	Refused    Outcome = iota // The earlier value is kept and an Error is reported.
 	Overridden                // The returned node won and the other value was discarded.
-	Combined                  // Both values survive in the returned node.
+	Combined                  // The returned node wins and both sides' children merge.
 )
 
 // MergeStrategy defines how merge resolves this slot when two parts claim it.
@@ -340,7 +340,7 @@ func (n *Def) Key(args ...string) *Def {
 // Idempotent marks this node as idempotent (re-applying has no effect).
 func (n *Def) MarkIdempotent() *Def { n.Idempotent = true; return n }
 
-// Protected prevents automatic deletion in all policies and is mutually exclusive with EmptyOnRemove.
+// Protected prevents automatic deletion under every option value and is mutually exclusive with EmptyOnRemove.
 func (n *Def) Protect() *Def {
 	if n.EmptyOnRemove {
 		panic(
@@ -401,9 +401,18 @@ func (n *Def) MergeFunc(
 	return n
 }
 
+// mergeTwiceInGroup names the authoring error of declaring a merge kind on two partners of one toggle group.
+const mergeTwiceInGroup = "schema: a toggle group declares a merge kind twice: "
+
 func (n *Def) setMerge(s MergeStrategy) {
 	if n.Merge.Kind != MergeDefault {
 		panic("schema: merge kind set twice: " + n.Template)
+	}
+	// Catch the reverse call order, where Toggles ran before this declaration.
+	for _, m := range n.ToggleGroup {
+		if m != n && m.Merge.Kind != MergeDefault {
+			panic(mergeTwiceInGroup + n.Template)
+		}
 	}
 	n.Merge = s
 }
@@ -445,6 +454,7 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 	}
 	group := append([]*Def{n}, partners...)
 	seen := map[*Def]bool{}
+	declared := 0
 	for _, m := range group {
 		if m == nil || seen[m] {
 			panic(
@@ -452,6 +462,9 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 			)
 		}
 		seen[m] = true
+		if m.Merge.Kind != MergeDefault {
+			declared++
+		}
 		if len(m.KeyArgs) > 0 || m.Cardinality != ZeroToOne {
 			panic(
 				"schema: toggle side must be a non-keyed ZeroToOne node: " + m.Template,
@@ -460,6 +473,10 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 		if m.ToggleGroup != nil {
 			panic("schema: node is already in a toggle group: " + m.Template)
 		}
+	}
+	// Toggle partners share one merge slot, so two declarations would make the winner depend on which one merge saw first.
+	if declared > 1 {
+		panic(mergeTwiceInGroup + n.Template)
 	}
 	for _, m := range group {
 		m.ToggleGroup = group

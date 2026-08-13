@@ -971,3 +971,35 @@ func TestMergeFuncExcludesOtherKindsBothOrders(t *testing.T) {
 		New().Node("hostname {{ name:word }}").MergeKeepLast().MergeFunc(fn)
 	})
 }
+
+func TestToggleGroupMergeKindTwicePanicsBothOrders(t *testing.T) {
+	// Toggle partners share one merge slot, so two declarations would make the winner depend on part order.
+	build := func() (*Def, *Def) {
+		s := New()
+		a := s.Node("mode fast").Card(ZeroToOne)
+		b := s.Node("mode slow").Card(ZeroToOne)
+		return a, b
+	}
+	assert.PanicsWithValue(t,
+		"schema: a toggle group declares a merge kind twice: mode fast",
+		func() {
+			a, b := build()
+			a.MergeKeepLast()
+			b.MergeKeepFirst()
+			a.Toggles(b)
+		})
+	assert.PanicsWithValue(t,
+		"schema: a toggle group declares a merge kind twice: mode slow",
+		func() {
+			a, b := build()
+			a.MergeKeepLast()
+			a.Toggles(b)
+			b.MergeKeepFirst()
+		})
+	// One declaration is enough for the whole group and stays legal.
+	assert.NotPanics(t, func() {
+		a, b := build()
+		a.Toggles(b)
+		b.MergeKeepFirst()
+	})
+}
