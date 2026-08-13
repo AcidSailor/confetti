@@ -12,5 +12,6 @@
 // Additions emit as-is; removals emit their negation
 // (def==nil text leaves); idempotent value changes emit the forward line;
 // declared toggle pairs flip; Protected nodes refuse deletion with an
-// Error in both policies. Diff returns no artifact when it reports an Error.
+// Error under both Cycle values. Cycle selects only ordering-cycle handling:
+// Abort reports an Error and emits nothing, Break drops the greatest edge.
 package remediate

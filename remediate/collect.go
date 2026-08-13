@@ -43,7 +43,7 @@ type op struct {
 type differ struct {
 	running, intended *tree.Config
 	order             map[*schema.Node]int
-	p                 diag.Policy
+	cycle             Cycle
 	d                 *diag.Diagnostics
 	ops               []op
 	g                 *graph.Graph
@@ -67,9 +67,9 @@ func (dv *differ) collect(
 	var intents []createIntent
 	for _, ic := range intParent.Children {
 		id := ident.Of(ic)
-		// Apply only the first spelling of an ambiguous intended slot.
+		// Dropping a schema-known intended line is an Error, not a policy choice.
 		if first := intByIdent[id]; first != ic {
-			d.AddAt(ic.Line, dv.p.Severity(),
+			d.AddAt(ic.Line, diag.Error,
 				"%s: duplicate spelling of %q; only the first is applied",
 				ic.Path(), first.Text)
 			continue
@@ -287,7 +287,8 @@ func (dv *differ) checkSplitSingles(
 			}
 			if rdef == def ||
 				(def.KindName != "" && rdef.KindName == def.KindName) {
-				dv.d.AddAt(ci.src.Line, dv.p.Severity(),
+				// The emitted add/remove pair can leave the device slot in either state.
+				dv.d.AddAt(ci.src.Line, diag.Error,
 					"%s: add and remove split single-occupancy slot %q;"+
 						" give the definition a Kind or MarkIdempotent",
 					ci.src.Path(), rc.Text)

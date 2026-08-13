@@ -6,6 +6,14 @@ import (
 	"github.com/acidsailor/confetti/tree"
 )
 
+// Cycle selects what happens when the operation graph does not sort.
+type Cycle int
+
+const (
+	Abort Cycle = iota // Report an Error and emit nothing.
+	Break              // Drop the greatest edge, report a Warning, continue.
+)
+
 // Result contains an operation-tagged remediation tree and its change log in emission order.
 type Result struct {
 	Tree    *tree.Config
@@ -30,7 +38,7 @@ func (r *Result) Empty() bool {
 // Diff returns the remediation from running to intended without modifying either input; both trees must use the same schema.
 func Diff(
 	running, intended *tree.Config,
-	p diag.Policy,
+	cycle Cycle,
 ) (*Result, *diag.Diagnostics) {
 	d := diag.New()
 	out := tree.NewConfig(intended.Schema)
@@ -44,12 +52,12 @@ func Diff(
 	dv := &differ{
 		running: running, intended: intended,
 		order: buildOrderIndex(intended.Schema),
-		p:     p, d: d,
+		cycle: cycle, d: d,
 	}
 	dv.collect(running.Root, intended.Root, nil, nil)
 	dv.buildGraph()
 	seq := dv.schedule()
-	if seq == nil { // A strict cycle prevents artifact output.
+	if seq == nil { // An aborted cycle prevents artifact output.
 		return &Result{Tree: out}, d
 	}
 	materialize(seq, dv.ops, out)

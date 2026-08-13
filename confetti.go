@@ -15,10 +15,11 @@ import (
 	"github.com/acidsailor/confetti/validate"
 )
 
-// Engine ties a schema, a policy, and the import/export transform pipelines.
+// Engine ties a schema, per-stage options, and the import/export transform pipelines.
 type Engine struct {
 	schema       *schema.Schema
-	policy       diag.Policy
+	unknown      parse.Unknown
+	cycle        remediate.Cycle
 	importText   []transform.TextRule
 	exportText   []transform.TextRule
 	importTree   []transform.TreeTransform
@@ -29,9 +30,14 @@ type Engine struct {
 // Option configures an Engine.
 type Option func(*Engine)
 
-// WithPolicy sets the strict/lenient policy.
-func WithPolicy(p diag.Policy) Option {
-	return func(e *Engine) { e.policy = p }
+// WithUnknown selects how Import reports a command the grammar does not model; the default rejects.
+func WithUnknown(u parse.Unknown) Option {
+	return func(e *Engine) { e.unknown = u }
+}
+
+// WithCycle selects what Remediate, Rollback, and Compare do with an ordering cycle; the default aborts.
+func WithCycle(c remediate.Cycle) Option {
+	return func(e *Engine) { e.cycle = c }
 }
 
 // WithImportText appends import-side (pre-parse) text transforms.
@@ -77,7 +83,7 @@ func New(s *schema.Schema, opts ...Option) *Engine {
 func (e *Engine) Import(text string) (*tree.Config, *diag.Diagnostics) {
 	d := diag.New()
 	text = applyTextOutsideBlocks(e.schema, e.importText, text)
-	cfg := parse.Parse(e.schema, text, e.policy, d)
+	cfg := parse.Parse(e.schema, text, e.unknown, d)
 	parse.Fold(cfg, d)
 	transform.ApplyTree(e.importTree, cfg)
 	validate.ImportCheck(cfg, d)
@@ -143,7 +149,7 @@ func (e *Engine) Remediate(
 ) (*remediate.Result, *diag.Diagnostics) {
 	d := diag.New()
 	e.commitCheck(intended, d)
-	res, rd := remediate.Diff(running, intended, e.policy)
+	res, rd := remediate.Diff(running, intended, e.cycle)
 	d.Merge(rd)
 	return res, d
 }
@@ -154,7 +160,7 @@ func (e *Engine) Rollback(
 ) (*remediate.Result, *diag.Diagnostics) {
 	d := diag.New()
 	e.commitCheck(running, d)
-	res, rd := remediate.Diff(intended, running, e.policy)
+	res, rd := remediate.Diff(intended, running, e.cycle)
 	d.Merge(rd)
 	return res, d
 }
@@ -163,13 +169,14 @@ func (e *Engine) Rollback(
 func (e *Engine) Compare(
 	running, intended *tree.Config,
 ) (string, *diag.Diagnostics) {
-	res, d := remediate.Diff(running, intended, e.policy)
+	res, d := remediate.Diff(running, intended, e.cycle)
 	return compare.Render(res.Changes), d
 }
 
-// Merge combines fragments in order without running a commit check; strict conflicts keep the first value, lenient conflicts keep the last, and list slots form a union.
+// Merge combines fragments in order without running a commit check; opts selects the conflict resolution per call because two callers of one engine can want different resolutions.
 func (e *Engine) Merge(
+	opts merge.Options,
 	parts ...*tree.Config,
 ) (*tree.Config, *diag.Diagnostics) {
-	return merge.Merge(e.schema, e.policy, parts...)
+	return merge.Merge(e.schema, opts, parts...)
 }

@@ -29,11 +29,6 @@ func TestStringFormat(t *testing.T) {
 	assert.Contains(t, d.String(), "error: boom")
 }
 
-func TestPolicySeverity(t *testing.T) {
-	assert.Equal(t, Warning, Policy{}.Severity())
-	assert.Equal(t, Error, Policy{Strict: true}.Severity())
-}
-
 func TestMerge(t *testing.T) {
 	a := New()
 	a.Add(Warning, "first")

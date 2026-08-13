@@ -59,7 +59,7 @@ func testSchema() *schema.Schema {
 func mustParse(t *testing.T, s *schema.Schema, text string) *tree.Config {
 	t.Helper()
 	d := diag.New()
-	cfg := parse.Parse(s, text, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, text, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	return cfg
 }

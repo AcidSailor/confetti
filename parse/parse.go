@@ -9,6 +9,14 @@ import (
 	"github.com/acidsailor/confetti/tree"
 )
 
+// Unknown selects how a command the grammar does not model is reported; the node is dropped from the tree under both values.
+type Unknown int
+
+const (
+	Reject Unknown = iota // Report an Error.
+	Drop                  // Report a Warning and count it in the summary.
+)
+
 // blockCapture accumulates raw lines for an open block node until its terminator.
 type blockCapture struct {
 	node *tree.Node
@@ -19,7 +27,7 @@ type blockCapture struct {
 func Parse(
 	s *schema.Schema,
 	text string,
-	policy diag.Policy,
+	unknown Unknown,
 	d *diag.Diagnostics,
 ) *tree.Config {
 	cfg := tree.NewConfig(s)
@@ -39,7 +47,7 @@ func Parse(
 			blk.node.Block = blk.body
 			blk = nil
 		case stepUnknown:
-			if policy.Strict {
+			if unknown == Reject {
 				d.AddAt(st.lineNo, diag.Error, "unknown command: %q", st.txt)
 			} else {
 				d.AddAt(
@@ -69,16 +77,17 @@ func Parse(
 			strings.HasSuffix(text, "\n") {
 			blk.body = blk.body[:n-1]
 		}
+		// An unterminated block consumed the rest of the file, so the result is unusable.
 		d.AddAt(
 			blk.node.Line,
-			policy.Severity(),
+			diag.Error,
 			"%s: block not terminated before end of input",
 			blk.node.Path(),
 		)
 		blk.node.Block = blk.body
 	}
 
-	if !policy.Strict && dropped > 0 {
+	if unknown == Drop && dropped > 0 {
 		d.Add(diag.Warning, "%d nodes dropped as unsupported", dropped)
 	}
 	return cfg

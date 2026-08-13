@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/graph"
 	"github.com/acidsailor/confetti/tree"
 )
@@ -116,7 +115,7 @@ func TestDiffListDeltaChangeLog(t *testing.T) {
 		"interface eth1\n  switchport trunk allowed vlan 10,20\n")
 	intended := mustParse(t, s,
 		"interface eth1\n  switchport trunk allowed vlan 10,30\n")
-	res, d := Diff(running, intended, diag.Policy{})
+	res, d := Diff(running, intended, Break)
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, res.Changes, 1)
 	c := res.Changes[0]

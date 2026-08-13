@@ -8,10 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	confetti "github.com/acidsailor/confetti"
-	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/graph"
 	"github.com/acidsailor/confetti/internal/fixture/alpha"
 	"github.com/acidsailor/confetti/internal/testtypes"
+	"github.com/acidsailor/confetti/merge"
+	"github.com/acidsailor/confetti/parse"
+	"github.com/acidsailor/confetti/remediate"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/transform"
 	"github.com/acidsailor/confetti/tree"
@@ -28,7 +30,7 @@ func engineSchema() *schema.Schema {
 func TestEngineImportRenderRoundTrip(t *testing.T) {
 	e := confetti.New(
 		engineSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 	)
 	cfg, d := e.Import("interface Ethernet1/1\n  shutdown\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -40,7 +42,7 @@ func TestEngineImportRenderRoundTrip(t *testing.T) {
 func TestEngineCommitCheckExcludeTag(t *testing.T) {
 	e := confetti.New(
 		l2l3Schema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 	)
 	cfg, d := e.Import("interface Ethernet1/1\n  switchport\n" +
 		"  switchport access vlan 20\n  ip address 10.0.0.1/24\n")
@@ -55,7 +57,7 @@ func TestEngineImportTextTransformStripsComments(t *testing.T) {
 	require.NoError(t, err)
 	e := confetti.New(
 		engineSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithImportText(drop),
 	)
 	cfg, d := e.Import("!banner\ninterface Ethernet1/1\n  shutdown\n")
@@ -84,7 +86,7 @@ func TestEngineImportTreeTransformRuns(t *testing.T) {
 	ran := false
 	e := confetti.New(
 		engineSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: false}),
+		confetti.WithUnknown(parse.Drop),
 		confetti.WithImportTree(
 			fakeTreeTransform{from: "shutdown", to: "shutdown", ran: &ran},
 		),
@@ -99,7 +101,7 @@ func TestEngineExportTextTransformRuns(t *testing.T) {
 	require.NoError(t, err)
 	e := confetti.New(
 		engineSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithExportText(tag),
 	)
 	cfg, d := e.Import("interface Ethernet1/1\n  shutdown\n")
@@ -127,7 +129,7 @@ func TestEngineExportTreeTransformRuns(t *testing.T) {
 	require.NoError(t, err)
 	e := confetti.New(
 		engineSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithExportTree(addNodeTransform{text: "link down", ran: &ran}),
 		confetti.WithExportText(tag),
 	)
@@ -141,10 +143,10 @@ func TestEngineExportTreeTransformRuns(t *testing.T) {
 }
 
 func TestEngineMerge(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	a, _ := e.Import("vlan 10\n")
 	b, _ := e.Import("interface Ethernet1/1\n  switchport access vlan 10\n")
-	merged, d := e.Merge(a, b)
+	merged, d := e.Merge(merge.Options{}, a, b)
 	require.False(t, d.HasErrors())
 	// jointly consistent: the merged artifact commit-checks green
 	require.False(t, e.CommitCheck(merged).HasErrors())
@@ -156,7 +158,7 @@ func TestEngineMerge(t *testing.T) {
 	)
 }
 
-func TestEngineRemediatePassesPolicyToOrdering(t *testing.T) {
+func TestEngineRemediatePassesCycleToOrdering(t *testing.T) {
 	s := schema.New()
 	s.Node("alpha {{ v:word }}").Card(schema.ZeroToN)
 	s.Node("beta {{ v:word }}").Card(schema.ZeroToN)
@@ -164,7 +166,8 @@ func TestEngineRemediatePassesPolicyToOrdering(t *testing.T) {
 		g.AddEdge(0, 1)
 		g.AddEdge(1, 0) // forced cycle
 	})
-	e := confetti.New(s, confetti.WithPolicy(diag.Policy{Strict: true}))
+	// The default aborts and emits nothing.
+	e := confetti.New(s)
 	run, d := e.Import("")
 	require.False(t, d.HasErrors())
 	want, d2 := e.Import("alpha one\nbeta two\n")
@@ -172,6 +175,15 @@ func TestEngineRemediatePassesPolicyToOrdering(t *testing.T) {
 	res, rd := e.Remediate(run, want)
 	assert.True(t, rd.HasErrors())
 	assert.True(t, res.Empty())
+
+	// WithCycle(Break) drops an edge, warns, and emits the artifact.
+	eb := confetti.New(s, confetti.WithCycle(remediate.Break))
+	runB, _ := eb.Import("")
+	wantB, _ := eb.Import("alpha one\nbeta two\n")
+	resB, rdB := eb.Remediate(runB, wantB)
+	assert.False(t, rdB.HasErrors(), rdB.String())
+	assert.Contains(t, rdB.String(), "ordering cycle")
+	assert.False(t, resB.Empty())
 }
 
 func TestEngineExportTextTransformSkipsBlocks(t *testing.T) {
@@ -187,7 +199,7 @@ func TestEngineExportTextTransformSkipsBlocks(t *testing.T) {
 	sub, err := transform.PerLineSub(`secret`, "REDACTED")
 	require.NoError(t, err)
 	e := confetti.New(s,
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithExportText(sub),
 	)
 	cfg, d := e.Import(
@@ -204,7 +216,7 @@ func TestEngineExportTextTransformReachesRemediationArtifact(t *testing.T) {
 	sub, err := transform.PerLineSub(`no `, "undo ")
 	require.NoError(t, err)
 	e := confetti.New(alpha.Schema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithExportText(sub),
 	)
 	running, d := e.Import("interface Ethernet1/1\n  description X\n")
@@ -236,7 +248,7 @@ func TestImportTextTransformNestedFalseOpenerStaysUnprotected(t *testing.T) {
 	drop, err := transform.DropLines(`^\s*!`)
 	require.NoError(t, err)
 	e := confetti.New(s,
-		confetti.WithPolicy(diag.Policy{Strict: false}),
+		confetti.WithUnknown(parse.Drop),
 		confetti.WithImportText(drop),
 	)
 	cfg, d := e.Import(
@@ -253,7 +265,7 @@ func TestImportTextTransformNestedFalseOpenerStaysUnprotected(t *testing.T) {
 
 func TestImportNoiseIndentCannotStrandBlockOpener(t *testing.T) {
 	// Combine raw and transformed span detection when shallower noise hides a block opener before rules run.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	cfg, d := e.Import("!\n banner motd !\nhello\n!\nvlan 10\nvlan 20\n")
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, cfg.Root.Children, 3)
@@ -265,7 +277,7 @@ func TestImportNoiseBeforeTabIndentedOpenerKeepsBody(t *testing.T) {
 	// Same shape with a tab-indented opener and a body that DropLines rules
 	// match ("!..." and "exit" are both noise patterns outside blocks): the
 	// body must arrive byte-exact with zero diagnostics.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	cfg, d := e.Import(
 		"!\n\tbanner motd ^\n!!! Authorized !!!\nexit\n^\nvlan 10\n",
 	)
@@ -282,7 +294,7 @@ func TestImportNoiseBeforeTabIndentedOpenerKeepsBody(t *testing.T) {
 func TestImportDiagnosticLineSurvivesDropLines(t *testing.T) {
 	// The bundled DropLines transform blanks instead of removing, so a
 	// diagnostic after dropped comment lines carries the ORIGINAL file line.
-	e := alpha.Engine(diag.Policy{})
+	e := alpha.Engine(confetti.WithUnknown(parse.Drop))
 	_, d := e.Import("!header\n!comment\nbogus command here\n")
 	require.False(t, d.HasErrors())
 	var hit bool
@@ -312,7 +324,7 @@ func l2l3Schema() *schema.Schema {
 func TestEngineRemediateClearsOldModeFirst(t *testing.T) {
 	e := confetti.New(
 		l2l3Schema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 	)
 	running, d := e.Import("interface Ethernet1/1\n  switchport\n" +
 		"  switchport access vlan 20\n")

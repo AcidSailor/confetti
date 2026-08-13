@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	confetti "github.com/acidsailor/confetti"
-	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/internal/valcheck"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/transform"
@@ -169,11 +168,8 @@ func ImportTransforms() []transform.TextRule {
 	return rules
 }
 
-// Engine returns a beta engine with its schema and import transforms.
-func Engine(policy diag.Policy) *confetti.Engine {
-	return confetti.New(
-		Schema(),
-		confetti.WithPolicy(policy),
-		confetti.WithImportText(ImportTransforms()...),
-	)
+// Engine returns a beta engine with its schema, import transforms, and any extra options.
+func Engine(opts ...confetti.Option) *confetti.Engine {
+	base := []confetti.Option{confetti.WithImportText(ImportTransforms()...)}
+	return confetti.New(Schema(), append(base, opts...)...)
 }

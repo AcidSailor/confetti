@@ -28,7 +28,7 @@ Build an `Engine` from a `schema.Schema` describing your platform's
 grammar, then drive it with text:
 
 ```go
-e := confetti.New(mySchema, confetti.WithPolicy(diag.Policy{Strict: true}))
+e := confetti.New(mySchema)
 
 // Parse and check referential integrity.
 cfg, diags := e.Import(runningText)
@@ -47,8 +47,9 @@ inv, diags := e.Rollback(running, intended)
 // Generate a git-diff-style view without a commit check.
 view, diags := e.Compare(running, intended)
 
-// Merge fragments. Strict mode rejects conflicts; lenient mode uses the last value.
-merged, diags := e.Merge(base, overlay)
+// Merge fragments. The default resolver follows each slot's declared merge
+// kind; merge.Refuse rejects undeclared conflicts instead.
+merged, diags := e.Merge(merge.Options{}, base, overlay)
 diags = e.CommitCheck(merged)
 ```
 
@@ -63,8 +64,10 @@ iface.Child("switchport access vlan {{ vlan:vlan }}").
 	Card(schema.ZeroToOne).MarkIdempotent().Ref("vlan", "vlan.id")
 ```
 
-A lenient `diag.Policy` downgrades unknown commands to warnings for existing
-configurations.
+`confetti.WithUnknown(parse.Drop)` downgrades unknown commands to warnings so
+existing configurations with unmodeled lines import;
+`confetti.WithCycle(remediate.Break)` lets remediation break an ordering
+cycle instead of aborting.
 
 Use `WithCommitChecks` for whole-tree rules that do not fit the schema. The
 validators run after the built-in check in `CommitCheck`, `Remediate`, and

@@ -6,11 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/acidsailor/confetti/diag"
+	confetti "github.com/acidsailor/confetti"
+	"github.com/acidsailor/confetti/parse"
 )
 
 func TestAlphaParsesBGPFixture(t *testing.T) {
-	e := Engine(diag.Policy{Strict: false})
+	e := Engine(confetti.WithUnknown(parse.Drop))
 	in := "" +
 		"vlan 10\n" +
 		"  name USERS\n" +
@@ -35,7 +36,7 @@ func TestAlphaParsesBGPFixture(t *testing.T) {
 }
 
 func TestAlphaCommitCheckErrors(t *testing.T) {
-	e := Engine(diag.Policy{Strict: false})
+	e := Engine(confetti.WithUnknown(parse.Drop))
 	for _, tc := range []struct{ name, in, want string }{
 		{
 			name: "dangling route-map",
@@ -67,7 +68,7 @@ func TestAlphaCommitCheckErrors(t *testing.T) {
 }
 
 func TestAlphaRoundTrip(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	// An empty want means the input renders back unchanged.
 	for _, tc := range []struct{ name, in, want string }{
 		{
@@ -128,7 +129,7 @@ func TestAlphaRoundTrip(t *testing.T) {
 }
 
 func TestAlphaAddressFamilyOptionalSAFI(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	in := "router bgp 65111\n" +
 		"  address-family ipv4\n" +
 		"    neighbor 10.1.1.2 activate\n"
@@ -141,7 +142,7 @@ func TestAlphaAddressFamilyOptionalSAFI(t *testing.T) {
 }
 
 func TestAlphaImportRejectsBadValues(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 
 	_, d := e.Import("vlan 9999\n")
 	assert.True(t, d.HasErrors())
@@ -191,7 +192,7 @@ func TestDomainTypeChecks(t *testing.T) {
 
 func TestAlphaVlanMembershipFoldRoundTrip(t *testing.T) {
 	// Fold compressed membership and property-bearing sections into canonical section output.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	in := "vlan 1,7-9,411\n" +
 		"vlan 411\n" +
 		"  name PAYMENTS\n"
@@ -217,7 +218,7 @@ func TestAlphaVlanMembershipFoldRoundTrip(t *testing.T) {
 func TestAlphaMembershipVlanSatisfiesRef(t *testing.T) {
 	// A vlan declared only through the membership spelling is a real
 	// canonical instance: refs resolve against it.
-	e := Engine(diag.Policy{Strict: false})
+	e := Engine(confetti.WithUnknown(parse.Drop))
 	cfg, d := e.Import("vlan 5-10\n" +
 		"interface Ethernet1/1\n  switchport access vlan 7\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -227,7 +228,7 @@ func TestAlphaMembershipVlanSatisfiesRef(t *testing.T) {
 
 func TestAlphaMembershipBadItemRejected(t *testing.T) {
 	// The fold accepts the pattern, then ImportCheck rejects the synthesized out-of-range VLAN.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	_, d := e.Import("vlan 5,5000\n")
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "5000")

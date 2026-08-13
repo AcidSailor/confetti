@@ -59,7 +59,7 @@ func rawDiff(
 	res, d := Diff(
 		mustParse(t, s, running),
 		mustParse(t, s, intended),
-		diag.Policy{},
+		Break,
 	)
 	return render.Render(res.Tree), d
 }
@@ -130,10 +130,12 @@ func TestKindSlotUnchangedSpellingIsNoOp(t *testing.T) {
 	assert.Equal(t, "", out)
 }
 
-func TestSplitSlotWarningFiresWithoutKind(t *testing.T) {
-	out, d := kindSlotDiff(t, kindSlotSchema(),
+func TestSplitSlotErrorFiresWithoutKind(t *testing.T) {
+	// The split is an Error because the emitted pair can leave the slot in either state; the artifact is still emitted for inspection.
+	out, d := rawDiff(t, kindSlotSchema(),
 		"router bgp 65000\n  local-as 65001\n",
 		"router bgp 65000\n  local-as 65002\n")
+	assert.True(t, d.HasErrors())
 	assert.Equal(t,
 		"router bgp 65000\n  local-as 65002\n  no local-as 65001\n", out)
 	assert.Contains(t, d.String(),
@@ -347,7 +349,7 @@ func TestKindSlotIntendedCarriesBothSpellings(t *testing.T) {
 			"router bgp 65000\n  default-originate route-map RM\n"),
 		mustParse(t, s, "router bgp 65000\n"+
 			"  default-originate route-map RM2\n  default-originate\n"),
-		diag.Policy{Strict: true},
+		Abort,
 	)
 	assert.True(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "duplicate spelling")
@@ -384,7 +386,7 @@ func TestSplitSlotStrictIsError(t *testing.T) {
 	_, d := Diff(
 		mustParse(t, s, "router bgp 65000\n  local-as 65001\n"),
 		mustParse(t, s, "router bgp 65000\n  local-as 65002\n"),
-		diag.Policy{Strict: true},
+		Abort,
 	)
 	assert.True(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "split single-occupancy slot")

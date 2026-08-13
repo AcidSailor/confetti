@@ -38,7 +38,7 @@ confetti (root)   Engine: option wiring + the pipelines below
 ├── graph         ordering graph passed to schema.OrderHook; pure leaf
 │                 package, stdlib only (see Layering)
 ├── compare       Changes → git-diff-style human view
-├── merge         fragments → one tree, conflict policy + list union
+├── merge         fragments → one tree, per-call conflict resolvers + list union
 ├── diag          two-severity diagnostics with optional source line
 └── internal/
     ├── ident     node-pairing identity shared by remediate + merge
@@ -97,12 +97,16 @@ The explanations record constraints that tests do not show.
 
 ### Policy and safety constraints
 
-- **`diag.Policy.Strict` controls tolerance for unknown input. It does not
-  relax constraints on schema-known configuration.** Lenient mode lets existing
-  configurations with unmodeled lines import. After a line matches, all
-  schema constraints apply. Fold and authoring errors during Diff are Errors
-  in both policies.
-- **`Protect()` fails in both policies.** A policy setting cannot disable
+- **Each recovery strategy lives with the stage it governs, and none relaxes
+  constraints on schema-known configuration.** `parse.Unknown` controls only
+  tolerance for unknown input: `Drop` lets existing configurations with
+  unmodeled lines import. After a line matches, all schema constraints
+  apply. `merge.Options` selects conflict resolution per call because it is
+  a semantic choice between two accepted values, not a trust decision.
+  `remediate.Cycle` selects only ordering-cycle handling. Every zero value
+  is the conservative choice (`Reject`, `Declared`+report, `Abort`). Fold
+  and authoring errors during Diff are always Errors.
+- **`Protect()` fails under every option value.** No option can disable
   this safety constraint. Silent skips hide attempted deletion. The check
   applies to every deletion path: the removal loop, `ckReplace`, removed
   subtree descendants, and keyed identity changes. `ckReplace` refuses both
@@ -113,9 +117,9 @@ The explanations record constraints that tests do not show.
   `EmptyOnRemove` expansion**, and `Protected` × `EmptyOnRemove` on one def
   is an authoring panic ("never delete this" contradicts "here is how to
   delete this").
-- **An Error prevents artifact output.** A strict ordering cycle produces an
-  empty tree and empty Changes. A Protected refusal produces no operation or
-  Change. A partial artifact would be unsafe.
+- **An Error prevents artifact output.** An `Abort`ed ordering cycle produces
+  an empty tree and empty Changes. A Protected refusal produces no operation
+  or Change. A partial artifact would be unsafe.
 
 ### Schema construction constraints
 
@@ -175,15 +179,15 @@ The explanations record constraints that tests do not show.
   `EmptyOnRemove` sections cannot pair because they have no header negation.
 - **Duplicate Kind-paired spellings produce diagnostics.** Diff removes stale
   running spellings before it reissues the intended value. Multiple intended
-  spellings produce a policy-severity diagnostic, and only the first is
-  applied. `ImportCheck` rejects multiple spellings at one level.
+  spellings produce an Error, and only the first is applied. `ImportCheck`
+  rejects multiple spellings at one level.
 - **Block bodies are not part of identity.** A body-only change is a Modify.
 - **Merge gives every non-keyed ZeroToOne definition one slot per level.**
   This includes definitions without a Kind and toggle groups. Remediation
   requires a Kind because unmarked sibling definitions can be independent.
-  Diff reports at policy severity when separate Add and Remove operations
-  target the same definition or a Kind shared by toggle and non-toggle
-  siblings.
+  Diff reports an Error when separate Add and Remove operations target the
+  same definition or a Kind shared by toggle and non-toggle siblings,
+  because the emitted pair can leave the device slot in either state.
 - **A section header is never `OpModify` for identity**: changed header
   identity is Remove+Add of the whole section. A kept section whose
   children all vanish keeps its header and negates each child instead of a
@@ -256,7 +260,7 @@ The explanations record constraints that tests do not show.
   `render(parse(x)) == canonical(x)`, and canonical is idempotent. Existing
   input is not always byte-identical after rendering. Rollback therefore
   restores canonical parsed running configuration, not original bytes. Lines
-  dropped by lenient import cannot be restored.
+  dropped by a `parse.Drop` import cannot be restored.
 - **Text transforms never run inside block spans.** Span detection is
   level-aware (`parse.BlockSpans` mirrors the parser's indent walk) and the
   guard protects the union of the raw-text walk and the
@@ -270,7 +274,7 @@ device commands. `Remediate` checks intended, and `Rollback` checks running.
 Both still return the Result for inspection when errors occur. `Render`,
 `Merge`, and `Compare` do not run a commit check because they format, assemble,
 or inspect configurations. Diff converges to the checked goal, so it does not
-check references in running configuration that will be removed. A lenient
+check references in running configuration that will be removed. A `Break`
 cycle break warns about its partial-application risk and names the dependency.
 
 ### Diagnostics
@@ -284,11 +288,12 @@ cycle break warns about its partial-application risk and names the dependency.
 - **Line numbers index the original text**, so `transform.TextRule` maps one
   line to one line and no rule can change the line count: `DropLines` blanks
   instead of removing. Raw and transformed block spans therefore always align.
-- **Collect all diagnostics instead of failing at the first error.** `Strict`
-  selects a per-stage recovery strategy for unknown or conflicting input:
-  `parse` drops an unmatched line when lenient, `merge` lets the later part
-  win, and `remediate` breaks an ordering cycle instead of aborting. Invalid
-  values, unresolved references, and duplicate keys are always Errors.
+- **Collect all diagnostics instead of failing at the first error.** Each
+  stage owns its recovery strategy for unknown or conflicting input:
+  `parse.Drop` drops an unmatched line with a Warning, `merge.Options`
+  selects how a contested slot resolves, and `remediate.Break` breaks an
+  ordering cycle instead of aborting. Invalid values, unresolved references,
+  and duplicate keys are always Errors.
 
 ### Modeling decisions
 

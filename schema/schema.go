@@ -68,6 +68,15 @@ type NegateStrategy struct {
 	Func     func(fields map[string]string, rendered string) string
 }
 
+// MergeKind selects how merge resolves a slot that two parts both claim.
+type MergeKind int
+
+const (
+	MergeDefault   MergeKind = iota // Union a list slot, recurse a section, else keep the later value.
+	MergeKeepFirst                  // The earlier part's value wins; a later section is discarded whole.
+	MergeKeepLast                   // The later part's value wins; it replaces an earlier section whole.
+)
+
 // BlockKind selects how a node captures a raw multi-line block.
 type BlockKind int
 
@@ -168,7 +177,8 @@ type Node struct {
 	UniqueArgs       []string
 	Idempotent       bool
 	Negate           NegateStrategy
-	SectionExitToken string // The token emitted when this section closes.
+	Merge            MergeKind // How merge resolves this slot when two parts claim it.
+	SectionExitToken string    // The token emitted when this section closes.
 	Block            BlockStrategy
 	ListSpec         ListStrategy
 	ListContinuation *Node        // The base list slot that receives these items.
@@ -350,6 +360,19 @@ func (n *Node) NegateDefault() *Node {
 	n.mustNegatable()
 	n.Negate = NegateStrategy{Kind: NegDefault}
 	return n
+}
+
+// MergeKeepFirst declares that a contested slot keeps the earlier part's value.
+func (n *Node) MergeKeepFirst() *Node { n.setMerge(MergeKeepFirst); return n }
+
+// MergeKeepLast declares that a contested slot takes the later part's value.
+func (n *Node) MergeKeepLast() *Node { n.setMerge(MergeKeepLast); return n }
+
+func (n *Node) setMerge(k MergeKind) {
+	if n.Merge != MergeDefault {
+		panic("schema: merge kind set twice: " + n.Template)
+	}
+	n.Merge = k
 }
 
 // EmptyOnRemove retains an always-present section header and removes each child; it excludes explicit negation, blocks, lists, and Protected.

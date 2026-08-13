@@ -468,7 +468,6 @@ func (dv *differ) deriveRequireEdges() {
 		}
 	}
 
-	unsatSev := dv.p.Severity()
 	reported := map[string]bool{}
 	validRequirement := func(rq requirement) bool {
 		if declared[rq.label] {
@@ -499,8 +498,9 @@ func (dv *differ) deriveRequireEdges() {
 					}
 					continue
 				}
+				// The goal neither keeps nor adds the prerequisite, so the emitted sequence cannot converge.
 				d.Add(
-					unsatSev,
+					diag.Error,
 					"%s: requires a %q but the goal defines none",
 					opPath(o), rq.label,
 				)

@@ -42,9 +42,9 @@ func FuzzParse(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, in string) {
-		for _, strict := range []bool{true, false} {
+		for _, unknown := range []Unknown{Reject, Drop} {
 			d := diag.New()
-			cfg := Parse(s, in, diag.Policy{Strict: strict}, d)
+			cfg := Parse(s, in, unknown, d)
 			if cfg == nil {
 				t.Fatalf("Parse returned nil config for %q", in)
 			}

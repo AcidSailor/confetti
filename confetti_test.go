@@ -11,6 +11,8 @@ import (
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/internal/fixture/alpha"
 	"github.com/acidsailor/confetti/internal/testtypes"
+	"github.com/acidsailor/confetti/merge"
+	"github.com/acidsailor/confetti/parse"
 	"github.com/acidsailor/confetti/remediate"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
@@ -25,7 +27,7 @@ const cleanConfig = "vlan 10\n" +
 	"  no shutdown\n"
 
 func TestE2ECanonicalRoundTrip(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	cfg, d := e.Import(cleanConfig)
 	require.False(t, d.HasErrors(), d.String())
 	out, _ := e.Render(cfg)
@@ -37,7 +39,7 @@ func TestE2ECanonicalRoundTrip(t *testing.T) {
 }
 
 func TestE2EDanglingRefThenFixed(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 
 	bad := "interface Ethernet1/1\n  switchport access vlan 99\n"
 	cfg, d := e.Import(bad)
@@ -57,7 +59,7 @@ func TestE2EBrownfieldLenientVsStrict(t *testing.T) {
 		"  flux-capacitor enable\n" +
 		"  no shutdown\n"
 
-	lenient := alpha.Engine(diag.Policy{Strict: false})
+	lenient := alpha.Engine(confetti.WithUnknown(parse.Drop))
 	cfg, d := lenient.Import(in)
 	assert.False(t, d.HasErrors()) // warnings only
 	assert.NotEmpty(t, d.Items)    // unsupported-command warning present
@@ -65,7 +67,7 @@ func TestE2EBrownfieldLenientVsStrict(t *testing.T) {
 	assert.NotContains(t, out, "flux-capacitor") // dropped from tree
 	assert.Contains(t, out, "no shutdown")       // known command survives
 
-	strict := alpha.Engine(diag.Policy{Strict: true})
+	strict := alpha.Engine()
 	_, ds := strict.Import(in)
 	assert.True(t, ds.HasErrors()) // same input is a hard error under Strict
 }
@@ -83,7 +85,7 @@ func remediateSchema() *schema.Schema {
 func TestEngineRemediateCommitChecksIntended(t *testing.T) { // E12
 	e := confetti.New(
 		remediateSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 	)
 	running, d1 := e.Import("")
 	require.False(t, d1.HasErrors())
@@ -111,7 +113,7 @@ func TestEngineRemediateCommitChecksIntended(t *testing.T) { // E12
 func TestEngineRemediateClean(t *testing.T) {
 	e := confetti.New(
 		remediateSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 	)
 	running, _ := e.Import("vlan 10\n")
 	intended, _ := e.Import("vlan 10\nvlan 20\n")
@@ -121,7 +123,7 @@ func TestEngineRemediateClean(t *testing.T) {
 }
 
 func TestRemediateAlphaEndToEnd(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 
 	running, dr := e.Import("vlan 10\n" +
 		"interface Ethernet1/1\n  switchport access vlan 10\n  shutdown\n")
@@ -147,7 +149,7 @@ func TestRemediateAlphaEndToEnd(t *testing.T) {
 }
 
 func TestRemediateAlphaAddressFamilyExit(t *testing.T) { // E8
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("feature bgp\nrouter bgp 65001\n")
 	intended, _ := e.Import(
 		"feature bgp\n" +
@@ -168,7 +170,7 @@ func TestRemediateAlphaAddressFamilyExit(t *testing.T) { // E8
 }
 
 func TestRemediateAlphaIdempotent(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	intended, _ := e.Import(
 		"vlan 10\ninterface Ethernet1/1\n  switchport access vlan 10\n",
 	)
@@ -181,7 +183,7 @@ func TestRemediateAlphaIdempotent(t *testing.T) {
 func TestRemediateAlphaRemovedAddressFamilyNoExit(
 	t *testing.T,
 ) { // E8 (removal side)
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, dr := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
 			"  address-family ipv4 unicast\n" +
@@ -200,7 +202,7 @@ func TestRemediateAlphaRemovedAddressFamilyNoExit(
 }
 
 func TestRemediateAlphaSafilessAddressFamilyExit(t *testing.T) { // E8 SAFI-less
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("feature bgp\nrouter bgp 65001\n")
 	intended, di := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
@@ -217,7 +219,7 @@ func TestRemediateAlphaSafilessAddressFamilyExit(t *testing.T) { // E8 SAFI-less
 }
 
 func TestRemediateAlphaRemovedSafilessAddressFamilyNoExit(t *testing.T) { // E8
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, dr := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
 			"  address-family ipv4\n" +
@@ -236,7 +238,7 @@ func TestRemediateAlphaRemovedSafilessAddressFamilyNoExit(t *testing.T) { // E8
 func TestRemediateAlphaFeatureBeforeRouterBGP(t *testing.T) {
 	// Requires("feature-bgp") lowers to graph edges: the feature add precedes
 	// router bgp on create; teardown negates router bgp before the feature.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	empty, _ := e.Import("")
 	full, d := e.Import("feature bgp\nrouter bgp 65001\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -263,7 +265,7 @@ func engineOpsByText(res *remediate.Result) map[string]tree.Op {
 }
 
 func TestRollbackAlphaInvertsRemediate(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, dr := e.Import("vlan 10\n" +
 		"interface Ethernet1/1\n  switchport access vlan 10\n  shutdown\n")
 	require.False(t, dr.HasErrors(), dr.String())
@@ -286,7 +288,7 @@ func TestRollbackAlphaInvertsRemediate(t *testing.T) {
 }
 
 func TestRollbackOpsMirrorRemediate(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("vlan 10\n" +
 		"interface Ethernet1/1\n  switchport access vlan 10\n  shutdown\n")
 	intended, _ := e.Import("vlan 20\n" +
@@ -313,7 +315,7 @@ func TestRollbackOpsMirrorRemediate(t *testing.T) {
 func TestRollbackCommitChecksRunningGoal(t *testing.T) {
 	e := confetti.New(
 		remediateSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 	)
 	// Running references an undefined VLAN and is therefore an invalid rollback goal.
 	running, d1 := e.Import(
@@ -336,7 +338,7 @@ func TestRollbackCommitChecksRunningGoal(t *testing.T) {
 }
 
 func TestRollbackNoChange(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	cfg, d := e.Import(cleanConfig)
 	require.False(t, d.HasErrors(), d.String())
 	res, rd := e.Rollback(cfg, cfg)
@@ -346,7 +348,7 @@ func TestRollbackNoChange(t *testing.T) {
 }
 
 func TestRollbackIsCanonicalNotByteExact(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: false})
+	e := alpha.Engine(confetti.WithUnknown(parse.Drop))
 	// lenient import drops the unknown line from the running tree, so rollback
 	// restores the canonical parse of running, never its original bytes
 	running, d1 := e.Import(
@@ -367,7 +369,7 @@ func TestRollbackIsCanonicalNotByteExact(t *testing.T) {
 }
 
 func TestBannerRemediateAndRollback(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	run, d1 := e.Import("banner motd ^\nold\n^\nvlan 10\n")
 	require.False(t, d1.HasErrors(), d1.String())
 	intd, d2 := e.Import("banner motd ^\nnew\n^\nvlan 10\n")
@@ -383,7 +385,7 @@ func TestBannerRemediateAndRollback(t *testing.T) {
 }
 
 func TestRemediateAlphaPhysicalPortReset(t *testing.T) { // E7 physical
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, d := e.Import("interface Ethernet1/1\n  description X\n")
 	require.False(t, d.HasErrors(), d.String())
 	intended, d := e.Import("")
@@ -397,7 +399,7 @@ func TestRemediateAlphaPhysicalPortReset(t *testing.T) { // E7 physical
 func TestRemediateAlphaLogicalInterfaceStillNegates(
 	t *testing.T,
 ) { // E7 logical
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("interface Vlan10\n  description X\n")
 	intended, _ := e.Import("")
 	res, rd := e.Remediate(running, intended)
@@ -408,7 +410,7 @@ func TestRemediateAlphaLogicalInterfaceStillNegates(
 func TestAlphaEthernetBindsPhysicalDef(t *testing.T) {
 	// Both interface templates match "interface Ethernet1/1" at equal literal
 	// specificity; declaration order (physical first) is the tie-break. Pin it.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	cfg, d := e.Import(
 		"interface Ethernet1/1\ninterface Vlan10\ninterface Ethernet1\n",
 	)
@@ -424,18 +426,18 @@ func TestAlphaEthernetBindsPhysicalDef(t *testing.T) {
 }
 
 func TestRemediateAlphaProtectedBGPRefuses(t *testing.T) {
-	for _, strict := range []bool{true, false} {
-		e := alpha.Engine(diag.Policy{Strict: strict})
+	for _, cycle := range []remediate.Cycle{remediate.Abort, remediate.Break} {
+		e := alpha.Engine(confetti.WithCycle(cycle))
 		running, _ := e.Import("router bgp 65000\n")
 		intended, _ := e.Import("")
 		_, d := e.Remediate(running, intended)
-		assert.True(t, d.HasErrors(), "strict=%v", strict)
+		assert.True(t, d.HasErrors(), "cycle=%v", cycle)
 		assert.Contains(t, d.String(), "refusing to delete protected")
 	}
 }
 
 func TestRemediateAlphaProtectedASNChangeRefuses(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("router bgp 65000\n")
 	intended, _ := e.Import("router bgp 65001\n")
 	_, d := e.Remediate(running, intended)
@@ -445,12 +447,12 @@ func TestRemediateAlphaProtectedASNChangeRefuses(t *testing.T) {
 
 func TestEngineMergeToggleConflict(t *testing.T) {
 	// Engine.Merge must treat shutdown and no shutdown on one interface as a single conflicting slot.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	a, da := e.Import("interface Ethernet1/1\n  shutdown\n")
 	require.False(t, da.HasErrors(), da.String())
 	b, db := e.Import("interface Ethernet1/1\n  no shutdown\n")
 	require.False(t, db.HasErrors(), db.String())
-	_, d := e.Merge(a, b)
+	_, d := e.Merge(merge.Options{Resolve: merge.Refuse}, a, b)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "conflicts with")
 }
@@ -459,7 +461,7 @@ func TestRollbackReAddsResetInterface(t *testing.T) { // E7 rollback direction
 	// The rollback of a reset (physical port removal, "default interface")
 	// converges the other way: intended (empty) -> running (has the
 	// interface + description), so it must re-ADD the whole section.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, dr := e.Import("interface Ethernet1/1\n  description X\n")
 	require.False(t, dr.HasErrors(), dr.String())
 	intended, di := e.Import("")
@@ -475,7 +477,7 @@ func TestRollbackReAddsResetInterface(t *testing.T) { // E7 rollback direction
 func TestCompareAlphaEndToEnd(t *testing.T) {
 	// Same pair as TestRemediateAlphaEndToEnd; the view regroups the
 	// scheduled log by path, so both root-level changes share one hunk.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("vlan 10\n" +
 		"interface Ethernet1/1\n  switchport access vlan 10\n  shutdown\n")
 	intended, _ := e.Import("vlan 20\n" +
@@ -496,7 +498,7 @@ func TestCompareAlphaEndToEnd(t *testing.T) {
 func TestCompareSkipsCommitCheck(t *testing.T) {
 	// Read-only view: no commit-check on either side (gofmt-vs-vet split).
 	// The same pair makes Remediate error on the dangling ref.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("")
 	intended, d0 := e.Import(
 		"interface Ethernet1/1\n  switchport access vlan 99\n")
@@ -512,7 +514,7 @@ func TestCompareSkipsCommitCheck(t *testing.T) {
 }
 
 func TestRemediateAlphaTrunkVlanDelta(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, dr := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan 10,20,30-40\n")
 	require.False(t, dr.HasErrors(), dr.String())
@@ -530,7 +532,7 @@ func TestRemediateAlphaTrunkVlanDelta(t *testing.T) {
 }
 
 func TestRollbackAlphaTrunkVlanDeltaInverts(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan 10,20,30-40\n")
 	intended, _ := e.Import(
@@ -547,7 +549,7 @@ func TestRollbackAlphaTrunkVlanDeltaInverts(t *testing.T) {
 }
 
 func TestRemediateAlphaTrunkVlanFormattingNoChurn(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan 10,11,12\n")
 	intended, _ := e.Import(
@@ -560,7 +562,7 @@ func TestRemediateAlphaTrunkVlanFormattingNoChurn(t *testing.T) {
 }
 
 func TestImportAlphaTrunkVlanBadItem(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	_, d := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan 10,5000\n")
 	assert.True(t, d.HasErrors())
@@ -568,7 +570,7 @@ func TestImportAlphaTrunkVlanBadItem(t *testing.T) {
 }
 
 func TestCompareAlphaTrunkVlanModifyPair(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan 10,20,30-40\n")
 	intended, _ := e.Import(
@@ -584,7 +586,7 @@ func TestCompareAlphaTrunkVlanModifyPair(t *testing.T) {
 
 func TestRemediateAlphaVlanSpellingNoChurn(t *testing.T) {
 	// Equivalent section and membership spellings must fold to identical trees.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("vlan 7\nvlan 8\nvlan 9\n")
 	intended, _ := e.Import("vlan 7-9\n")
 
@@ -597,7 +599,7 @@ func TestRemediateAlphaVlanSpellingNoChurn(t *testing.T) {
 func TestRemediateAlphaVlanMembershipAddRemove(t *testing.T) {
 	// Membership-declared vlans diff as ordinary canonical instances:
 	// per-instance adds and header negations, not list deltas.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("vlan 7,20\n")
 	intended, _ := e.Import("vlan 7,9-10\n")
 
@@ -609,7 +611,7 @@ func TestRemediateAlphaVlanMembershipAddRemove(t *testing.T) {
 }
 
 func TestRollbackAlphaVlanMembershipInverts(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("vlan 7,20\n")
 	intended, _ := e.Import("vlan 7,9-10\n")
 
@@ -623,20 +625,20 @@ func TestRollbackAlphaVlanMembershipInverts(t *testing.T) {
 
 func TestEngineMergeVlanMembershipUnion(t *testing.T) {
 	// Merge canonical membership instances by key, deduplicate overlap, and retain children.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	p1, d1 := e.Import("vlan 1-2\n")
 	require.False(t, d1.HasErrors(), d1.String())
 	p2, d2 := e.Import("vlan 2,3\nvlan 3\n  name STORAGE\n")
 	require.False(t, d2.HasErrors(), d2.String())
 
-	merged, d := e.Merge(p1, p2)
+	merged, d := e.Merge(merge.Options{}, p1, p2)
 	require.False(t, d.HasErrors(), d.String())
 	out, _ := e.Render(merged)
 	assert.Equal(t, "vlan 1\nvlan 2\nvlan 3\n  name STORAGE\n", out)
 }
 
 func TestCompareAlphaVlanMembership(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, _ := e.Import("vlan 7\n")
 	intended, _ := e.Import("vlan 7,9-10\n")
 
@@ -647,7 +649,7 @@ func TestCompareAlphaVlanMembership(t *testing.T) {
 
 func TestRemediateAlphaMalformedMembershipDegrades(t *testing.T) {
 	// Preserve an unexpanded membership line with an Import Error and pair it by full text.
-	e := alpha.Engine(diag.Policy{Strict: false})
+	e := alpha.Engine(confetti.WithUnknown(parse.Drop))
 	running, dr := e.Import("vlan 9-5\n")
 	assert.True(t, dr.HasErrors())
 	intended, di := e.Import("vlan 5\n")
@@ -660,7 +662,7 @@ func TestRemediateAlphaMalformedMembershipDegrades(t *testing.T) {
 
 func TestRemediateAlphaTrunkKeywordSpellingNoChurn(t *testing.T) {
 	// "all" and the explicit full range are the same set: not drift.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	running, dr := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan all\n")
 	require.False(t, dr.HasErrors(), dr.String())
@@ -674,7 +676,7 @@ func TestRemediateAlphaTrunkKeywordSpellingNoChurn(t *testing.T) {
 }
 
 func TestRemediateAlphaTrunkKeywordDeltas(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 
 	// Explicit list -> none: remove exactly the running items.
 	running, _ := e.Import(
@@ -702,7 +704,7 @@ func TestRemediateAlphaTrunkKeywordDeltas(t *testing.T) {
 func TestAlphaTrunkContinuationEndToEnd(t *testing.T) {
 	// The add-form is accepted as config input and folds into the base slot;
 	// the folded spelling is not drift against the pre-joined one.
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	cfg, d := e.Import("interface Ethernet1/5\n" +
 		"  switchport trunk allowed vlan 10\n" +
 		"  switchport trunk allowed vlan add 20-22\n")
@@ -720,12 +722,12 @@ func TestAlphaTrunkContinuationEndToEnd(t *testing.T) {
 }
 
 func TestEngineMergeTrunkKeywordUnion(t *testing.T) {
-	e := alpha.Engine(diag.Policy{Strict: true})
+	e := alpha.Engine()
 	p1, _ := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan none\n")
 	p2, _ := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan 10\n")
-	merged, d := e.Merge(p1, p2)
+	merged, d := e.Merge(merge.Options{}, p1, p2)
 	require.False(t, d.HasErrors(), d.String())
 	out, _ := e.Render(merged)
 	assert.Equal(t,
@@ -733,7 +735,7 @@ func TestEngineMergeTrunkKeywordUnion(t *testing.T) {
 
 	p3, _ := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan all\n")
-	merged2, d2 := e.Merge(p3, p2)
+	merged2, d2 := e.Merge(merge.Options{}, p3, p2)
 	require.False(t, d2.HasErrors(), d2.String())
 	out2, _ := e.Render(merged2)
 	// Union with the whole domain canonicalizes back to the keyword.
@@ -759,7 +761,7 @@ func refListSchema() *schema.Schema {
 
 func TestCommitCheckPerItemListRef(t *testing.T) {
 	e := confetti.New(refListSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}))
+		confetti.WithUnknown(parse.Reject))
 
 	cfg, d := e.Import("interface Ethernet1/1\n  allowed vlan 10,99\nvlan 10\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -796,7 +798,7 @@ func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
 		})
 	}
 	e := confetti.New(alpha.Schema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(noUsersVlan))
 
 	bad, d := e.Import("vlan 10\n  name USERS\n")
@@ -827,7 +829,7 @@ func TestCommitChecksRunExactlyOncePerCommitPath(t *testing.T) {
 	calls := 0
 	count := func(*tree.Config, *diag.Diagnostics) { calls++ }
 	e := confetti.New(alpha.Schema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(count))
 
 	cfg, d := e.Import(cleanConfig)
@@ -845,7 +847,7 @@ func TestCommitChecksRunExactlyOncePerCommitPath(t *testing.T) {
 		{"Rollback", func() { e.Rollback(other, cfg) }, 1},
 		{"Compare", func() { e.Compare(other, cfg) }, 0},
 		{"Render", func() { e.Render(cfg) }, 0},
-		{"Merge", func() { e.Merge(cfg, other) }, 0},
+		{"Merge", func() { e.Merge(merge.Options{}, cfg, other) }, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -864,7 +866,7 @@ func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
 	}
 	// Two options prove that a later WithCommitChecks appends instead of replacing.
 	e := confetti.New(alpha.Schema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(mark("first"), mark("second")),
 		confetti.WithCommitChecks(mark("third")))
 
@@ -882,7 +884,7 @@ func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
 func TestCommitCheckKeepsDiagnosticsFromClobberingValidator(t *testing.T) {
 	clobber := func(_ *tree.Config, d *diag.Diagnostics) { d.Items = nil }
 	e := confetti.New(alpha.Schema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}),
+		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(clobber))
 
 	cfg, d := e.Import("interface Ethernet1/1\n  switchport access vlan 99\n")
@@ -903,7 +905,7 @@ func TestWithCommitChecksNilFuncPanics(t *testing.T) {
 
 func TestRemediatePerItemRefOrdersDelta(t *testing.T) {
 	e := confetti.New(refListSchema(),
-		confetti.WithPolicy(diag.Policy{Strict: true}))
+		confetti.WithUnknown(parse.Reject))
 
 	// Add side: the delta referencing vlan 30 must wait for its creation,
 	// against declaration rank.
@@ -937,14 +939,14 @@ func TestEngineMergeEmptyExceptUnionKeepsSpelling(
 		Card(schema.ZeroToOne).
 		List("vlans", "vlan").
 		ListKeywords("", "all", "except", "1-6")
-	e := confetti.New(s, confetti.WithPolicy(diag.Policy{Strict: true}))
+	e := confetti.New(s, confetti.WithUnknown(parse.Reject))
 
 	p1, d1 := e.Import("interface Ethernet1/1\n  allowed vlan except 1-6\n")
 	require.False(t, d1.HasErrors(), d1.String())
 	p2, d2 := e.Import("interface Ethernet1/1\n  allowed vlan except 1-2,3-6\n")
 	require.False(t, d2.HasErrors(), d2.String())
 
-	merged, d := e.Merge(p1, p2)
+	merged, d := e.Merge(merge.Options{}, p1, p2)
 	require.False(t, d.HasErrors(), d.String())
 	out, _ := e.Render(merged)
 	assert.Equal(t,

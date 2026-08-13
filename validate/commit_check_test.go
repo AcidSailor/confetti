@@ -29,7 +29,7 @@ func TestCommitCheckDanglingRef(t *testing.T) {
 	cfg := parse.Parse(
 		refSchema(),
 		"interface Ethernet1/1\n  switchport access vlan 10\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	CommitCheck(cfg, d)
@@ -42,7 +42,7 @@ func TestCommitCheckResolvedRef(t *testing.T) {
 	cfg := parse.Parse(
 		refSchema(),
 		"vlan 10\ninterface Ethernet1/1\n  switchport access vlan 10\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	CommitCheck(cfg, d)
@@ -69,7 +69,7 @@ func TestCommitCheckCollectsMultiple(t *testing.T) {
 	d := diag.New()
 	in := "interface Ethernet1/1\n  switchport access vlan 10\n" +
 		"router bgp 65000\n  neighbor 1.1.1.1 route-map MISSING in\n"
-	cfg := parse.Parse(multiRefSchema(), in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(multiRefSchema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	assert.Contains(t, d.String(), `vlan "10" does not exist`)
@@ -81,7 +81,7 @@ func TestCommitCheckMultiKeyRefResolves(t *testing.T) {
 	d := diag.New()
 	in := "route-map FOO permit 10\nroute-map FOO permit 20\n" +
 		"router bgp 65000\n  neighbor 1.1.1.1 route-map FOO in\n"
-	cfg := parse.Parse(multiRefSchema(), in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(multiRefSchema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
@@ -96,7 +96,7 @@ func TestCommitCheckMalformedListReportsInvalidList(t *testing.T) {
 		List("vlans", "vlan").
 		Ref("vlans", "vlan.id")
 	d := diag.New()
-	cfg := parse.Parse(s, "allowed vlan 10,,20\n", diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, "allowed vlan 10,,20\n", parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	require.True(t, d.HasErrors())
@@ -116,7 +116,7 @@ func requiresSchema() *schema.Schema {
 func TestCommitCheckRequiresMissing(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(
-		requiresSchema(), "router bgp 65000\n", diag.Policy{Strict: true}, d,
+		requiresSchema(), "router bgp 65000\n", parse.Reject, d,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
@@ -130,7 +130,7 @@ func TestCommitCheckRequiresSatisfied(t *testing.T) {
 	cfg := parse.Parse(
 		requiresSchema(),
 		"feature bgp\nrouter bgp 65000\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
@@ -141,7 +141,7 @@ func TestCommitCheckRequiresSatisfied(t *testing.T) {
 func TestCommitCheckRequiresAbsentBothIsFine(t *testing.T) {
 	// Requires is existential, not mandatory.
 	d := diag.New()
-	cfg := parse.Parse(requiresSchema(), "", diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(requiresSchema(), "", parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
@@ -168,7 +168,7 @@ func TestCommitCheckExcludeTagConflict(t *testing.T) {
 	d := diag.New()
 	in := "interface Ethernet1/1\n  switchport\n" +
 		"  switchport access vlan 20\n  ip address 10.0.0.1/24\n"
-	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(l2l3Schema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	require.True(t, d.HasErrors())
@@ -182,7 +182,7 @@ func TestCommitCheckExcludeTagConflict(t *testing.T) {
 func TestCommitCheckExcludeTagSameSetCoexists(t *testing.T) {
 	d := diag.New()
 	in := "interface Ethernet1/1\n  switchport\n  switchport access vlan 20\n"
-	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(l2l3Schema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
@@ -192,7 +192,7 @@ func TestCommitCheckExcludeTagIgnoresGrandchildren(t *testing.T) {
 	d := diag.New()
 	in := "interface Ethernet1/1\n  ip address 10.0.0.1/24\n" +
 		"  hsrp 1\n    ip 10.0.0.254\n"
-	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(l2l3Schema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
@@ -202,7 +202,7 @@ func TestCommitCheckExcludeTagScopedToParentInstance(t *testing.T) {
 	d := diag.New()
 	in := "interface Ethernet1/1\n  switchport\n" +
 		"interface Ethernet1/2\n  ip address 10.0.0.1/24\n"
-	cfg := parse.Parse(l2l3Schema(), in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(l2l3Schema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
@@ -216,7 +216,7 @@ func TestCommitCheckRequiresSatisfiedByTag(t *testing.T) {
 		Card(schema.ZeroToN).Key("id").Requires("feature-lacp")
 	d := diag.New()
 	cfg := parse.Parse(
-		s, "feature lacp\nport-channel 10\n", diag.Policy{Strict: true}, d,
+		s, "feature lacp\nport-channel 10\n", parse.Reject, d,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
@@ -232,7 +232,7 @@ func TestCommitCheckRefResolvesThroughTag(t *testing.T) {
 		Card(schema.ZeroToN).Key("vlan").Ref("vlan", "bridge.id")
 	d := diag.New()
 	cfg := parse.Parse(
-		s, "vlan 10\nmember 10\nmember 20\n", diag.Policy{Strict: true}, d,
+		s, "vlan 10\nmember 10\nmember 20\n", parse.Reject, d,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	CommitCheck(cfg, d)
@@ -246,7 +246,7 @@ func TestCommitCheckDanglingRefCarriesReferrerLine(t *testing.T) {
 	cfg := parse.Parse(
 		refSchema(),
 		"interface Ethernet1/1\n  switchport access vlan 10\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
@@ -259,7 +259,7 @@ func TestCommitCheckDanglingRefCarriesReferrerLine(t *testing.T) {
 func checkText(t *testing.T, s *schema.Schema, in string) *diag.Diagnostics {
 	t.Helper()
 	d := diag.New()
-	cfg := parse.Parse(s, in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, in, parse.Reject, d)
 	CommitCheck(cfg, d)
 	return d
 }

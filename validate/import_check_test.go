@@ -30,7 +30,7 @@ func miniSchema() *schema.Schema {
 func TestImportCheckBadValue(t *testing.T) {
 	s := miniSchema()
 	d := diag.New()
-	cfg := parse.Parse(s, "vlan 9999\n", diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, "vlan 9999\n", parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
@@ -43,7 +43,7 @@ func TestImportCheckBadIP(t *testing.T) {
 	cfg := parse.Parse(
 		s,
 		"interface Ethernet1/1\n  ip address 10.0.0.300 255.255.255.0\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -57,7 +57,7 @@ func TestImportCheckGoodValuesClean(t *testing.T) {
 		s,
 		"vlan 10\ninterface Ethernet1/1\n"+
 			"  ip address 10.0.0.1 255.255.255.0\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -70,7 +70,7 @@ func TestImportCheckDuplicateSingle(t *testing.T) {
 	cfg := parse.Parse(
 		s,
 		"interface Ethernet1/1\n  description A\n  description B\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -81,7 +81,7 @@ func TestImportCheckDuplicateSingle(t *testing.T) {
 func TestImportCheckDuplicateKey(t *testing.T) {
 	s := miniSchema()
 	d := diag.New()
-	cfg := parse.Parse(s, "vlan 10\nvlan 10\n", diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, "vlan 10\nvlan 10\n", parse.Reject, d)
 	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "duplicate")
@@ -94,7 +94,7 @@ func TestImportCheckTwoInvalidArgsDeterministicOrder(t *testing.T) {
 	cfg := parse.Parse(
 		s,
 		"interface Ethernet1/1\n  ip address 10.0.0.300 255.255.255.300\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
@@ -117,7 +117,7 @@ func TestImportCheckRequiredOneMissing(t *testing.T) {
 	cfg := parse.Parse(
 		oneSchema(),
 		"interface Ethernet1/1\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -130,7 +130,7 @@ func TestImportCheckRequiredOnePresent(t *testing.T) {
 	cfg := parse.Parse(
 		oneSchema(),
 		"interface Ethernet1/1\n  mtu 1500\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -142,7 +142,7 @@ func TestImportCheckOneDuplicate(t *testing.T) {
 	cfg := parse.Parse(
 		oneSchema(),
 		"interface Ethernet1/1\n  mtu 1500\n  mtu 9000\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -161,7 +161,7 @@ func TestDuplicateKeyAcrossSiblingDefs(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(s,
 		"vlan 10 state enable\nvlan 10 name FOO state disable\n",
-		diag.Policy{Strict: true}, d)
+		parse.Reject, d)
 	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "duplicate key")
@@ -172,7 +172,7 @@ func TestImportCheckRequiredOneMissingAtRoot(t *testing.T) {
 	testtypes.Fill(s.Registry)
 	s.Node("hostname {{ h:word }}").Card(schema.One)
 	d := diag.New()
-	cfg := parse.Parse(s, "", diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, "", parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	ImportCheck(cfg, d)
 	require.True(t, d.HasErrors())
@@ -193,7 +193,7 @@ func TestImportCheckToggleGroupViolation(t *testing.T) {
 	cfg := parse.Parse(
 		toggleSchema(),
 		"interface Ethernet1/1\n  duplex full\n  duplex half\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
@@ -212,7 +212,7 @@ func TestImportCheckToggleGroupSingleMemberClean(t *testing.T) {
 	cfg := parse.Parse(
 		toggleSchema(),
 		"interface Ethernet1/1\n  duplex full\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -251,7 +251,7 @@ func TestImportCheckListItemChecks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := listSchema()
 			d := diag.New()
-			cfg := parse.Parse(s, tt.cfg, diag.Policy{Strict: true}, d)
+			cfg := parse.Parse(s, tt.cfg, parse.Reject, d)
 			require.False(t, d.HasErrors(), d.String())
 			ImportCheck(cfg, d)
 			assert.True(t, d.HasErrors())
@@ -264,7 +264,7 @@ func TestImportCheckListGoodValuesClean(t *testing.T) {
 	s := listSchema()
 	d := diag.New()
 	cfg := parse.Parse(s, "allowed vlan 10,20-22,4094\n",
-		diag.Policy{Strict: true}, d)
+		parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	ImportCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
@@ -275,7 +275,7 @@ func TestImportCheckDiagnosticsCarryLines(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(s,
 		"interface Ethernet1/1\nvlan 10\nvlan 9999\nvlan 10\n",
-		diag.Policy{Strict: true}, d)
+		parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	ImportCheck(cfg, d)
 	require.True(t, d.HasErrors())
@@ -307,7 +307,7 @@ func TestImportCheckDuplicateKindSpelling(t *testing.T) {
 		s,
 		"router bgp 65000\n  default-originate\n"+
 			"  default-originate route-map RM\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -318,7 +318,7 @@ func TestImportCheckDuplicateKindSpelling(t *testing.T) {
 	cfg = parse.Parse(
 		s,
 		"router bgp 65000\n  send-community\n  send-community extended\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -338,13 +338,13 @@ func TestImportCheckKindSlotSatisfiesRequiredOne(t *testing.T) {
 		"router bgp 65000\n  default-originate route-map RM\n",
 	} {
 		d := diag.New()
-		cfg := parse.Parse(s, text, diag.Policy{Strict: true}, d)
+		cfg := parse.Parse(s, text, parse.Reject, d)
 		ImportCheck(cfg, d)
 		assert.False(t, d.HasErrors(), "%q: %s", text, d.String())
 	}
 
 	d := diag.New()
-	cfg := parse.Parse(s, "router bgp 65000\n", diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, "router bgp 65000\n", parse.Reject, d)
 	ImportCheck(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "missing required")
@@ -364,7 +364,7 @@ func TestImportCheckKindSpellingsAtDifferentLevelsAreFine(t *testing.T) {
 		s,
 		"vrf RED\n  default-originate\n"+
 			"vrf BLUE\n  default-originate route-map RM\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)
@@ -387,7 +387,7 @@ func TestImportCheckThreeKindSpellingsReportEachExtra(t *testing.T) {
 		s,
 		"router bgp 65000\n  default-originate\n  default-originate always\n"+
 			"  default-originate route-map RM\n",
-		diag.Policy{Strict: true},
+		parse.Reject,
 		d,
 	)
 	ImportCheck(cfg, d)

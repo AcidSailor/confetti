@@ -940,3 +940,18 @@ func TestWalkVisitsSharedChildrenOnce(t *testing.T) {
 	}
 	assert.Len(t, seen, 2)
 }
+
+func TestMergeKindSetTwicePanicsBothOrders(t *testing.T) {
+	assert.PanicsWithValue(t,
+		"schema: merge kind set twice: hostname {{ name:word }}",
+		func() {
+			New().Node("hostname {{ name:word }}").
+				MergeKeepFirst().MergeKeepLast()
+		})
+	assert.PanicsWithValue(t,
+		"schema: merge kind set twice: hostname {{ name:word }}",
+		func() {
+			New().Node("hostname {{ name:word }}").
+				MergeKeepLast().MergeKeepFirst()
+		})
+}

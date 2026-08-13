@@ -5,8 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/acidsailor/confetti/diag"
 )
 
 const canonical = `bridge 1 protocol rstp vlan-bridge
@@ -51,7 +49,7 @@ const bridged = "bridge 1 protocol rstp vlan-bridge\n" +
 	"  switchport access vlan 10\n"
 
 func TestRoundTrip(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	cfg, d := e.Import(canonical)
 	require.False(t, d.HasErrors(), d.String())
 	out, _ := e.Render(cfg)
@@ -59,7 +57,7 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestImportDropsNoise(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	_, d := e.Import(
 		"!\nvlan database\n vlan 10 bridge 1 state enable\n!\nend\n",
 	)
@@ -68,13 +66,13 @@ func TestImportDropsNoise(t *testing.T) {
 }
 
 func TestStrictRejectsUnknown(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	_, d := e.Import("feature bgp\n")
 	assert.True(t, d.HasErrors()) // no alpha-style feature gating in beta
 }
 
 func TestCommitCheckRefs(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	for _, bad := range []string{
 		"interface xe1\n  bridge-group 2\n",            // no bridge 2
 		"interface xe1\n  switchport access vlan 30\n", // no vlan 30
@@ -91,7 +89,7 @@ func TestCommitCheckRefs(t *testing.T) {
 }
 
 func TestValueRanges(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	for _, bad := range []string{
 		"vlan database\n  vlan 1 bridge 1 state enable\n",   // vlan 1 implicit
 		"vlan database\n  vlan 10 bridge 33 state enable\n", // bridge > 32
@@ -108,7 +106,7 @@ func TestValueRanges(t *testing.T) {
 }
 
 func TestASNAsdotSpelling(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	for _, good := range []string{
 		"router bgp 1.0\n", // = 65536
 		"router bgp 65535.65535\n",
@@ -126,7 +124,7 @@ func TestASNAsdotSpelling(t *testing.T) {
 }
 
 func TestVlanRangeFoldsToInstances(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	cfg, d := e.Import(
 		"bridge 1 protocol rstp vlan-bridge\n" +
 			"vlan database\n  vlan 2-4 bridge 1 state enable\n")
@@ -145,7 +143,7 @@ func TestVlanRangeFoldsToInstances(t *testing.T) {
 func TestVlanRangeSpellingIsNotDrift(t *testing.T) {
 	// Range spelling vs explicit per-vlan spelling of the same content:
 	// remediation must see zero drift.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	running, dr := e.Import(
 		"bridge 1 protocol rstp vlan-bridge\n" +
 			"vlan database\n" +
@@ -163,7 +161,7 @@ func TestVlanRangeSpellingIsNotDrift(t *testing.T) {
 
 func TestVlanRangeStateConflictIsDupKey(t *testing.T) {
 	// ImportCheck reports conflicting states for one VLAN identity as a duplicate key.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	_, d := e.Import(
 		"bridge 1 protocol rstp vlan-bridge\n" +
 			"vlan database\n" +
@@ -175,7 +173,7 @@ func TestVlanRangeStateConflictIsDupKey(t *testing.T) {
 func TestTrunkAddLinesUnionOnImport(t *testing.T) {
 	// Successive add lines accumulate on-device; import folds them into one
 	// slot spelled as the canonical add-form line.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	cfg, d := e.Import(
 		"interface xe1\n" +
 			"  switchport trunk allowed vlan add 10\n" +
@@ -189,7 +187,7 @@ func TestTrunkAddLinesUnionOnImport(t *testing.T) {
 }
 
 func TestTrunkRemediateEmitsDeltaForms(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	running, dr := e.Import(
 		"interface xe1\n  switchport trunk allowed vlan add 10,20\n")
 	require.False(t, dr.HasErrors(), dr.String())
@@ -208,7 +206,7 @@ func TestTrunkRemediateEmitsDeltaForms(t *testing.T) {
 
 func TestTrunkSpellingEquivalenceIsNotDrift(t *testing.T) {
 	// Multi-line and folded single-line spellings of the same set: no drift.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	running, _ := e.Import(
 		"interface xe1\n" +
 			"  switchport trunk allowed vlan add 10\n" +
@@ -221,7 +219,7 @@ func TestTrunkSpellingEquivalenceIsNotDrift(t *testing.T) {
 }
 
 func TestVrfGrammar(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	in := "ip vrf RED\n" +
 		"interface xe1\n" +
 		"  ip vrf forwarding RED\n" +
@@ -237,7 +235,7 @@ func TestVrfGrammar(t *testing.T) {
 }
 
 func TestVrfDanglingRefs(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	for _, bad := range []string{
 		"interface xe1\n  ip vrf forwarding BLUE\n",
 		"router bgp 65000\n  address-family ipv4 vrf BLUE\n    network 10.1.0.0/24\n  exit-address-family\n",
@@ -253,7 +251,7 @@ func TestVrfDanglingRefs(t *testing.T) {
 func TestTrunkWholeSlotRemovalUsesRemoveForm(t *testing.T) {
 	// Dropping the slot entirely must spell the vendor's remove form, not
 	// "no switchport trunk allowed vlan add ...".
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	running, _ := e.Import(
 		"interface xe1\n  switchport trunk allowed vlan add 10,20\n")
 	intended, _ := e.Import("interface xe1\n  description x\n")

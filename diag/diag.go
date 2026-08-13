@@ -85,16 +85,3 @@ func (d *Diagnostics) String() string {
 	}
 	return b.String()
 }
-
-// Policy selects the strict or lenient recovery strategy for recoverable problems; its zero value is lenient.
-type Policy struct {
-	Strict bool
-}
-
-// Severity returns Error under a strict policy and Warning otherwise.
-func (p Policy) Severity() Severity {
-	if p.Strict {
-		return Error
-	}
-	return Warning
-}

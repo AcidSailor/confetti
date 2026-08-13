@@ -2,8 +2,9 @@
 // configurations. It parses, validates, canonicalizes, remediates, rolls back,
 // compares, and merges configuration text without connecting to a device.
 //
-// The Engine ties a platform grammar (schema.Schema), a strict/lenient
-// policy (diag.Policy), and the import/export transform pipelines. Grammar
+// The Engine ties a platform grammar (schema.Schema), per-stage options
+// (parse.Unknown, remediate.Cycle), and the import/export transform
+// pipelines; Merge takes its resolution options per call. Grammar
 // is data: platforms are authored as schemas and live outside this module
 // (the in-repo internal/fixture schemas are test fixtures and authoring
 // references). See docs/design.md for the architecture and the design
