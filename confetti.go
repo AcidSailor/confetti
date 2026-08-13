@@ -14,7 +14,7 @@ import (
 	"github.com/acidsailor/confetti/validate"
 )
 
-// Engine ties a schema, per-stage options, and the import/export transform pipelines.
+// Engine runs configuration pipelines for one schema.
 type Engine struct {
 	schema       *schema.Schema
 	unknown      parse.Unknown
@@ -29,12 +29,12 @@ type Engine struct {
 // Option configures an Engine.
 type Option func(*Engine)
 
-// WithUnknown selects how Import reports a command the grammar does not model; the default rejects.
+// WithUnknown sets Import's unknown-command behavior; the default is parse.Reject.
 func WithUnknown(u parse.Unknown) Option {
 	return func(e *Engine) { e.unknown = u }
 }
 
-// WithCycle selects what Remediate, Rollback, and Compare do with an ordering cycle; the default aborts.
+// WithCycle sets cycle handling for Remediate, Rollback, and Compare; the default is remediate.Abort.
 func WithCycle(c remediate.Cycle) Option {
 	return func(e *Engine) { e.cycle = c }
 }
@@ -172,7 +172,7 @@ func (e *Engine) Compare(
 	return compare.Render(res.Changes), d
 }
 
-// Merge combines fragments in order without running a commit check; opts selects the conflict resolution per call because two callers of one engine can want different resolutions.
+// Merge combines fragments in order with per-call conflict resolution and no commit check.
 func (e *Engine) Merge(
 	opts merge.Options,
 	parts ...*schema.Config,

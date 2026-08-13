@@ -1,16 +1,15 @@
-// Package merge assembles configuration fragments from left to right in a new
-// tree. It removes duplicate lines and recursively merges sections. A slot
-// claimed twice with different values goes to the Options resolver: Declared
-// (the default) follows the slot's schema merge strategy, including a
-// definition's MergeFunc, unions list slots, and keeps the later value
-// otherwise; Refuse reports an Error for everything the schema does not
-// sanction. A caller resolver receives the same declared strategy and may
-// ignore it. The
-// severity follows the outcome: Refused is an Error and keeps the earlier
-// value, Overridden and a value-changing Combined are Warnings, and a
-// Combined that hands back the earlier node warns that a leaf's later value
-// was dropped. A resolver-built node that breaks the identity contract is an
-// Error that keeps the earlier value. Merge does not run a commit check.
+// Package merge combines configuration fragments from left to right without
+// modifying them. It removes duplicate lines and recursively merges sections.
+// Merge does not run a commit check.
+//
+// The Options resolver handles contested slots. Declared applies the schema
+// strategy, unions lists, merges matching sections, and otherwise keeps the
+// later value. Refuse rejects conflicts not resolved by the schema or list
+// union. A custom resolver receives the declared schema strategy.
+//
+// Refused reports an Error and keeps the earlier value. Overridden and
+// value-changing Combined outcomes report Warnings. Merge rejects resolver
+// output that breaks slot identity or tree ownership.
 //
 // Merge treats each non-keyed ZeroToOne definition as one slot per level.
 // Remediate requires a shared Kind to pair sibling definitions because

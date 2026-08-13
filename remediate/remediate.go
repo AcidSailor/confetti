@@ -5,7 +5,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Cycle selects what happens when the operation graph does not sort.
+// Cycle selects how Diff handles an ordering cycle.
 type Cycle int
 
 const (
@@ -56,7 +56,7 @@ func Diff(
 	dv.collect(running.Root, intended.Root, nil, nil)
 	dv.buildGraph()
 	seq := dv.schedule()
-	if seq == nil { // An aborted cycle prevents artifact output.
+	if seq == nil {
 		return &Result{Tree: out}, d
 	}
 	materialize(seq, dv.ops, out)

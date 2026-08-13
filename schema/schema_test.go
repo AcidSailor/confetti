@@ -973,7 +973,6 @@ func TestMergeFuncExcludesOtherKindsBothOrders(t *testing.T) {
 }
 
 func TestToggleGroupMergeKindTwicePanicsBothOrders(t *testing.T) {
-	// Toggle partners share one merge slot, so two declarations would make the winner depend on part order.
 	build := func() (*Def, *Def) {
 		s := New()
 		a := s.Node("mode fast").Card(ZeroToOne)
@@ -996,7 +995,6 @@ func TestToggleGroupMergeKindTwicePanicsBothOrders(t *testing.T) {
 			a.Toggles(b)
 			b.MergeKeepFirst()
 		})
-	// One declaration is enough for the whole group and stays legal.
 	assert.NotPanics(t, func() {
 		a, b := build()
 		a.Toggles(b)

@@ -22,9 +22,8 @@ This document defines the current design.
 
 ```
 confetti (root)   Engine: option wiring + the pipelines below
-├── schema        grammar-as-data (Def templates, kinds/keys/refs, negate/
-│                 block/list/toggle/fold/merge strategies, MatchChild) plus
-│                 the config tree it parses into (Node, Config, op tags)
+├── schema        grammar and config tree (Def templates, kinds/keys/refs,
+│                 strategies, MatchChild, Node, Config, op tags)
 ├── value         value-type registry (builtins: word, rest, uint)
 ├── parse         text → tree (indent stack, block capture, BlockSpans) and
 │                 the import fold (Respell → ListContinues → Members)
@@ -38,7 +37,7 @@ confetti (root)   Engine: option wiring + the pipelines below
 ├── graph         ordering graph passed to schema.OrderHook; pure leaf
 │                 package, stdlib only (see Layering)
 ├── compare       Changes → git-diff-style human view
-├── merge         fragments → one tree, per-call conflict resolvers + list union
+├── merge         fragments → one tree, per-call conflict resolution
 ├── diag          two-severity diagnostics with optional source line
 └── internal/
     ├── ident     node-pairing identity shared by remediate + merge
@@ -98,45 +97,39 @@ The explanations record constraints that tests do not show.
 
 ### Policy and safety constraints
 
-- **Each recovery strategy lives with the stage it governs, and none relaxes
-  constraints on schema-known configuration.** `parse.Unknown` controls only
-  tolerance for unknown input: `Drop` lets existing configurations with
-  unmodeled lines import. After a line matches, all schema constraints
-  apply. `merge.Options` selects conflict resolution per call because it is
-  a semantic choice between two accepted values, not a trust decision.
-  `remediate.Cycle` selects only ordering-cycle handling. Parse and remediate
-  default to refusing (`Reject`, `Abort`). Merge defaults to `Declared`, which
-  resolves and reports rather than refusing, because a slot conflict is a
-  choice between two accepted values, not untrusted input; `Refuse` is the
-  conservative resolver. Fold and authoring errors during Diff are always
-  Errors.
-- **`Protect()` fails under every option value.** No option can disable
-  this safety constraint. Silent skips hide attempted deletion. The check
-  applies to every deletion path: the removal loop, `ckReplace`, removed
-  subtree descendants, and keyed identity changes. `ckReplace` refuses both
-  operations because an add without its removal could create duplicates.
+- **Recovery options are stage-specific and do not relax constraints on
+  schema-known configuration.** `parse.Unknown` handles unknown input,
+  `merge.Options` resolves accepted values, and `remediate.Cycle` handles
+  ordering cycles. Fold and Diff authoring errors are always Errors.
+- **Parse and remediation refuse by default.** Their zero values are `Reject`
+  and `Abort`. Merge defaults to `Declared`, which applies the schema strategy,
+  unions lists, merges matching sections, and keeps the later value otherwise.
+  `Refuse` rejects conflicts not resolved by the schema or list union.
+- **`Protect()` always rejects deletion.** The check applies to the removal
+  loop, `ckReplace`, removed subtree descendants, and keyed identity changes.
+  `ckReplace` rejects both operations because an add without its removal could
+  create duplicates.
 - **The Protected boundary: value changes are not deletions.** `ckModify`,
   a toggle flip, and list deltas on a protected node stay allowed.
 - **Protected is all-or-nothing for header negation but per-child for an
   `EmptyOnRemove` expansion**, and `Protected` × `EmptyOnRemove` on one def
   is an authoring panic ("never delete this" contradicts "here is how to
   delete this").
-- **An Error prevents artifact output.** An `Abort`ed ordering cycle produces
-  an empty tree and empty Changes. A Protected refusal produces no operation
-  or Change. A partial artifact would be unsafe.
-- **A merge resolver cannot corrupt identity.** A resolver must not mutate
-  its arguments; it returns `earlier`, `later`, or a fresh parentless node.
-  A fresh node must carry a definition, must not already belong to a tree,
-  must keep the contested slot's pairing identity, must render its text from
-  its fields, and that text must bind its own definition through
-  `schema.BindsDef` at its level. It must not win a section, because a
-  fresh node has no children and would erase both stanzas. Merge reports an
-  Error and keeps the earlier value for each of these. A `Combined` outcome
-  across two definitions with a section on either side is an Error: children
-  of different definitions cannot share a header. A `Combined` outcome that
-  hands back `earlier` itself drops a leaf's later value, so Merge reports it
-  as a Warning. `Refused` keeps the earlier stanza whole and merges nothing
-  from the later part.
+- **Safety refusals suppress output.** An `Abort` cycle produces an empty tree
+  and empty Changes. A Protected refusal produces no operation or Change.
+  Other Diff errors can retain a Result for inspection.
+- **A merge resolver must not mutate its inputs.** It returns `earlier`,
+  `later`, or a fresh parentless node. Returning an owned node would splice
+  two trees together.
+- **Fresh resolver nodes must preserve slot identity.** A fresh node must have
+  a definition, keep the contested pairing identity, render its text from its
+  fields, and bind its definition through `schema.BindsDef` at that level. A
+  fresh node cannot replace a section because it has no children. Invalid
+  output reports an Error and keeps the earlier value.
+- **A `Combined` result must preserve both values.** Sections can combine only
+  when both inputs and the result use one definition. Returning `earlier` for
+  different leaf values reports a Warning because the later value is absent.
+  `Refused` keeps the earlier stanza whole.
 
 ### Schema construction constraints
 
@@ -156,13 +149,12 @@ The explanations record constraints that tests do not show.
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
   `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
   platform-independent.
-- **Whole-tree validators belong to `Engine`.** A hook such as `OrderHook` or
-  `MergeFunc` is per-definition grammar and belongs to the definition that
-  declares it; a validator is per-Engine composition, so two Engines can share
-  one schema and still run different validator sets. `WithCommitChecks` appends validators after the built-in
-  `CommitCheck`, in registration order. They run for `CommitCheck`,
-  `Remediate` (intended), and `Rollback` (running). `Render`, `Compare`, and
-  `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
+- **Whole-tree validators belong to `Engine`.** `OrderHook` and `MergeFunc`
+  are schema behavior. Validators are Engine composition, so Engines that
+  share a schema can use different validator sets. `WithCommitChecks` appends
+  validators after the built-in `CommitCheck`, in registration order. They run
+  for `CommitCheck`, `Remediate` (intended), and `Rollback` (running). `Render`,
+  `Compare`, and `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
   merged after it returns, so it cannot drop what earlier checks recorded. It
   must not modify the tree: `Remediate` validates the caller's `intended`
   before `Diff`, so a mutation would silently change the remediation. A nil
@@ -171,19 +163,17 @@ The explanations record constraints that tests do not show.
   heuristic has no fallback. A test verifies that an undeclared pair emits
   separate remove and add operations.
 - **At most one member of a toggle group may declare a merge kind.** The
-  group shares one merge slot, so a second declaration would make the winner
-  depend on which member merge saw first. The check holds in both builder
-  call orders.
+  group shares one merge slot, so a second declaration would make resolution
+  depend on encounter order. The check holds in both builder call orders.
 
 ### Pairing and diff semantics
 
-- **Remediation output is a `*schema.Config` of new operation-tagged
-  nodes.** The existing renderer produces executable CLI, and `schema.Walk`
-  supports inspection. `OpNone` must remain the zero value because every
-  tree node has an operation field. `OpRemove` nodes
-  carry `def == nil`: a negated line does not match its positive definition,
-  and the missing definition suppresses an incorrect section-exit token on a
-  negated block.
+- **Remediation output is a new `*schema.Config` of operation-tagged nodes.**
+  The standard renderer produces executable CLI, and `schema.Walk` supports
+  inspection. `OpNone` is the zero value because every node has an operation.
+  `OpRemove` nodes have no definition: a negated line does not match its
+  positive definition, and the missing definition suppresses an incorrect
+  section-exit token on a negated block.
 - **Diff never mutates its inputs.** `Change.Running`/`.Intended` alias the
   caller's trees read-only; the artifact is built from new nodes.
 - **`Diff` is direction-independent, and `Remediate` and `Rollback` use the
@@ -311,12 +301,10 @@ reason when edge derivation recorded one.
 - **Line numbers index the original text**, so `transform.TextRule` maps one
   line to one line and no rule can change the line count: `DropLines` blanks
   instead of removing. Raw and transformed block spans therefore always align.
-- **Collect all diagnostics instead of failing at the first error.** Each
-  stage owns its recovery strategy for unknown or conflicting input:
-  `parse.Drop` drops an unmatched line with a Warning, `merge.Options`
-  selects how a contested slot resolves, and `remediate.Break` breaks an
-  ordering cycle instead of aborting. Invalid values, unresolved references,
-  and duplicate keys are always Errors.
+- **Collect all diagnostics instead of failing at the first error.** `Drop`
+  warns and drops unknown input, merge resolvers settle contested slots, and
+  `Break` warns and drops an ordering edge. Invalid values, unresolved
+  references, and duplicate keys are Errors.
 
 ### Modeling decisions
 

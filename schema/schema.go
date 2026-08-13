@@ -68,14 +68,14 @@ type NegateStrategy struct {
 	Func     func(fields map[string]string, rendered string) string
 }
 
-// MergeKind declares how a slot should resolve; the Merge call's resolver decides whether to honor it.
+// MergeKind identifies a schema-declared conflict strategy.
 type MergeKind int
 
 const (
-	MergeDefault   MergeKind = iota // Under Declared: union a list slot, recurse a section, else keep the later value.
-	MergeKeepFirst                  // The earlier part's value wins; a later section is discarded whole.
-	MergeKeepLast                   // The later part's value wins; it replaces an earlier section whole.
-	MergeCustom                     // Call Func for combinations no fixed kind expresses.
+	MergeDefault   MergeKind = iota // Declared unions lists, merges sections, and otherwise keeps the later value.
+	MergeKeepFirst                  // Keep the earlier value or section.
+	MergeKeepLast                   // Keep the later value or section.
+	MergeCustom                     // Call Func.
 )
 
 // Outcome reports how a merge resolution settled a contested slot.
@@ -180,7 +180,7 @@ func (s *Schema) newNode(tmpl string) *Def {
 	return &Def{Schema: s, spec: spec, Template: tmpl}
 }
 
-// Def defines one command line plus its nested grammar; builder methods validate mutually exclusive declarations.
+// Def describes one command line and its nested grammar.
 type Def struct {
 	Schema           *Schema
 	Template         string // The original template used in diagnostics.
@@ -340,7 +340,7 @@ func (n *Def) Key(args ...string) *Def {
 // Idempotent marks this node as idempotent (re-applying has no effect).
 func (n *Def) MarkIdempotent() *Def { n.Idempotent = true; return n }
 
-// Protected prevents automatic deletion under every option value and is mutually exclusive with EmptyOnRemove.
+// Protect marks a definition as undeletable and is mutually exclusive with ClearOnRemove.
 func (n *Def) Protect() *Def {
 	if n.EmptyOnRemove {
 		panic(
@@ -390,7 +390,7 @@ func (n *Def) MergeKeepLast() *Def {
 	return n
 }
 
-// MergeFunc sets a non-nil custom resolution for combinations no fixed kind expresses; merge validates what it returns.
+// MergeFunc sets a custom conflict resolver; merge validates its result.
 func (n *Def) MergeFunc(
 	fn func(earlier, later *Node) (*Node, Outcome),
 ) *Def {
@@ -401,14 +401,13 @@ func (n *Def) MergeFunc(
 	return n
 }
 
-// mergeTwiceInGroup names the authoring error of declaring a merge kind on two partners of one toggle group.
 const mergeTwiceInGroup = "schema: a toggle group declares a merge kind twice: "
 
 func (n *Def) setMerge(s MergeStrategy) {
 	if n.Merge.Kind != MergeDefault {
 		panic("schema: merge kind set twice: " + n.Template)
 	}
-	// Catch the reverse call order, where Toggles ran before this declaration.
+	// Check strategies declared before Toggles.
 	for _, m := range n.ToggleGroup {
 		if m != n && m.Merge.Kind != MergeDefault {
 			panic(mergeTwiceInGroup + n.Template)
@@ -474,7 +473,7 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 			panic("schema: node is already in a toggle group: " + m.Template)
 		}
 	}
-	// Toggle partners share one merge slot, so two declarations would make the winner depend on which one merge saw first.
+	// Toggle members share one merge slot and permit one strategy.
 	if declared > 1 {
 		panic(mergeTwiceInGroup + n.Template)
 	}
@@ -920,7 +919,7 @@ func MatchChild(
 	return nil, nil, false
 }
 
-// BindsDef reports whether line re-parses among candidates to want, and returns the fields want captures from it.
+// BindsDef reports whether MatchChild selects want and returns its captured fields.
 func BindsDef(
 	candidates []*Def,
 	want *Def,

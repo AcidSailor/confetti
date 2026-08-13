@@ -13,8 +13,8 @@ connections. The core contains no vendor-specific logic.
   dual-form spellings, protected nodes.
 - **Safety constraints.** Remediation artifacts are dependency-ordered
   (definitions before referrers on add, referrers first on remove),
-  protected nodes refuse deletion under every option value, and on any Error no
-  artifact is returned.
+  and protected nodes cannot be deleted. Rejected deletions and aborted
+  ordering cycles produce no artifact.
 
 ## Install
 
@@ -47,8 +47,7 @@ inv, diags := e.Rollback(running, intended)
 // Generate a git-diff-style view without a commit check.
 view, diags := e.Compare(running, intended)
 
-// Merge fragments. The default resolver follows each slot's declared merge
-// kind; merge.Refuse rejects undeclared conflicts instead.
+// Merge fragments with schema-declared conflict handling.
 merged, diags := e.Merge(merge.Options{}, base, overlay)
 diags = e.CommitCheck(merged)
 ```
@@ -64,10 +63,9 @@ iface.Child("switchport access vlan {{ vlan:vlan }}").
 	Card(schema.ZeroToOne).MarkIdempotent().Ref("vlan", "vlan.id")
 ```
 
-`confetti.WithUnknown(parse.Drop)` downgrades unknown commands to warnings so
-existing configurations with unmodeled lines import;
-`confetti.WithCycle(remediate.Break)` lets remediation break an ordering
-cycle instead of aborting.
+`confetti.WithUnknown(parse.Drop)` warns and drops unmodeled commands during
+import. `confetti.WithCycle(remediate.Break)` warns and drops an ordering edge
+to break a cycle.
 
 Use `WithCommitChecks` for whole-tree rules that do not fit the schema. The
 validators run after the built-in check in `CommitCheck`, `Remediate`, and

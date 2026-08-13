@@ -68,7 +68,7 @@ func TestE2EBrownfieldDropVsReject(t *testing.T) {
 
 	strict := alpha.Engine()
 	_, ds := strict.Import(in)
-	assert.True(t, ds.HasErrors()) // same input is a hard error under Reject
+	assert.True(t, ds.HasErrors())
 }
 
 func remediateSchema() *schema.Schema {

@@ -168,7 +168,7 @@ func ImportTransforms() []transform.TextRule {
 	return rules
 }
 
-// Engine returns a beta engine with its schema, import transforms, and any extra options.
+// Engine returns a beta engine with import transforms and opts.
 func Engine(opts ...confetti.Option) *confetti.Engine {
 	base := []confetti.Option{confetti.WithImportText(ImportTransforms()...)}
 	return confetti.New(Schema(), append(base, opts...)...)

@@ -9,11 +9,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Resolve decides what a slot holds when two parts both claim it with
-// different values. earlier is the node already in the output tree, later is
-// the incoming part node, and declared is the merge strategy resolved from the
-// slot's schema definitions. A resolver must not modify either argument; it
-// returns earlier, later, or a fresh parentless node.
+// Resolve returns earlier, later, or a fresh parentless node for a contested slot without mutating either input.
 type Resolve func(earlier, later *schema.Node, declared schema.MergeStrategy) (*schema.Node, schema.Outcome)
 
 // Options configures one Merge call; a nil Resolve uses Declared.
@@ -21,9 +17,7 @@ type Options struct {
 	Resolve Resolve
 }
 
-// Declared applies the slot's declared merge strategy: keep the declared
-// winner, union a list slot, take the later header of a same-definition
-// section and recurse, and keep the later value otherwise.
+// Declared applies the schema strategy, unions lists, merges matching sections, and otherwise keeps the later value.
 func Declared(
 	earlier, later *schema.Node,
 	declared schema.MergeStrategy,
@@ -37,7 +31,7 @@ func Declared(
 	return later, schema.Overridden
 }
 
-// Refuse resolves only what the schema sanctions and refuses every other contested slot, including same-definition sections whose headers differ.
+// Refuse resolves schema strategies and list unions, and rejects other conflicts.
 func Refuse(
 	earlier, later *schema.Node,
 	declared schema.MergeStrategy,
@@ -46,7 +40,7 @@ func Refuse(
 	return n, out
 }
 
-// resolveDeclared settles the slots whose resolution the schema itself sanctions, and refuses the rest.
+// resolveDeclared applies explicit schema strategies and list union.
 func resolveDeclared(
 	earlier, later *schema.Node,
 	declared schema.MergeStrategy,
@@ -68,10 +62,7 @@ func resolveDeclared(
 	return nil, schema.Refused, false
 }
 
-// UnionLists combines two spellings of one list slot into a canonical node,
-// or earlier itself when both resolve to an empty set with no declared None
-// spelling; ok is false when they are not two spellings of one list slot,
-// which is not by itself a conflict.
+// UnionLists returns a canonical union and reports whether both nodes are spellings of one list slot.
 func UnionLists(earlier, later *schema.Node) (node *schema.Node, ok bool) {
 	def := earlier.Def
 	if def == nil || def != later.Def ||
@@ -94,7 +85,6 @@ func UnionLists(earlier, later *schema.Node) (node *schema.Node, ok bool) {
 		}
 	}
 	raw := listval.Canonical(append(a, b...), ls.Sep, kw)
-	// Keep the existing spelling when both values resolve to an empty set without a declared None spelling.
 	if raw == "" {
 		return earlier, true
 	}
@@ -103,7 +93,6 @@ func UnionLists(earlier, later *schema.Node) (node *schema.Node, ok bool) {
 		n.Fields = map[string]string{}
 	}
 	n.Fields[ls.Arg] = raw
-	// Set text last so it renders from the final fields.
 	n.Text = def.Render(n.Fields)
 	return n, true
 }
@@ -138,11 +127,10 @@ func Merge(
 	return out, d
 }
 
-// merger carries one Merge invocation's resolver, origin index, and diagnostics.
 type merger struct {
 	schema  *schema.Schema
 	resolve Resolve
-	origin  map[*schema.Node]int // Map each output node to its 1-based source part.
+	origin  map[*schema.Node]int // 1-based source part for each output node.
 	d       *diag.Diagnostics
 }
 
@@ -166,7 +154,7 @@ func (m *merger) level(outParent, partParent *schema.Node, part int) {
 			continue
 		}
 		declared := declaredStrategy(oc, pc)
-		// A non-default section kind resolves even equal headers because it owns the whole stanza.
+		// A non-default section strategy owns the complete stanza, even when headers match.
 		if oc.SameValue(pc) &&
 			(declared.Kind == schema.MergeDefault || !ident.IsSection(pc)) {
 			if ident.IsSection(pc) {
@@ -181,7 +169,7 @@ func (m *merger) level(outParent, partParent *schema.Node, part int) {
 	}
 }
 
-// slot resolves one contested slot in place and returns a replacement node when the later or a fresh value wins whole.
+// slot resolves a contested slot and returns a whole-subtree replacement when needed.
 func (m *merger) slot(
 	outParent, oc, pc *schema.Node,
 	id ident.Ident,
@@ -226,7 +214,6 @@ func (m *merger) slot(
 	if node == oc {
 		return nil
 	}
-	// The winning value replaces the slot's whole subtree.
 	if node == pc {
 		return m.cloneSubtree(pc, part)
 	}
@@ -234,9 +221,9 @@ func (m *merger) slot(
 	return node
 }
 
-// combine folds a Combined outcome into the earlier node and recurses when both sides keep one section definition.
+// combine applies a Combined outcome and merges children for one shared section definition.
 func (m *merger) combine(oc, pc, node *schema.Node, section bool, part int) {
-	// Merging children across definitions produces a tree its own schema cannot re-parse.
+	// Children from different definitions cannot share a section header.
 	prevDef := oc.Def
 	if section && (oc.Def != pc.Def || node.Def != oc.Def) {
 		m.d.Add(diag.Error,
@@ -249,7 +236,7 @@ func (m *merger) combine(oc, pc, node *schema.Node, section bool, part int) {
 		m.d.Add(diag.Warning, "%s: part %d combines with part %d (was %q)",
 			pc.Path(), part, m.origin[oc], oc.Text)
 		m.origin[oc] = part
-	// Handing back the earlier node itself leaves a leaf's later value in no node at all.
+	// Returning the earlier leaf omits the later value.
 	case node == oc && !ident.IsSection(pc) && pc.Text != oc.Text:
 		m.d.Add(diag.Warning,
 			"%s: part %d combined without part %d's value (was %q)",
@@ -263,40 +250,40 @@ func (m *merger) combine(oc, pc, node *schema.Node, section bool, part int) {
 	}
 }
 
-// freshNodeValid reports whether a resolver-constructed node keeps its identity through later stages, reporting an Error when it cannot.
+// freshNodeValid checks the identity and ownership of a resolver-built node.
 func (m *merger) freshNodeValid(
 	outParent, node, pc *schema.Node,
 	id ident.Ident,
 ) bool {
-	// Contested slots always carry definitions, so a definition-free fresh node can only lose identity.
+	// A definition-free node cannot retain a contested slot's identity.
 	if node.Def == nil {
 		m.d.Add(diag.Error,
 			"%s: resolver returned a node without a definition",
 			pc.Path())
 		return false
 	}
-	// Adopting a node that another tree still owns would splice two trees together.
+	// An owned node would splice two trees together.
 	if node.Parent != nil {
 		m.d.Add(diag.Error,
 			"%s: resolver returned a node that is already in a tree",
 			pc.Path())
 		return false
 	}
-	// A different pairing identity would leave the slot map naming a node that no longer fills it.
+	// The replacement must keep the contested slot identity.
 	if mergeIdent(node) != id {
 		m.d.Add(diag.Error,
 			"%s: resolver changed the slot's identity",
 			pc.Path())
 		return false
 	}
-	// A text that does not render from its fields corrupts every later stage.
+	// Text and fields must describe the same value.
 	if node.Text != node.Def.Render(node.Fields) {
 		m.d.Add(diag.Error,
 			"%s: resolver text does not render from its fields",
 			pc.Path())
 		return false
 	}
-	// The text must bind its own definition when parsed again, or the merged tree and its round-trip disagree on identity.
+	// Re-parsing must select the same definition.
 	cands := m.schema.Roots
 	if outParent.Def != nil {
 		cands = outParent.Def.Children
@@ -310,7 +297,7 @@ func (m *merger) freshNodeValid(
 	return true
 }
 
-// declaredStrategy resolves a slot's merge strategy, preferring the earlier definition's non-default declaration.
+// declaredStrategy prefers the earlier definition's non-default strategy.
 func declaredStrategy(earlier, later *schema.Node) schema.MergeStrategy {
 	if d := earlier.Def; d != nil && d.Merge.Kind != schema.MergeDefault {
 		return d.Merge

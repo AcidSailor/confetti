@@ -11,7 +11,7 @@ import (
 	"github.com/acidsailor/confetti/internal/lcp"
 )
 
-// schedule applies Kahn's algorithm, preferring the longest shared section path and then the smallest baseline key; Abort cycles fail, while Break cycles drop the greatest keyed edge.
+// schedule orders operations by dependencies, section affinity, and baseline key.
 func (dv *differ) schedule() []int {
 	ops := dv.ops
 	n := len(ops)

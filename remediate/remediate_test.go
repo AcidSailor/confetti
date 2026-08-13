@@ -179,7 +179,7 @@ func TestDiffOpTagsAddRemoveSection(t *testing.T) {
 	assert.Equal(t, schema.OpAdd, ops["vlan 99"])
 	assert.Equal(t, schema.OpSection, ops["interface Ethernet1/1"])
 	assert.Equal(t, schema.OpAdd, ops["description NEW"])
-	assert.Equal(t, schema.OpRemove, ops["no shutdown"]) // shutdown removed
+	assert.Equal(t, schema.OpRemove, ops["no shutdown"])
 }
 
 func TestDiffUnmatchedNodeDefensive(t *testing.T) { // E11
@@ -373,7 +373,6 @@ func TestDiffDuplicateIdempotentRunningValueWarns(t *testing.T) {
 }
 
 func TestResultEmptyUnknownOpIsNotEmpty(t *testing.T) {
-	// A future schema.Op value must never read as "no change".
 	out := schema.NewConfig(testSchema())
 	n := schema.NewNode("mystery line")
 	n.Op = schema.Op(99)

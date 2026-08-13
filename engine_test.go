@@ -165,7 +165,7 @@ func TestEngineRemediatePassesCycleToOrdering(t *testing.T) {
 		g.AddEdge(0, 1)
 		g.AddEdge(1, 0) // forced cycle
 	})
-	// The default aborts and emits nothing.
+	// Abort emits no artifact.
 	e := confetti.New(s)
 	run, d := e.Import("")
 	require.False(t, d.HasErrors())
@@ -175,7 +175,7 @@ func TestEngineRemediatePassesCycleToOrdering(t *testing.T) {
 	assert.True(t, rd.HasErrors())
 	assert.True(t, res.Empty())
 
-	// WithCycle(Break) drops an edge, warns, and emits the artifact.
+	// Break drops an edge and emits the artifact.
 	eb := confetti.New(s, confetti.WithCycle(remediate.Break))
 	runB, _ := eb.Import("")
 	wantB, _ := eb.Import("alpha one\nbeta two\n")

@@ -8,7 +8,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Unknown selects how a command the grammar does not model is reported; the node is dropped from the tree under both values.
+// Unknown selects whether an unsupported command reports an Error or Warning; Parse always drops its node.
 type Unknown int
 
 const (
@@ -78,7 +78,7 @@ func Parse(
 			strings.HasSuffix(text, "\n") {
 			blk.body = blk.body[:n-1]
 		}
-		// An unterminated block consumed the rest of the file, so the result is unusable.
+		// Unterminated blocks consume the remaining input and always report an Error.
 		d.AddAt(
 			blk.node.Line,
 			diag.Error,

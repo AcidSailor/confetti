@@ -159,7 +159,7 @@ func TestParseBlockUnterminated(t *testing.T) {
 	assert.True(
 		t,
 		d2.HasErrors(),
-	) // malformed input errors under both Unknown values
+	)
 }
 
 func TestParseBlockTerminatorTrailingWhitespace(t *testing.T) {

@@ -131,7 +131,7 @@ func TestKindSlotUnchangedSpellingIsNoOp(t *testing.T) {
 }
 
 func TestSplitSlotErrorFiresWithoutKind(t *testing.T) {
-	// The split is an Error because the emitted pair can leave the slot in either state; the artifact is still emitted for inspection.
+	// The ambiguous pair is an Error but remains available for inspection.
 	out, d := rawDiff(t, kindSlotSchema(),
 		"router bgp 65000\n  local-as 65001\n",
 		"router bgp 65000\n  local-as 65002\n")
