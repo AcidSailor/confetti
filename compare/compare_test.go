@@ -12,13 +12,12 @@ import (
 	"github.com/acidsailor/confetti/parse"
 	"github.com/acidsailor/confetti/remediate"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
-func mustParse(t *testing.T, s *schema.Schema, text string) *tree.Config {
+func mustParse(t *testing.T, s *schema.Schema, text string) *schema.Config {
 	t.Helper()
 	d := diag.New()
-	cfg := parse.Parse(s, text, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, text, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	return cfg
 }
@@ -31,11 +30,15 @@ func TestRenderSignsAndContext(t *testing.T) {
 	iface := []string{"interface Ethernet1/1"}
 	changes := []remediate.Change{
 		{
-			Action: graph.Modify, Running: tree.NewNode("description OLD"),
-			Intended: tree.NewNode("description NEW"), Path: iface,
+			Action: graph.Modify, Running: schema.NewNode("description OLD"),
+			Intended: schema.NewNode("description NEW"), Path: iface,
 		},
-		{Action: graph.Remove, Running: tree.NewNode("shutdown"), Path: iface},
-		{Action: graph.Add, Intended: tree.NewNode("vlan 99")},
+		{
+			Action:  graph.Remove,
+			Running: schema.NewNode("shutdown"),
+			Path:    iface,
+		},
+		{Action: graph.Add, Intended: schema.NewNode("vlan 99")},
 	}
 	want := "  interface Ethernet1/1\n" +
 		"-   description OLD\n" +
@@ -51,9 +54,13 @@ func TestRenderRegroupsSplitSections(t *testing.T) {
 	e11 := []string{"interface Ethernet1/1"}
 	e12 := []string{"interface Ethernet1/2"}
 	changes := []remediate.Change{
-		{Action: graph.Add, Intended: tree.NewNode("description A"), Path: e11},
-		{Action: graph.Add, Intended: tree.NewNode("mtu 9000"), Path: e12},
-		{Action: graph.Add, Intended: tree.NewNode("no shutdown"), Path: e11},
+		{
+			Action:   graph.Add,
+			Intended: schema.NewNode("description A"),
+			Path:     e11,
+		},
+		{Action: graph.Add, Intended: schema.NewNode("mtu 9000"), Path: e12},
+		{Action: graph.Add, Intended: schema.NewNode("no shutdown"), Path: e11},
 	}
 	want := "  interface Ethernet1/1\n" +
 		"+   description A\n" +
@@ -69,12 +76,12 @@ func TestRenderSharedAncestorPrefix(t *testing.T) {
 	changes := []remediate.Change{
 		{
 			Action:   graph.Add,
-			Intended: tree.NewNode("router-id 1.1.1.1"),
+			Intended: schema.NewNode("router-id 1.1.1.1"),
 			Path:     bgp,
 		},
 		{
 			Action:   graph.Add,
-			Intended: tree.NewNode("max-paths ebgp 8"),
+			Intended: schema.NewNode("max-paths ebgp 8"),
 			Path:     af,
 		},
 	}
@@ -88,9 +95,9 @@ func TestRenderSharedAncestorPrefix(t *testing.T) {
 func TestRenderRemovedSectionShowsSubtree(t *testing.T) {
 	// The artifact negates only the header; the view shows every
 	// disappearing line through the paired running-side node.
-	sec := tree.NewNode("interface Ethernet1/1")
-	sec.AddChild(tree.NewNode("description A"))
-	sec.AddChild(tree.NewNode("shutdown"))
+	sec := schema.NewNode("interface Ethernet1/1")
+	sec.AddChild(schema.NewNode("description A"))
+	sec.AddChild(schema.NewNode("shutdown"))
 	changes := []remediate.Change{{Action: graph.Remove, Running: sec}}
 	want := "- interface Ethernet1/1\n" +
 		"-   description A\n" +
@@ -107,7 +114,7 @@ func TestRenderToggleFlipPairFromDiff(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "interface Ethernet1/1\n  shutdown\n"),
 		mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n"),
-		diag.Policy{},
+		remediate.Break,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "  interface Ethernet1/1\n" +
@@ -126,7 +133,7 @@ func TestRenderToggleFlipShowsBothSubtrees(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "feature on\n  old child\n"),
 		mustParse(t, s, "feature off\n  new child\n"),
-		diag.Policy{Strict: true},
+		remediate.Abort,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- feature on\n" +
@@ -151,7 +158,7 @@ func TestRenderRemovedSectionFromDiff(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "interface Ethernet1/1\n  description A\n  shutdown\n"),
 		mustParse(t, s, ""),
-		diag.Policy{},
+		remediate.Break,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- interface Ethernet1/1\n" +
@@ -172,7 +179,7 @@ func TestRenderSectionHeaderModifyHeaderOnly(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "vlan 10 name FOO\n  shutdown\n"),
 		mustParse(t, s, "vlan 10 name BAR\n"),
-		diag.Policy{},
+		remediate.Break,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- vlan 10 name FOO\n" +
@@ -191,7 +198,7 @@ func TestRenderReplacePairFromDiff(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "vlan 10 state enable\n"),
 		mustParse(t, s, "vlan 10 state disable\n"),
-		diag.Policy{},
+		remediate.Break,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- vlan 10 state enable\n" +
@@ -214,7 +221,7 @@ func TestRenderNoSectionExitToken(t *testing.T) {
 		mustParse(t, s, "router bgp 65000\n"+
 			"  address-family ipv4 unicast\n"+
 			"    max-paths ebgp 8\n"),
-		diag.Policy{},
+		remediate.Break,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "+ router bgp 65000\n" +
@@ -232,7 +239,7 @@ func TestRenderBlockBody(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "banner motd ^\nhello\n^\n"),
 		mustParse(t, s, "banner motd ^\nworld\n^\n"),
-		diag.Policy{},
+		remediate.Break,
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- banner motd ^\n" +

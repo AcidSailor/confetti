@@ -6,11 +6,10 @@ import (
 
 	"github.com/acidsailor/confetti/internal/listval"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // listOrModify returns a list delta for a valid changed list, no operation for equal sets, or a whole-line modification as fallback.
-func listOrModify(ic, rc *tree.Node) (createIntent, bool) {
+func listOrModify(ic, rc *schema.Node) (createIntent, bool) {
 	ci := createIntent{src: ic, run: rc, kind: ckModify}
 	def := ic.Def
 	// Use a whole-line modification unless both nodes form a valid list pair without a block change.
@@ -64,10 +63,10 @@ func deltaLeaf(
 	fields map[string]string,
 	ls schema.ListStrategy,
 	items []string,
-) *tree.Node {
+) *schema.Node {
 	f := maps.Clone(fields)
 	f[ls.Arg] = listval.Compress(items, ls.Sep)
-	n := tree.NewNode(schema.Interpolate(tmpl, f))
-	n.Op = tree.OpModify
+	n := schema.NewNode(schema.Interpolate(tmpl, f))
+	n.Op = schema.OpModify
 	return n
 }

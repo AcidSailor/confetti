@@ -23,7 +23,7 @@ func BlockSpans(s *schema.Schema, text string) []bool {
 	return spans
 }
 
-func hasBlocks(nodes []*schema.Node) bool {
+func hasBlocks(nodes []*schema.Def) bool {
 	for _, n := range nodes {
 		if n.Block.Kind != schema.BlockNone || hasBlocks(n.Children) {
 			return true

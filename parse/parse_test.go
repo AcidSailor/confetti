@@ -28,7 +28,7 @@ func TestParseNesting(t *testing.T) {
 		"  shutdown\n" +
 		"vlan 10\n"
 	d := diag.New()
-	cfg := Parse(miniSchema(), in, diag.Policy{Strict: true}, d)
+	cfg := Parse(miniSchema(), in, Reject, d)
 
 	require.False(t, d.HasErrors(), d.String())
 	top := cfg.Root.Children
@@ -49,7 +49,7 @@ func TestParseWhitespaceNormalized(t *testing.T) {
 	cfg := Parse(
 		miniSchema(),
 		"interface   Ethernet1/1\n",
-		diag.Policy{Strict: true},
+		Reject,
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
@@ -61,7 +61,7 @@ func TestParseUnknownStrict(t *testing.T) {
 	cfg := Parse(
 		miniSchema(),
 		"frobnicate the foo\n",
-		diag.Policy{Strict: true},
+		Reject,
 		d,
 	)
 	assert.True(t, d.HasErrors())
@@ -73,7 +73,7 @@ func TestParseUnknownLenient(t *testing.T) {
 	in := "interface Ethernet1/1\n" +
 		"  flux-capacitor on\n" +
 		"  shutdown\n"
-	cfg := Parse(miniSchema(), in, diag.Policy{Strict: false}, d)
+	cfg := Parse(miniSchema(), in, Drop, d)
 	assert.False(t, d.HasErrors()) // warnings only
 	require.Len(t, cfg.Root.Children, 1)
 	require.Equal(t, 1, len(cfg.Root.Children[0].Children))
@@ -97,7 +97,7 @@ func TestParseBlockDelim(t *testing.T) {
 	cfg := Parse(
 		blockSchema(),
 		"banner motd ^\nhello  world\n\n  interface fake\n^\ninterface eth1\n  mtu 9000\n",
-		diag.Policy{Strict: true},
+		Reject,
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
@@ -117,7 +117,7 @@ func TestParseBlockDelim(t *testing.T) {
 func TestParseBlockUntil(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(blockSchema(),
-		"certificate ca1\nMIIB\nAAAA\nquit\n", diag.Policy{Strict: true}, d)
+		"certificate ca1\nMIIB\nAAAA\nquit\n", Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, []string{"MIIB", "AAAA"}, cfg.Root.Children[0].Block)
 }
@@ -127,7 +127,7 @@ func TestParseBlockEmptyBody(t *testing.T) {
 	cfg := Parse(
 		blockSchema(),
 		"banner motd ^\n^\n",
-		diag.Policy{Strict: true},
+		Reject,
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
@@ -139,7 +139,7 @@ func TestParseBlockUnterminated(t *testing.T) {
 	cfg := Parse(
 		blockSchema(),
 		"banner motd ^\nhello\n",
-		diag.Policy{Strict: true},
+		Reject,
 		d,
 	)
 	assert.True(t, d.HasErrors())
@@ -153,11 +153,13 @@ func TestParseBlockUnterminated(t *testing.T) {
 	Parse(
 		blockSchema(),
 		"banner motd ^\nhello\n",
-		diag.Policy{Strict: false},
+		Drop,
 		d2,
 	)
-	assert.False(t, d2.HasErrors()) // lenient: warning only
-	assert.NotEmpty(t, d2.Items)
+	assert.True(
+		t,
+		d2.HasErrors(),
+	)
 }
 
 func TestParseBlockTerminatorTrailingWhitespace(t *testing.T) {
@@ -165,7 +167,7 @@ func TestParseBlockTerminatorTrailingWhitespace(t *testing.T) {
 	cfg := Parse(
 		blockSchema(),
 		"banner motd ^\nbody\n^  \nafter capture unknown\n",
-		diag.Policy{Strict: false},
+		Drop,
 		d,
 	)
 	assert.Equal(t, []string{"body"}, cfg.Root.Children[0].Block)
@@ -176,7 +178,7 @@ func TestParseBlockCRLF(t *testing.T) {
 	cfg := Parse(
 		blockSchema(),
 		"banner motd ^\r\nhello\r\n^\r\ninterface eth1\r\n",
-		diag.Policy{Strict: true},
+		Reject,
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
@@ -191,7 +193,7 @@ func TestParseIndentAfterBlockStrict(t *testing.T) {
 	// Keep deeper input under an ordinary leaf isolated instead of reparenting it.
 	d := diag.New()
 	cfg := Parse(blockSchema(), "banner motd ^\nbody\n^\n  interface eth1\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	assert.True(t, d.HasErrors())
 	require.Len(t, cfg.Root.Children, 1) // only the banner survives
 }
@@ -201,7 +203,7 @@ func TestParseLineNumbers(t *testing.T) {
 	// the imported text, not indices into what survived.
 	in := "\ninterface Ethernet1/1\n\n  shutdown\nvlan 10\n"
 	d := diag.New()
-	cfg := Parse(miniSchema(), in, diag.Policy{Strict: true}, d)
+	cfg := Parse(miniSchema(), in, Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	top := cfg.Root.Children
 	assert.Equal(t, 2, top[0].Line)
@@ -214,7 +216,7 @@ func TestParseUnknownDiagCarriesLine(t *testing.T) {
 	Parse(
 		miniSchema(),
 		"vlan 10\nbogus command\n",
-		diag.Policy{Strict: true},
+		Reject,
 		d,
 	)
 	require.True(t, d.HasErrors())
@@ -222,7 +224,7 @@ func TestParseUnknownDiagCarriesLine(t *testing.T) {
 	assert.Contains(t, d.String(), "2: error: unknown command")
 
 	ld := diag.New()
-	Parse(miniSchema(), "bogus\n", diag.Policy{}, ld)
+	Parse(miniSchema(), "bogus\n", Drop, ld)
 	assert.Equal(t, 1, ld.Items[0].Line)
 	// The aggregate "N nodes dropped" summary has no single line.
 	assert.Equal(t, 0, ld.Items[1].Line)

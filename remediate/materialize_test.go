@@ -8,7 +8,7 @@ import (
 
 	"github.com/acidsailor/confetti/graph"
 	"github.com/acidsailor/confetti/render"
-	"github.com/acidsailor/confetti/tree"
+	"github.com/acidsailor/confetti/schema"
 )
 
 func TestMaterializeSharedAndReopenedSections(t *testing.T) {
@@ -19,12 +19,12 @@ func TestMaterializeSharedAndReopenedSections(t *testing.T) {
 		s,
 		"interface Ethernet1/1\n  shutdown\ninterface Ethernet1/2\n  shutdown\n",
 	)
-	secA := []*tree.Node{cfg.Root.Children[0]}
-	secB := []*tree.Node{cfg.Root.Children[1]}
+	secA := []*schema.Node{cfg.Root.Children[0]}
+	secB := []*schema.Node{cfg.Root.Children[1]}
 
-	lineAdd := func(text string) *tree.Node {
-		n := tree.NewNode(text)
-		n.Op = tree.OpAdd
+	lineAdd := func(text string) *schema.Node {
+		n := schema.NewNode(text)
+		n.Op = schema.OpAdd
 		return n
 	}
 	// op nodes are attached directly (not cloned), so each materialize call
@@ -51,7 +51,7 @@ func TestMaterializeSharedAndReopenedSections(t *testing.T) {
 			},
 		}
 	}
-	out := tree.NewConfig(s)
+	out := schema.NewConfig(s)
 	materialize([]int{0, 1, 2}, mkOps(), out)
 	// Ethernet1/1 is entered, left for Ethernet1/2, then re-entered:
 	// three section headers total, the first reused for nothing.
@@ -61,7 +61,7 @@ func TestMaterializeSharedAndReopenedSections(t *testing.T) {
 			"interface Ethernet1/1\n  description three\n",
 		render.Render(out))
 	// consecutive same-section ops share one header
-	out2 := tree.NewConfig(s)
+	out2 := schema.NewConfig(s)
 	materialize([]int{0, 2, 1}, mkOps(), out2)
 	assert.Equal(t,
 		"interface Ethernet1/1\n  description one\n  description three\n"+
@@ -75,7 +75,7 @@ func TestMaterializeAddedSubtreeKeepsChildren(t *testing.T) {
 	cfg := mustParse(t, s, "interface Ethernet1/1\n  description A\n")
 	added := buildAdd(cfg.Root.Children[0]) // whole subtree as one op node
 	ops := []op{{node: added, src: cfg.Root.Children[0], action: graph.Add}}
-	out := tree.NewConfig(s)
+	out := schema.NewConfig(s)
 	materialize([]int{0}, ops, out)
 	assert.Equal(t,
 		"interface Ethernet1/1\n  description A\n",
@@ -85,15 +85,15 @@ func TestMaterializeAddedSubtreeKeepsChildren(t *testing.T) {
 func TestMaterializeReplacePreRidesFirst(t *testing.T) {
 	s := testSchema()
 	cfg := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
-	pre := tree.NewNode("no thing old")
-	pre.Op = tree.OpRemove
-	add := tree.NewNode("thing new")
-	add.Op = tree.OpAdd
+	pre := schema.NewNode("no thing old")
+	pre.Op = schema.OpRemove
+	add := schema.NewNode("thing new")
+	add.Op = schema.OpAdd
 	ops := []op{{
 		node: add, pre: pre, src: cfg.Root.Children[0],
-		action: graph.Replace, secs: []*tree.Node{cfg.Root.Children[0]},
+		action: graph.Replace, secs: []*schema.Node{cfg.Root.Children[0]},
 	}}
-	out := tree.NewConfig(s)
+	out := schema.NewConfig(s)
 	materialize([]int{0}, ops, out)
 	assert.Equal(t,
 		"interface Ethernet1/1\n  no thing old\n  thing new\n",

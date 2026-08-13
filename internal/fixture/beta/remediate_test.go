@@ -7,8 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/acidsailor/confetti/diag"
 )
 
 // assertBefore requires that first appears ahead of second in out.
@@ -18,7 +16,7 @@ func assertBefore(t *testing.T, out, first, second string) {
 }
 
 func TestVlanStateFlipIsModify(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	run, d1 := e.Import(fmt.Sprintf(vlanTmpl, "state enable"))
 	require.False(t, d1.HasErrors())
 	intd, d2 := e.Import(fmt.Sprintf(vlanTmpl, "state disable"))
@@ -37,7 +35,7 @@ func TestVlanStateFlipIsModify(t *testing.T) {
 }
 
 func TestMaxPathsChangeIsModify(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	base := "router bgp 65000\n  address-family ipv4 unicast\n    max-paths ebgp %s\n  exit-address-family\n"
 	run, _ := e.Import(fmt.Sprintf(base, "4"))
 	intd, _ := e.Import(fmt.Sprintf(base, "8"))
@@ -52,7 +50,7 @@ func TestMaxPathsChangeIsModify(t *testing.T) {
 }
 
 func TestBridgeTeardownOrdersRefsFirst(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	run, d1 := e.Import(bridged)
 	require.False(t, d1.HasErrors())
 	// Retain VLAN database and empty it with per-VLAN negations.
@@ -70,7 +68,7 @@ func TestBridgeTeardownOrdersRefsFirst(t *testing.T) {
 }
 
 func TestInversionGolden(t *testing.T) {
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	run, _ := e.Import(canonical)
 	intdText := strings.Replace(canonical, "state enable", "state disable", 1)
 	intd, d := e.Import(intdText)
@@ -88,7 +86,7 @@ func TestInversionGolden(t *testing.T) {
 
 func TestVlanRenameIsModifyNotDelete(t *testing.T) {
 	// Pair named and unnamed VLAN definitions and emit one reissue without a later removal.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	run, d1 := e.Import(fmt.Sprintf(vlanTmpl, "state enable"))
 	require.False(t, d1.HasErrors())
 	intd, d2 := e.Import(fmt.Sprintf(vlanTmpl, "name CORE state enable"))
@@ -107,7 +105,7 @@ func TestVlanRenameIsModifyNotDelete(t *testing.T) {
 
 func TestVlanDatabaseDropEqualsEmptying(t *testing.T) {
 	// EmptyOnRemove drops VLANs individually and orders referrer removals first.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	run, d1 := e.Import(bridged)
 	require.False(t, d1.HasErrors())
 	intd, d2 := e.Import("interface xe1\n  switchport\n")

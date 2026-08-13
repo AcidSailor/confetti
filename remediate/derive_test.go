@@ -41,7 +41,7 @@ func orderedDiff(
 ) (string, *diag.Diagnostics) {
 	t.Helper()
 	res, d := Diff(mustParse(t, s, running), mustParse(t, s, intended),
-		diag.Policy{Strict: true})
+		Abort)
 	return render.Render(res.Tree), d
 }
 
@@ -89,7 +89,7 @@ func TestRetargetModifyEdges(t *testing.T) {
 	d := diag.New()
 	dv := &differ{
 		running: running, intended: intended,
-		order: buildOrderIndex(s), p: diag.Policy{Strict: true}, d: d,
+		order: buildOrderIndex(s), cycle: Abort, d: d,
 	}
 	dv.collect(running.Root, intended.Root, nil, nil)
 	dv.buildGraph()
@@ -125,7 +125,7 @@ func TestRetargetReplaceEdges(t *testing.T) {
 	d := diag.New()
 	dv := &differ{
 		running: running, intended: intended,
-		order: buildOrderIndex(s), p: diag.Policy{Strict: true}, d: d,
+		order: buildOrderIndex(s), cycle: Abort, d: d,
 	}
 	dv.collect(running.Root, intended.Root, nil, nil)
 	dv.buildGraph()
@@ -171,7 +171,7 @@ func TestRefsOfMalformedListWarnsNotSilent(t *testing.T) {
 		"vlan 10\ninterface Ethernet1\n  switchport trunk allowed vlan 10,,20\n",
 	)
 	intended := mustParse(t, s, "")
-	_, d := Diff(running, intended, diag.Policy{})
+	_, d := Diff(running, intended, Break)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "ref-ordering edges")
 	assert.Contains(t, d.String(), `"10,,20"`)
@@ -561,21 +561,16 @@ func TestRequiresUnknownLabelIsError(t *testing.T) {
 	assert.Contains(t, d.String(), `unknown label "nosuch"`)
 }
 
-func TestRequiresUnsatisfiedSeverityFollowsPolicy(t *testing.T) {
-	s := requireSchema()
-	res, d := Diff(
-		mustParse(t, s, ""), mustParse(t, s, "router bgp\n"),
-		diag.Policy{Strict: true})
-	require.True(t, d.HasErrors())
-	assert.Contains(t, d.String(), `requires a "feature"`)
-	_ = res
-
-	s2 := requireSchema()
-	_, d2 := Diff(
-		mustParse(t, s2, ""), mustParse(t, s2, "router bgp\n"),
-		diag.Policy{})
-	assert.False(t, d2.HasErrors()) // lenient: Warning, artifact still emitted
-	assert.Contains(t, d2.String(), `requires a "feature"`)
+func TestRequiresUnsatisfiedIsErrorUnderBothCycles(t *testing.T) {
+	// A goal that neither keeps nor adds a required prerequisite cannot converge.
+	for _, cycle := range []Cycle{Abort, Break} {
+		s := requireSchema()
+		_, d := Diff(
+			mustParse(t, s, ""), mustParse(t, s, "router bgp\n"),
+			cycle)
+		require.True(t, d.HasErrors(), "cycle=%v", cycle)
+		assert.Contains(t, d.String(), `requires a "feature"`)
+	}
 }
 
 func TestOrderHookReordersOutput(t *testing.T) {
@@ -616,7 +611,7 @@ func TestOrderHookCycleFollowsPolicy(t *testing.T) {
 	res, d := Diff(
 		mustParse(t, s, ""),
 		mustParse(t, s, "alpha one\nbeta two\n"),
-		diag.Policy{Strict: true},
+		Abort,
 	)
 	require.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "ordering cycle")
@@ -626,7 +621,7 @@ func TestOrderHookCycleFollowsPolicy(t *testing.T) {
 	res2, d2 := Diff(
 		mustParse(t, s2, ""),
 		mustParse(t, s2, "alpha one\nbeta two\n"),
-		diag.Policy{},
+		Break,
 	)
 	assert.False(t, d2.HasErrors())
 	assert.Contains(t, d2.String(), "dropped ordering edge")
@@ -642,7 +637,7 @@ func TestCycleBreakNamesRefEndToEnd(t *testing.T) {
 		Ref("y", "a.x")
 	running := mustParse(t, s, "a 1\nb 1\n")
 	intended := mustParse(t, s, "")
-	_, d := Diff(running, intended, diag.Policy{})
+	_, d := Diff(running, intended, Break)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "dropped ordering edge")
 	assert.Contains(t, d.String(), "(protecting ref ")
@@ -683,14 +678,14 @@ func TestExcludeTagOrdersRemovalBeforeAddReverse(t *testing.T) {
 func TestExcludeTagOrdersSemanticRemovalBeforeAdd(t *testing.T) {
 	tests := []struct {
 		name      string
-		configure func(*schema.Node)
+		configure func(*schema.Def)
 		running   string
 		intended  string
 		first     string
 	}{
 		{
 			name: "replace",
-			configure: func(iface *schema.Node) {
+			configure: func(iface *schema.Def) {
 				iface.Child("mode l2").Kind("mode").Tag("l2").ExcludeTag("l3")
 				iface.Child("mode l3").Kind("mode").Tag("l3").ExcludeTag("l2")
 			},
@@ -700,7 +695,7 @@ func TestExcludeTagOrdersSemanticRemovalBeforeAdd(t *testing.T) {
 		},
 		{
 			name: "modify",
-			configure: func(iface *schema.Node) {
+			configure: func(iface *schema.Def) {
 				iface.Child("mode l2").
 					Kind("mode").
 					MarkIdempotent().
@@ -718,7 +713,7 @@ func TestExcludeTagOrdersSemanticRemovalBeforeAdd(t *testing.T) {
 		},
 		{
 			name: "toggle",
-			configure: func(iface *schema.Node) {
+			configure: func(iface *schema.Def) {
 				l2 := iface.Child("mode l2").Tag("l2").ExcludeTag("l3")
 				iface.Child("mode l3").Tag("l3").ExcludeTag("l2").Toggles(l2)
 			},

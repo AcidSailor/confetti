@@ -9,12 +9,12 @@ import (
 
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/graph"
-	"github.com/acidsailor/confetti/tree"
+	"github.com/acidsailor/confetti/schema"
 )
 
 // mkOp hand-builds an op for scheduler tests (no schema needed).
-func mkOp(text string, secs []*tree.Node, key pathKey, act graph.Action) op {
-	n := tree.NewNode(text)
+func mkOp(text string, secs []*schema.Node, key pathKey, act graph.Action) op {
+	n := schema.NewNode(text)
 	return op{node: n, src: n, action: act, secs: secs, key: key}
 }
 
@@ -22,7 +22,7 @@ func sched(
 	t *testing.T,
 	ops []op,
 	edges [][2]int,
-	strict bool,
+	cyc Cycle,
 ) ([]int, *diag.Diagnostics) {
 	t.Helper()
 	g := graph.New(opViews(ops))
@@ -31,11 +31,11 @@ func sched(
 	}
 	d := diag.New()
 	dv := &differ{
-		ops: ops,
-		g:   g,
-		why: map[[2]int]string{},
-		p:   diag.Policy{Strict: strict},
-		d:   d,
+		ops:   ops,
+		g:     g,
+		why:   map[[2]int]string{},
+		cycle: cyc,
+		d:     d,
 	}
 	return dv.schedule(), d
 }
@@ -46,7 +46,7 @@ func TestScheduleBaselineIsKeyOrder(t *testing.T) {
 		mkOp("a", nil, pathKey{{0, 1, 0}}, graph.Add),
 		mkOp("rm", nil, pathKey{{1, -3, 0}}, graph.Remove),
 	}
-	order, d := sched(t, ops, nil, true)
+	order, d := sched(t, ops, nil, Abort)
 	require.False(t, d.HasErrors())
 	assert.Equal(t, []int{1, 0, 2}, order)
 }
@@ -56,14 +56,14 @@ func TestScheduleEdgeOverridesKey(t *testing.T) {
 		mkOp("first-by-key", nil, pathKey{{0, 1, 0}}, graph.Add),
 		mkOp("must-go-first", nil, pathKey{{0, 2, 1}}, graph.Add),
 	}
-	order, d := sched(t, ops, [][2]int{{1, 0}}, true)
+	order, d := sched(t, ops, [][2]int{{1, 0}}, Abort)
 	require.False(t, d.HasErrors())
 	assert.Equal(t, []int{1, 0}, order)
 }
 
 func TestScheduleAffinityFinishesOpenSection(t *testing.T) {
-	secA := []*tree.Node{tree.NewNode("section A")}
-	secB := []*tree.Node{tree.NewNode("section B")}
+	secA := []*schema.Node{schema.NewNode("section A")}
+	secB := []*schema.Node{schema.NewNode("section B")}
 	// After b1 unblocks a2, affinity must finish section B before returning to section A.
 	ops := []op{
 		mkOp("a1", secA, pathKey{{0, 1, 0}, {0, 1, 0}}, graph.Add),
@@ -71,7 +71,7 @@ func TestScheduleAffinityFinishesOpenSection(t *testing.T) {
 		mkOp("a2", secA, pathKey{{0, 1, 0}, {0, 2, 1}}, graph.Add),
 		mkOp("b2", secB, pathKey{{0, 2, 1}, {0, 2, 1}}, graph.Add),
 	}
-	order, d := sched(t, ops, [][2]int{{1, 2}}, true)
+	order, d := sched(t, ops, [][2]int{{1, 2}}, Abort)
 	require.False(t, d.HasErrors())
 	// a1; a2 blocked -> b1; b2 wins over a2 by affinity; then a2.
 	assert.Equal(t, []int{0, 1, 3, 2}, order)
@@ -82,7 +82,7 @@ func TestScheduleCycleStrictErrors(t *testing.T) {
 		mkOp("x", nil, pathKey{{0, 1, 0}}, graph.Add),
 		mkOp("y", nil, pathKey{{0, 2, 1}}, graph.Add),
 	}
-	order, d := sched(t, ops, [][2]int{{0, 1}, {1, 0}}, true)
+	order, d := sched(t, ops, [][2]int{{0, 1}, {1, 0}}, Abort)
 	assert.Nil(t, order)
 	require.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "ordering cycle")
@@ -97,7 +97,7 @@ func TestScheduleCycleLenientBreaksDeterministically(t *testing.T) {
 	}
 	var first []int
 	for range 5 {
-		order, d := sched(t, ops, [][2]int{{0, 1}, {1, 0}}, false)
+		order, d := sched(t, ops, [][2]int{{0, 1}, {1, 0}}, Break)
 		require.NotNil(t, order)
 		require.False(t, d.HasErrors())
 		assert.True(t, strings.Contains(d.String(), "dropped ordering edge"))
@@ -119,7 +119,7 @@ func TestScheduleCycleBreakTieBreaksOnToKey(t *testing.T) {
 	}
 	var first []int
 	for range 5 {
-		order, d := sched(t, ops, [][2]int{{0, 1}, {1, 2}, {2, 0}}, false)
+		order, d := sched(t, ops, [][2]int{{0, 1}, {1, 2}, {2, 0}}, Break)
 		require.NotNil(t, order)
 		require.False(t, d.HasErrors())
 		assert.Contains(t, d.String(), `dropped ordering edge "a" -> "b"`)
@@ -143,7 +143,7 @@ func TestScheduleCycleBreakNamesProtectedDependency(t *testing.T) {
 	// [1, 0] is the greatest-key edge and will be dropped.
 	why := map[[2]int]string{{1, 0}: `ref vlan.id="10"`}
 	d := diag.New()
-	dv := &differ{ops: ops, g: g, why: why, d: d}
+	dv := &differ{ops: ops, g: g, why: why, cycle: Break, d: d}
 	order := dv.schedule()
 	require.NotNil(t, order)
 	assert.Contains(t, d.String(), `(protecting ref vlan.id="10")`)

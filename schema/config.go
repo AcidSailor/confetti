@@ -1,12 +1,10 @@
-package tree
+package schema
 
 import (
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
-
-	"github.com/acidsailor/confetti/schema"
 )
 
 // Op identifies a node's remediation role; OpNone must remain the zero value for ordinary parsed nodes.
@@ -40,7 +38,7 @@ func (o Op) String() string {
 // Node stores one parsed configuration line and its children.
 type Node struct {
 	Text       string
-	Def        *schema.Node      // The matched schema node, or nil when unknown.
+	Def        *Def              // The matched definition, or nil when unknown.
 	Fields     map[string]string // Captured argument values; live, not a copy.
 	RealIndent int               // Raw parsed indentation column.
 	Line       int               // A 1-based source line, or zero when absent.
@@ -72,10 +70,15 @@ func (n *Node) SetValueFrom(src *Node) {
 	n.Text = src.Text
 }
 
+// SameValue reports whether both nodes carry the same definition, rendered line, and block body.
+func (n *Node) SameValue(o *Node) bool {
+	return n.Def == o.Def && n.Text == o.Text && slices.Equal(n.Block, o.Block)
+}
+
 // AddChild attaches c under n and panics if c already has a parent.
 func (n *Node) AddChild(c *Node) *Node {
 	if c.Parent != nil {
-		panic("tree: AddChild on a node that already has a parent")
+		panic("schema: AddChild on a node that already has a parent")
 	}
 	c.Parent = n
 	n.Children = append(n.Children, c)
@@ -85,11 +88,11 @@ func (n *Node) AddChild(c *Node) *Node {
 // ReplaceChild replaces old with zero or more parentless nodes.
 func (n *Node) ReplaceChild(old *Node, repl ...*Node) {
 	if old.Parent != n {
-		panic("tree: ReplaceChild on a node that is not a child")
+		panic("schema: ReplaceChild on a node that is not a child")
 	}
 	for _, c := range repl {
 		if c.Parent != nil {
-			panic("tree: ReplaceChild with a node that already has a parent")
+			panic("schema: ReplaceChild with a node that already has a parent")
 		}
 		c.Parent = n
 	}
@@ -100,10 +103,10 @@ func (n *Node) ReplaceChild(old *Node, repl ...*Node) {
 // InsertChildBefore inserts parentless c before child ref and retains ref.
 func (n *Node) InsertChildBefore(ref, c *Node) {
 	if ref.Parent != n {
-		panic("tree: InsertChildBefore ref is not a child")
+		panic("schema: InsertChildBefore ref is not a child")
 	}
 	if c.Parent != nil {
-		panic("tree: InsertChildBefore with a node that already has a parent")
+		panic("schema: InsertChildBefore with a node that already has a parent")
 	}
 	c.Parent = n
 	n.Children = spliceChildren(n.Children, ref, []*Node{c, ref})
@@ -129,12 +132,12 @@ func (n *Node) Path() string {
 
 // Config contains a sentinel root and the schema used to parse it.
 type Config struct {
-	Schema *schema.Schema
+	Schema *Schema
 	Root   *Node
 }
 
 // NewConfig returns an empty Config bound to s.
-func NewConfig(s *schema.Schema) *Config {
+func NewConfig(s *Schema) *Config {
 	return &Config{Schema: s, Root: NewNode("")}
 }
 

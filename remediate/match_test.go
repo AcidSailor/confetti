@@ -11,7 +11,6 @@ import (
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/parse"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // testSchema is the shared fixture for the remediate suite: vlan (keyed, with a
@@ -56,16 +55,21 @@ func testSchema() *schema.Schema {
 	return s
 }
 
-func mustParse(t *testing.T, s *schema.Schema, text string) *tree.Config {
+func mustParse(t *testing.T, s *schema.Schema, text string) *schema.Config {
 	t.Helper()
 	d := diag.New()
-	cfg := parse.Parse(s, text, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, text, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	return cfg
 }
 
 // topNode returns the nth top-level node of a parsed config.
-func topNode(cfg *tree.Config, i int) *tree.Node { return cfg.Root.Children[i] }
+func topNode(
+	cfg *schema.Config,
+	i int,
+) *schema.Node {
+	return cfg.Root.Children[i]
+}
 
 func TestCategoryOf(t *testing.T) {
 	s := testSchema()

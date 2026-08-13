@@ -6,13 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/acidsailor/confetti/diag"
 )
 
 func TestCompareVlanStateFlip(t *testing.T) {
 	// Compare shows both states even though the remediation artifact emits only the new line.
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	run, d1 := e.Import(fmt.Sprintf(vlanTmpl, "state enable"))
 	require.False(t, d1.HasErrors())
 	intd, d2 := e.Import(fmt.Sprintf(vlanTmpl, "state disable"))
@@ -30,7 +28,7 @@ func TestCompareVlanStateFlip(t *testing.T) {
 func TestCompareVlanRenameShowsPair(t *testing.T) {
 	// Cross-def (Kind,key) pairing: rename is one -/+ pair, never an add
 	// plus a vlan-deleting negate (see TestVlanRenameIsModifyNotDelete).
-	e := Engine(diag.Policy{Strict: true})
+	e := Engine()
 	run, d1 := e.Import(fmt.Sprintf(vlanTmpl, "state enable"))
 	require.False(t, d1.HasErrors())
 	intd, d2 := e.Import(fmt.Sprintf(vlanTmpl, "name CORE state enable"))

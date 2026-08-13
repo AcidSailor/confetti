@@ -242,7 +242,7 @@ func TestToggleGroupThreeWay(t *testing.T) {
 	a := s.Node("duplex auto").Card(ZeroToOne)
 	f := s.Node("duplex full").Card(ZeroToOne)
 	h := s.Node("duplex half").Card(ZeroToOne).Toggles(a, f)
-	for _, m := range []*Node{a, f, h} {
+	for _, m := range []*Def{a, f, h} {
 		assert.Len(t, m.ToggleGroup, 3)
 		// Each member uses the first Toggles argument as canonical.
 		assert.Same(t, a, m.ToggleCanonical())
@@ -472,7 +472,7 @@ func TestListContinuesDeclaration(t *testing.T) {
 }
 
 func TestListSeamsPanics(t *testing.T) {
-	base := func(s *Schema) *Node {
+	base := func(s *Schema) *Def {
 		return s.Node("vlan {{ v:word }}").List("v", "uint")
 	}
 	tests := []struct {
@@ -671,7 +671,7 @@ func TestEmptyOnRemoveProtectedPanics(t *testing.T) {
 }
 
 func TestRespellAsRails(t *testing.T) {
-	mk := func() (*Schema, *Node) {
+	mk := func() (*Schema, *Def) {
 		s := New()
 		n := s.Node("acl {{ id:uint }} {{ act:word }}").Card(ZeroToN)
 		return s, n
@@ -720,7 +720,7 @@ func TestRespellAsRails(t *testing.T) {
 	assert.Panics(t, func() { blk.RespellAs("b2 {{ d }}") })
 }
 
-func mkNode(t *testing.T) *Node {
+func mkNode(t *testing.T) *Def {
 	t.Helper()
 	return New().Node("orphan {{ v:word }}").Card(ZeroToN)
 }
@@ -906,7 +906,7 @@ func TestTagAndExcludeTagHoldInBothCallOrders(t *testing.T) {
 		Kind("addr").Tag("l3").ExcludeTag("l2")
 	second := New().Node("ip address {{ a:word }}").
 		ExcludeTag("l2").Tag("l3").Kind("addr")
-	for _, n := range []*Node{first, second} {
+	for _, n := range []*Def{first, second} {
 		assert.Equal(t, want, n.Relations)
 		assert.Equal(t, []string{"addr", "l3"}, n.Labels())
 	}
@@ -933,10 +933,71 @@ func TestWalkVisitsSharedChildrenOnce(t *testing.T) {
 	s := New()
 	shared := s.Node("shutdown")
 	s.Node("interface {{ n:word }}").Adopt(shared)
-	seen := map[*Node]int{}
-	s.Walk(func(n *Node) { seen[n]++ })
+	seen := map[*Def]int{}
+	s.Walk(func(n *Def) { seen[n]++ })
 	for n, c := range seen {
 		assert.Equal(t, 1, c, n.Template)
 	}
 	assert.Len(t, seen, 2)
+}
+
+func TestMergeKindSetTwicePanicsBothOrders(t *testing.T) {
+	assert.PanicsWithValue(t,
+		"schema: merge kind set twice: hostname {{ name:word }}",
+		func() {
+			New().Node("hostname {{ name:word }}").
+				MergeKeepFirst().MergeKeepLast()
+		})
+	assert.PanicsWithValue(t,
+		"schema: merge kind set twice: hostname {{ name:word }}",
+		func() {
+			New().Node("hostname {{ name:word }}").
+				MergeKeepLast().MergeKeepFirst()
+		})
+}
+
+func TestMergeFuncNilPanics(t *testing.T) {
+	assert.PanicsWithValue(t,
+		"schema: MergeFunc with nil func: hostname {{ name:word }}",
+		func() { New().Node("hostname {{ name:word }}").MergeFunc(nil) })
+}
+
+func TestMergeFuncExcludesOtherKindsBothOrders(t *testing.T) {
+	fn := func(earlier, _ *Node) (*Node, Outcome) { return earlier, Overridden }
+	assert.Panics(t, func() {
+		New().Node("hostname {{ name:word }}").MergeFunc(fn).MergeKeepLast()
+	})
+	assert.Panics(t, func() {
+		New().Node("hostname {{ name:word }}").MergeKeepLast().MergeFunc(fn)
+	})
+}
+
+func TestToggleGroupMergeKindTwicePanicsBothOrders(t *testing.T) {
+	build := func() (*Def, *Def) {
+		s := New()
+		a := s.Node("mode fast").Card(ZeroToOne)
+		b := s.Node("mode slow").Card(ZeroToOne)
+		return a, b
+	}
+	assert.PanicsWithValue(t,
+		"schema: a toggle group declares a merge kind twice: mode fast",
+		func() {
+			a, b := build()
+			a.MergeKeepLast()
+			b.MergeKeepFirst()
+			a.Toggles(b)
+		})
+	assert.PanicsWithValue(t,
+		"schema: a toggle group declares a merge kind twice: mode slow",
+		func() {
+			a, b := build()
+			a.MergeKeepLast()
+			a.Toggles(b)
+			b.MergeKeepFirst()
+		})
+	assert.NotPanics(t, func() {
+		a, b := build()
+		a.Toggles(b)
+		b.MergeKeepFirst()
+	})
 }

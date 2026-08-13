@@ -9,7 +9,7 @@ import (
 
 // negateLine applies a definition's NegateStrategy to a rendered positive line.
 func negateLine(
-	def *schema.Node,
+	def *schema.Def,
 	fields map[string]string,
 	rendered string,
 ) string {

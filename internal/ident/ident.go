@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // Category classifies a node for pairing purposes.
@@ -19,7 +18,7 @@ const (
 )
 
 // CategoryOf classifies a tree node by its schema def.
-func CategoryOf(n *tree.Node) Category {
+func CategoryOf(n *schema.Node) Category {
 	def := n.Def
 	switch {
 	case def == nil:
@@ -36,30 +35,30 @@ func CategoryOf(n *tree.Node) Category {
 }
 
 // SingleOccupancy reports whether at most one instance of the definition can exist per level.
-func SingleOccupancy(def *schema.Node) bool {
+func SingleOccupancy(def *schema.Def) bool {
 	return def.Cardinality == schema.ZeroToOne || def.Cardinality == schema.One
 }
 
 // SlotDef reports whether a definition has one negatable, unkeyed slot per level.
-func SlotDef(def *schema.Node) bool {
+func SlotDef(def *schema.Def) bool {
 	return def != nil && len(def.KeyArgs) == 0 &&
 		!def.EmptyOnRemove && SingleOccupancy(def)
 }
 
 // KindedSingleDef reports whether a definition pairs by Kind alone.
-func KindedSingleDef(def *schema.Node) bool {
+func KindedSingleDef(def *schema.Def) bool {
 	return SlotDef(def) && def.KindName != "" && len(def.ToggleGroup) == 0
 }
 
 // Ident is a node's pairing identity.
 type Ident struct {
-	Def  *schema.Node
+	Def  *schema.Def
 	Kind string
 	Key  string
 }
 
 // Of computes a node's pairing identity.
-func Of(n *tree.Node) Ident {
+func Of(n *schema.Node) Ident {
 	switch CategoryOf(n) {
 	case Unmatched:
 		return Ident{Key: n.Text}
@@ -79,7 +78,7 @@ func Of(n *tree.Node) Ident {
 }
 
 // KeyValue joins a keyed node's key arguments for pairing and duplicate detection.
-func KeyValue(n *tree.Node) string {
+func KeyValue(n *schema.Node) string {
 	keys := n.Def.KeyArgs
 	parts := make([]string, len(keys))
 	for i, a := range keys {
@@ -89,6 +88,6 @@ func KeyValue(n *tree.Node) string {
 }
 
 // IsSection reports whether a node's schema definition declares children.
-func IsSection(n *tree.Node) bool {
+func IsSection(n *schema.Node) bool {
 	return n.Def != nil && len(n.Def.Children) > 0
 }

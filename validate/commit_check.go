@@ -3,7 +3,6 @@ package validate
 import (
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 )
 
 // target identifies a labeled key value.
@@ -19,14 +18,14 @@ type checker struct {
 }
 
 // CommitCheck validates relations (references, prerequisites, exclusions) against the assembled tree.
-func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
+func CommitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	// Validate the complete schema, including definitions absent from the configuration.
 	if cfg.Schema != nil {
 		cfg.Schema.ValidateRelations(d)
 	}
 	c := checker{index: map[target]bool{}, present: map[string]bool{}, d: d}
 
-	tree.Walk(cfg, func(n *tree.Node) {
+	schema.Walk(cfg, func(n *schema.Node) {
 		def := n.Def
 		if def == nil {
 			return
@@ -39,7 +38,7 @@ func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 		}
 	})
 
-	tree.Walk(cfg, func(n *tree.Node) {
+	schema.Walk(cfg, func(n *schema.Node) {
 		def := n.Def
 		if def == nil {
 			return
@@ -58,7 +57,7 @@ func CommitCheck(cfg *tree.Config, d *diag.Diagnostics) {
 
 // relValues returns a presence sentinel or the expanded capture values to match.
 func relValues(
-	n *tree.Node,
+	n *schema.Node,
 	rel schema.Relation,
 	d *diag.Diagnostics,
 ) ([]string, bool) {
@@ -73,7 +72,7 @@ func relValues(
 }
 
 // check reports a diagnostic when one relation value is unsatisfied or in conflict.
-func (c checker) check(n *tree.Node, rel schema.Relation, v string) {
+func (c checker) check(n *schema.Node, rel schema.Relation, v string) {
 	// ValidateRelations rejects every other scope and polarity pairing.
 	if rel.IsExclusion() {
 		if hit := findSibling(n, rel, v); hit != nil {
@@ -115,7 +114,7 @@ func (c checker) satisfied(rel schema.Relation, v string) bool {
 }
 
 // findSibling returns the first direct sibling of n that matches rel, or nil.
-func findSibling(n *tree.Node, rel schema.Relation, v string) *tree.Node {
+func findSibling(n *schema.Node, rel schema.Relation, v string) *schema.Node {
 	if n.Parent == nil {
 		return nil
 	}

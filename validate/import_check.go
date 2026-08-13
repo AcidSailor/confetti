@@ -10,17 +10,16 @@ import (
 	"github.com/acidsailor/confetti/internal/ident"
 	"github.com/acidsailor/confetti/internal/listval"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 	"github.com/acidsailor/confetti/value"
 )
 
 // ImportCheck validates node values, cardinality, duplicate keys, toggle exclusions, and required nodes within each level.
-func ImportCheck(cfg *tree.Config, d *diag.Diagnostics) {
+func ImportCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	reg := cfg.Schema.Registry
 	// Capture names are fixed per definition, so sort them once instead of per node.
-	argNames := map[*schema.Node][]string{}
+	argNames := map[*schema.Def][]string{}
 
-	tree.Walk(cfg, func(n *tree.Node) {
+	schema.Walk(cfg, func(n *schema.Node) {
 		def := n.Def
 		if def == nil {
 			return
@@ -57,8 +56,8 @@ func ImportCheck(cfg *tree.Config, d *diag.Diagnostics) {
 
 // checkCardinality validates child cardinality at one level and then recurses.
 func checkCardinality(
-	parent *tree.Node,
-	allowed []*schema.Node,
+	parent *schema.Node,
+	allowed []*schema.Def,
 	d *diag.Diagnostics,
 ) {
 	children := parent.Children
@@ -66,11 +65,11 @@ func checkCardinality(
 		return
 	}
 
-	count := map[*schema.Node]int{}
+	count := map[*schema.Def]int{}
 	seenKey := map[ident.Ident]bool{}
-	kindSeen := map[string]*tree.Node{}
+	kindSeen := map[string]*schema.Node{}
 	// Map each canonical toggle member to the first present group member.
-	toggleSeen := map[*schema.Node]*tree.Node{}
+	toggleSeen := map[*schema.Def]*schema.Node{}
 
 	for _, c := range children {
 		def := c.Def
@@ -156,7 +155,7 @@ func checkCardinality(
 }
 
 // parentPath labels a parent node for diagnostics, naming the sentinel root.
-func parentPath(n *tree.Node) string {
+func parentPath(n *schema.Node) string {
 	if p := n.Path(); p != "" {
 		return p
 	}
@@ -178,7 +177,7 @@ func anchored(pattern string) *regexp.Regexp {
 
 // listItems parses a list and reports malformed syntax.
 func listItems(
-	n *tree.Node,
+	n *schema.Node,
 	ls schema.ListStrategy,
 	d *diag.Diagnostics,
 ) ([]string, bool) {
@@ -201,7 +200,7 @@ func listItems(
 
 // checkListArg validates list syntax and each explicitly written item against its anchored element type.
 func checkListArg(
-	n *tree.Node,
+	n *schema.Node,
 	ls schema.ListStrategy,
 	reg *value.Registry,
 	d *diag.Diagnostics,

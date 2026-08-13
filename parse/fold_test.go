@@ -9,7 +9,6 @@ import (
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/tree"
 	"github.com/acidsailor/confetti/value"
 )
 
@@ -27,16 +26,16 @@ func memberSchema() *schema.Schema {
 	return s
 }
 
-func foldConfig(t *testing.T, s *schema.Schema, in string) *tree.Config {
+func foldConfig(t *testing.T, s *schema.Schema, in string) *schema.Config {
 	t.Helper()
 	d := diag.New()
-	cfg := Parse(s, in, diag.Policy{Strict: true}, d)
+	cfg := Parse(s, in, Reject, d)
 	Fold(cfg, d)
 	require.False(t, d.HasErrors(), d.String())
 	return cfg
 }
 
-func topTexts(cfg *tree.Config) []string {
+func topTexts(cfg *schema.Config) []string {
 	texts := make([]string, 0, len(cfg.Root.Children))
 	for _, n := range cfg.Root.Children {
 		texts = append(texts, n.Text)
@@ -113,7 +112,7 @@ func TestFoldMembersNestedLevel(t *testing.T) {
 func TestFoldMembersExpandFailureLeavesLine(t *testing.T) {
 	// Keep the malformed list for ImportCheck.
 	d := diag.New()
-	cfg := Parse(memberSchema(), "vlan 9-5\n", diag.Policy{Strict: true}, d)
+	cfg := Parse(memberSchema(), "vlan 9-5\n", Reject, d)
 	Fold(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, []string{"vlan 9-5"}, topTexts(cfg))
@@ -125,7 +124,7 @@ func TestFoldMembersNoCanonicalSiblingErrors(t *testing.T) {
 	s.Node("vlan {{ ids:word }}").Card(schema.ZeroToN).
 		List("ids", "vlan").Members("vlan") // no "vlan" Kind def anywhere
 	d := diag.New()
-	cfg := Parse(s, "vlan 1-3\n", diag.Policy{Strict: true}, d)
+	cfg := Parse(s, "vlan 1-3\n", Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "no canonical \"vlan\" def")
@@ -135,7 +134,7 @@ func TestFoldMembersNoCanonicalSiblingErrors(t *testing.T) {
 func TestFoldMembersUnsynthesizableItemErrors(t *testing.T) {
 	// Reject the complete fold when one item cannot match the canonical template.
 	d := diag.New()
-	cfg := Parse(memberSchema(), "vlan 5,abc\n", diag.Policy{Strict: true}, d)
+	cfg := Parse(memberSchema(), "vlan 5,abc\n", Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "cannot synthesize")
@@ -155,7 +154,7 @@ func TestFoldMembersCompetingSiblingDefErrors(t *testing.T) {
 		List("ids", "vlan").Members("vlan")
 
 	d := diag.New()
-	cfg := Parse(s, "vlan 7-8\n", diag.Policy{Strict: true}, d)
+	cfg := Parse(s, "vlan 7-8\n", Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "does not re-parse")
@@ -179,7 +178,7 @@ func contSchema() *schema.Schema {
 	return s
 }
 
-func ifaceKids(t *testing.T, cfg *tree.Config) []string {
+func ifaceKids(t *testing.T, cfg *schema.Config) []string {
 	t.Helper()
 	require.Len(t, cfg.Root.Children, 1)
 	kids := cfg.Root.Children[0].Children
@@ -231,7 +230,7 @@ func TestFoldContinuationMalformedLeavesLine(t *testing.T) {
 		"interface Ethernet1/1\n"+
 			"  allowed vlan 10\n"+
 			"  allowed vlan add 9-5\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 	assert.Equal(t,
@@ -253,7 +252,7 @@ func TestFoldContinuationSelectsMatchingBase(t *testing.T) {
 			"filter out vlans 20\n"+
 			"filter out vlans add 30\n"+
 			"filter local vlans add 40\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, []string{
@@ -273,7 +272,7 @@ func TestFoldContinuationRejectsAmbiguousBase(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(s,
 		"filter in vlans 10\nfilter out vlans 20\nfilter vlans add 30\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "matches multiple base slots")
@@ -298,7 +297,7 @@ func TestFoldContinuationUnionReparseRail(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(s,
 		"interface Ethernet1/1\n  allowed vlan 10\n  allowed vlan add 20\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "does not re-parse")
@@ -356,7 +355,7 @@ func compositeSchema() *schema.Schema {
 	return s
 }
 
-func kidTexts(n *tree.Node) []string {
+func kidTexts(n *schema.Node) []string {
 	texts := make([]string, 0, len(n.Children))
 	for _, c := range n.Children {
 		texts = append(texts, c.Text)
@@ -399,7 +398,7 @@ func TestFoldMembersCompositeConflictSplicesForImportCheck(t *testing.T) {
 		"vlan database\n"+
 			"  vlan 3 bridge 1 state disable\n"+
 			"  vlan 2-4 bridge 1 state enable\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, []string{
@@ -494,7 +493,7 @@ func TestFoldRespellUnbindableHeaderErrors(t *testing.T) {
 		RespellAs("ip access-list standard {{ id }}", "{{ action }} {{ net }}")
 	d := diag.New()
 	cfg := Parse(s, "access-list 10 permit 10.0.0.0 0.0.0.255\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "does not bind a canonical def")
@@ -512,7 +511,7 @@ func TestFoldRespellUnbindableChildErrors(t *testing.T) {
 		RespellAs("ip access-list standard {{ id }}", "{{ action }} {{ net }}")
 	d := diag.New()
 	cfg := Parse(s, "access-list 10 permit 10.0.0.0 0.0.0.255\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "does not bind under")
@@ -542,7 +541,7 @@ func TestFoldRespellChainedRefusesLoudly(t *testing.T) {
 	s.Node("outer {{ id:uint }} {{ x:word }}").Card(schema.ZeroToN).
 		RespellAs("mid {{ id }} {{ x }}")
 	d := diag.New()
-	cfg := Parse(s, "outer 1 aa\n", diag.Policy{Strict: true}, d)
+	cfg := Parse(s, "outer 1 aa\n", Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "does not bind a canonical def")
@@ -556,7 +555,7 @@ func TestFoldContinuationMalformedBaseWarnsAndLeavesLine(t *testing.T) {
 		"interface Ethernet1/1\n"+
 			"  allowed vlan 9-5\n"+
 			"  allowed vlan add 20\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "continuation left unfolded")
@@ -591,7 +590,7 @@ func TestFoldContinuationEmptyUnionNoNoneKeywordErrors(t *testing.T) {
 		"interface Ethernet1/1\n"+
 			"  allowed vlan except 1-4\n"+
 			"  allowed vlan add none\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "empty union has no spelling")
@@ -607,7 +606,7 @@ func TestFoldContinuationSynthesizeZeroItemsErrors(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(contKeywordSchema(),
 		"interface Ethernet1/1\n  allowed vlan add none\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "continuation resolves to no items")
@@ -630,7 +629,7 @@ func TestFoldContinuationSynthesizeReparseRail(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(s,
 		"interface Ethernet1/1\n  allowed vlan add 20\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "cannot synthesize base slot")
@@ -649,7 +648,7 @@ func TestFoldTrunkSelfUnion(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(s,
 		"interface Ethernet1/1\n  allowed vlan 10\n  allowed vlan 20\n",
-		diag.Policy{Strict: true}, d)
+		Reject, d)
 	Fold(cfg, d)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(
@@ -697,11 +696,11 @@ func TestFoldStepsOverUnmatchedNodes(t *testing.T) {
 			"interface Ethernet1/1\n"+
 			"  allowed vlan 10\n"+
 			"  allowed vlan add 20\n",
-		diag.Policy{Strict: false}, d)
+		Drop, d)
 	top := cfg.Root.Children
-	raw := tree.NewNode("mystery knob 42")
+	raw := schema.NewNode("mystery knob 42")
 	cfg.Root.InsertChildBefore(top[1], raw)
-	rawKid := tree.NewNode("mystery leaf 7")
+	rawKid := schema.NewNode("mystery leaf 7")
 	top[2].InsertChildBefore(top[2].Children[1], rawKid)
 
 	Fold(cfg, d)

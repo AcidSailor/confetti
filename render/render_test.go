@@ -26,7 +26,7 @@ func TestRenderCanonicalRoundTrip(t *testing.T) {
 		"  ip address 10.0.0.1 255.255.255.0\n" +
 		"  shutdown\n"
 	d := diag.New()
-	cfg := parse.Parse(miniSchema(), in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(miniSchema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, in, Render(cfg))
 }
@@ -37,12 +37,12 @@ func TestRenderNormalizesMessyInput(t *testing.T) {
 	canonical := "interface Ethernet1/1\n" +
 		"  ip address 10.0.0.1 255.255.255.0\n"
 	d := diag.New()
-	cfg := parse.Parse(miniSchema(), messy, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(miniSchema(), messy, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	out := Render(cfg)
 	assert.Equal(t, canonical, out)
 	// idempotent: re-parsing+rendering the canonical form is stable
-	cfg2 := parse.Parse(miniSchema(), out, diag.Policy{Strict: true}, d)
+	cfg2 := parse.Parse(miniSchema(), out, parse.Reject, d)
 	assert.Equal(t, canonical, Render(cfg2))
 }
 
@@ -55,7 +55,7 @@ func TestRenderBlock(t *testing.T) {
 
 	d := diag.New()
 	in := "banner motd ^\nhello  world\n\n  deep\n^\ninterface eth1\n  mtu 9000\n"
-	cfg := parse.Parse(s, in, diag.Policy{Strict: true}, d)
+	cfg := parse.Parse(s, in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, in, Render(cfg)) // byte-exact through the block
 }

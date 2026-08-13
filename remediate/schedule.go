@@ -4,13 +4,14 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/acidsailor/confetti/schema"
+
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/graph"
 	"github.com/acidsailor/confetti/internal/lcp"
-	"github.com/acidsailor/confetti/tree"
 )
 
-// schedule applies Kahn's algorithm, preferring the longest shared section path and then the smallest baseline key; strict cycles fail, while lenient cycles drop the greatest keyed edge.
+// schedule orders operations by dependencies, section affinity, and baseline key.
 func (dv *differ) schedule() []int {
 	ops := dv.ops
 	n := len(ops)
@@ -19,7 +20,7 @@ func (dv *differ) schedule() []int {
 		indeg[e[1]]++
 	}
 	emitted := make([]bool, n)
-	var stack []*tree.Node // section path of the last emitted op
+	var stack []*schema.Node // section path of the last emitted op
 	out := make([]int, 0, n)
 	for len(out) < n {
 		best, bestAff := -1, -1
@@ -49,7 +50,7 @@ func (dv *differ) schedule() []int {
 	return out
 }
 
-// breakCycle reports a strict cycle or removes the greatest-key edge from a lenient cycle.
+// breakCycle reports an Abort cycle or removes the greatest-key edge from a Break cycle.
 func (dv *differ) breakCycle(indeg []int, emitted []bool) bool {
 	ops := dv.ops
 	cyc := findCycle(dv.g, indeg, emitted)
@@ -58,7 +59,7 @@ func (dv *differ) breakCycle(indeg []int, emitted []bool) bool {
 		names[i] = opPath(ops[x])
 	}
 	names[len(cyc)] = names[0] // Repeat the first operation to close the cycle.
-	if dv.p.Strict {
+	if dv.cycle == Abort {
 		dv.d.Add(diag.Error, "ordering cycle: %s", strings.Join(names, " -> "))
 		return false
 	}
