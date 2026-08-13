@@ -13,7 +13,7 @@ connections. The core contains no vendor-specific logic.
   dual-form spellings, protected nodes.
 - **Safety constraints.** Remediation artifacts are dependency-ordered
   (definitions before referrers on add, referrers first on remove),
-  protected nodes refuse deletion in every policy, and on any Error no
+  protected nodes refuse deletion under every option value, and on any Error no
   artifact is returned.
 
 ## Install

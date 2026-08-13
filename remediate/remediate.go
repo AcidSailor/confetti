@@ -10,7 +10,7 @@ type Cycle int
 
 const (
 	Abort Cycle = iota // Report an Error and emit nothing.
-	Break              // Drop the greatest edge, report a Warning, continue.
+	Break              // Drop the greatest-keyed edge in the cycle, report a Warning, continue.
 )
 
 // Result contains an operation-tagged remediation tree and its change log in emission order.

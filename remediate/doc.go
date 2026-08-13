@@ -2,7 +2,8 @@
 // configuration into intended configuration.
 // Diff pairs the two trees by schema identity (internal/ident; Kind-aware,
 // block bodies excluded), collects op-tagged changes, derives dependency
-// edges (refs, exclusive resources, Requires), topologically schedules
+// edges (refs, exclusive resources, Requires, identity conflicts, sibling
+// exclusions), topologically schedules
 // them. Creates ascend by declaration rank, and removes descend. Scheduling can
 // split sections. The result is a new *schema.Config that render can convert to
 // CLI. Result.Changes is a flat log with read-only references to source nodes.
@@ -13,5 +14,6 @@
 // (def==nil text leaves); idempotent value changes emit the forward line;
 // declared toggle pairs flip; Protected nodes refuse deletion with an
 // Error under both Cycle values. Cycle selects only ordering-cycle handling:
-// Abort reports an Error and emits nothing, Break drops the greatest edge.
+// Abort reports an Error and emits nothing, Break drops the greatest-keyed
+// edge in the cycle.
 package remediate

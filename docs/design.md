@@ -42,6 +42,7 @@ confetti (root)   Engine: option wiring + the pipelines below
 ├── diag          two-severity diagnostics with optional source line
 └── internal/
     ├── ident     node-pairing identity shared by remediate + merge
+    ├── lcp       longest-common-prefix for scheduler section affinity
     ├── listval   the one comma+range list codec
     ├── testtypes domain value types for core tests
     ├── valcheck  the shared ipv4 and numeric-range value checks
@@ -103,9 +104,12 @@ The explanations record constraints that tests do not show.
   unmodeled lines import. After a line matches, all schema constraints
   apply. `merge.Options` selects conflict resolution per call because it is
   a semantic choice between two accepted values, not a trust decision.
-  `remediate.Cycle` selects only ordering-cycle handling. Every zero value
-  is the conservative choice (`Reject`, `Declared`+report, `Abort`). Fold
-  and authoring errors during Diff are always Errors.
+  `remediate.Cycle` selects only ordering-cycle handling. Parse and remediate
+  default to refusing (`Reject`, `Abort`). Merge defaults to `Declared`, which
+  resolves and reports rather than refusing, because a slot conflict is a
+  choice between two accepted values, not untrusted input; `Refuse` is the
+  conservative resolver. Fold and authoring errors during Diff are always
+  Errors.
 - **`Protect()` fails under every option value.** No option can disable
   this safety constraint. Silent skips hide attempted deletion. The check
   applies to every deletion path: the removal loop, `ckReplace`, removed
@@ -122,12 +126,17 @@ The explanations record constraints that tests do not show.
   or Change. A partial artifact would be unsafe.
 - **A merge resolver cannot corrupt identity.** A resolver must not mutate
   its arguments; it returns `earlier`, `later`, or a fresh parentless node.
-  A fresh node must render its text from its fields and that text must bind
-  its own definition through `schema.MatchChild` at its level, or Merge
-  reports an Error and keeps the earlier value. A `Combined` outcome across
-  two definitions with a section on either side is an Error: children of
-  different definitions cannot share a header. `Refused` keeps the earlier
-  stanza whole and merges nothing from the later part.
+  A fresh node must carry a definition, must not already belong to a tree,
+  must keep the contested slot's pairing identity, must render its text from
+  its fields, and that text must bind its own definition through
+  `schema.MatchChild` at its level. It must not win a section, because a
+  fresh node has no children and would erase both stanzas. Merge reports an
+  Error and keeps the earlier value for each of these. A `Combined` outcome
+  across two definitions with a section on either side is an Error: children
+  of different definitions cannot share a header. A `Combined` outcome that
+  hands back `earlier` itself drops a leaf's later value, so Merge reports it
+  as a Warning. `Refused` keeps the earlier stanza whole and merges nothing
+  from the later part.
 
 ### Schema construction constraints
 
@@ -159,6 +168,10 @@ The explanations record constraints that tests do not show.
 - **Toggle pairs are declared, never text-detected.** The `"no "`-prefix
   heuristic has no fallback. A test verifies that an undeclared pair emits
   separate remove and add operations.
+- **At most one member of a toggle group may declare a merge kind.** The
+  group shares one merge slot, so a second declaration would make the winner
+  depend on which member merge saw first. The check holds in both builder
+  call orders.
 
 ### Pairing and diff semantics
 
@@ -282,7 +295,8 @@ Both still return the Result for inspection when errors occur. `Render`,
 `Merge`, and `Compare` do not run a commit check because they format, assemble,
 or inspect configurations. Diff converges to the checked goal, so it does not
 check references in running configuration that will be removed. A `Break`
-cycle break warns about its partial-application risk and names the dependency.
+cycle break warns with the full cycle and the dropped edge, and names the
+reason when edge derivation recorded one.
 
 ### Diagnostics
 
