@@ -233,3 +233,31 @@ func TestAlphaMembershipBadItemRejected(t *testing.T) {
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "5000")
 }
+
+func TestAlphaTrunkVlanBadItemRejected(t *testing.T) {
+	e := Engine()
+	_, d := e.Import(
+		"interface Ethernet1/5\n  switchport trunk allowed vlan 10,5000\n")
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "5000")
+}
+
+func TestAlphaTrunkContinuationEndToEnd(t *testing.T) {
+	// The add-form is accepted as config input and folds into the base slot;
+	// the folded spelling is not drift against the pre-joined one.
+	e := Engine()
+	cfg, d := e.Import("interface Ethernet1/5\n" +
+		"  switchport trunk allowed vlan 10\n" +
+		"  switchport trunk allowed vlan add 20-22\n")
+	require.False(t, d.HasErrors(), d.String())
+	out, _ := e.Render(cfg)
+	assert.Equal(t,
+		"interface Ethernet1/5\n  switchport trunk allowed vlan 10,20-22\n",
+		out)
+
+	joined, _ := e.Import(
+		"interface Ethernet1/5\n  switchport trunk allowed vlan 10,20-22\n")
+	res, rd := e.Remediate(cfg, joined)
+	require.False(t, rd.HasErrors(), rd.String())
+	assert.True(t, res.Empty())
+}
