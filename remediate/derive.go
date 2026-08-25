@@ -62,10 +62,7 @@ func appendDefines(out []resource, x *schema.Node) []resource {
 			continue
 		}
 		for _, a := range def.KeyArgs {
-			out = append(
-				out,
-				resource{label: label, arg: a, key: x.Fields[a]},
-			)
+			out = append(out, resource{label: label, arg: a, key: x.Fields[a]})
 		}
 	}
 	return out
@@ -104,14 +101,11 @@ func appendRefs(
 			}
 			continue
 		}
-		out = append(
-			out,
-			resource{
-				label: r.Label,
-				arg:   r.TargetKey,
-				key:   x.Fields[r.FromArg],
-			},
-		)
+		out = append(out, resource{
+			label: r.Label,
+			arg:   r.TargetKey,
+			key:   x.Fields[r.FromArg],
+		})
 	}
 	return out
 }
@@ -395,6 +389,7 @@ type requirement struct {
 	label string
 }
 
+// requirementsOf returns the Requires declarations in a subtree.
 func requirementsOf(n *schema.Node) []requirement {
 	var out []requirement
 	n.Walk(func(x *schema.Node) { out = appendRequirements(out, x) })
@@ -409,10 +404,7 @@ func appendRequirements(out []requirement, x *schema.Node) []requirement {
 	}
 	for _, r := range def.Relations {
 		if r.IsRequires() {
-			out = append(
-				out,
-				requirement{tmpl: def.Template, label: r.Label},
-			)
+			out = append(out, requirement{tmpl: def.Template, label: r.Label})
 		}
 	}
 	return out

@@ -16,8 +16,7 @@ import (
 // ImportCheck validates node values, cardinality, duplicate keys, toggle exclusions, and required nodes within each level.
 func ImportCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	v := valueChecker{
-		reg: cfg.Schema.Registry,
-		// Capture names are fixed per definition, so sort them once instead of per node.
+		reg:      cfg.Schema.Registry,
 		argNames: map[*schema.Def][]string{},
 		d:        d,
 	}
@@ -28,7 +27,8 @@ func ImportCheck(cfg *schema.Config, d *diag.Diagnostics) {
 
 // valueChecker validates node values against their registered types.
 type valueChecker struct {
-	reg      *value.Registry
+	reg *value.Registry
+	// Capture names are fixed per definition, so sort them once instead of per node.
 	argNames map[*schema.Def][]string
 	d        *diag.Diagnostics
 }
