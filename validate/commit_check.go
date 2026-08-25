@@ -8,8 +8,8 @@ import (
 // target identifies a labeled key value.
 type target struct{ label, arg, val string }
 
-// checker holds the relation indexes and diagnostic sink.
-type checker struct {
+// relationChecker holds the relation indexes and diagnostic sink.
+type relationChecker struct {
 	// index holds every declared key value so tree-scope relations resolve against it.
 	index map[target]bool
 	// present records whether any instance carries each label.
@@ -23,36 +23,45 @@ func CommitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	if cfg.Schema != nil {
 		cfg.Schema.ValidateRelations(d)
 	}
-	c := checker{index: map[target]bool{}, present: map[string]bool{}, d: d}
+	c := relationChecker{
+		index:   map[target]bool{},
+		present: map[string]bool{},
+		d:       d,
+	}
 
-	schema.Walk(cfg, func(n *schema.Node) {
-		def := n.Def
-		if def == nil {
-			return
-		}
-		for _, label := range def.Labels() {
-			c.present[label] = true
-			for _, arg := range def.KeyArgs {
-				c.index[target{label, arg, n.Fields[arg]}] = true
-			}
-		}
-	})
+	schema.Walk(cfg, c.record)
+	schema.Walk(cfg, c.checkRelations)
+}
 
-	schema.Walk(cfg, func(n *schema.Node) {
-		def := n.Def
-		if def == nil {
-			return
+// record indexes the labels and key values one node declares.
+func (c relationChecker) record(n *schema.Node) {
+	def := n.Def
+	if def == nil {
+		return
+	}
+	for _, label := range def.Labels() {
+		c.present[label] = true
+		for _, arg := range def.KeyArgs {
+			c.index[target{label, arg, n.Fields[arg]}] = true
 		}
-		for _, rel := range def.Relations {
-			vals, ok := relValues(n, rel, d)
-			if !ok {
-				continue
-			}
-			for _, v := range vals {
-				c.check(n, rel, v)
-			}
+	}
+}
+
+// checkRelations validates every relation one node declares against the index.
+func (c relationChecker) checkRelations(n *schema.Node) {
+	def := n.Def
+	if def == nil {
+		return
+	}
+	for _, rel := range def.Relations {
+		vals, ok := relValues(n, rel, c.d)
+		if !ok {
+			continue
 		}
-	})
+		for _, v := range vals {
+			c.check(n, rel, v)
+		}
+	}
 }
 
 // relValues returns a presence sentinel or the expanded capture values to match.
@@ -72,7 +81,7 @@ func relValues(
 }
 
 // check reports a diagnostic when one relation value is unsatisfied or in conflict.
-func (c checker) check(n *schema.Node, rel schema.Relation, v string) {
+func (c relationChecker) check(n *schema.Node, rel schema.Relation, v string) {
 	// ValidateRelations rejects every other scope and polarity pairing.
 	if rel.IsExclusion() {
 		if hit := findSibling(n, rel, v); hit != nil {
@@ -106,7 +115,7 @@ func (c checker) check(n *schema.Node, rel schema.Relation, v string) {
 }
 
 // satisfied reports whether any node in the tree provides the label and value.
-func (c checker) satisfied(rel schema.Relation, v string) bool {
+func (c relationChecker) satisfied(rel schema.Relation, v string) bool {
 	if rel.FromArg == "" {
 		return c.present[rel.Label]
 	}

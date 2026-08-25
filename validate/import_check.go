@@ -15,43 +15,55 @@ import (
 
 // ImportCheck validates node values, cardinality, duplicate keys, toggle exclusions, and required nodes within each level.
 func ImportCheck(cfg *schema.Config, d *diag.Diagnostics) {
-	reg := cfg.Schema.Registry
-	// Capture names are fixed per definition, so sort them once instead of per node.
-	argNames := map[*schema.Def][]string{}
-
-	schema.Walk(cfg, func(n *schema.Node) {
-		def := n.Def
-		if def == nil {
-			return
-		}
-		fields := n.Fields
-		args, cached := argNames[def]
-		if !cached {
-			// Sorted args keep the diagnostic order deterministic.
-			args = slices.Sorted(maps.Keys(fields))
-			argNames[def] = args
-		}
-		for _, arg := range args {
-			val := fields[arg]
-			vt, _ := reg.Get(def.ArgType(arg))
-			if vt.Check == nil {
-				continue // An unregistered type has a nil Check; schema construction rejects unknown types.
-			}
-			if err := vt.Check(val); err != nil {
-				d.AddAt(
-					n.Line,
-					diag.Error,
-					"%s: invalid %s %q: %v",
-					n.Path(), arg, val, err,
-				)
-			}
-		}
-		if ls := def.ListSpec; ls.Arg != "" {
-			checkListArg(n, ls, reg, d)
-		}
-	})
+	v := valueChecker{
+		reg:      cfg.Schema.Registry,
+		argNames: map[*schema.Def][]string{},
+		d:        d,
+	}
+	schema.Walk(cfg, v.checkValues)
 
 	checkCardinality(cfg.Root, cfg.Schema.Roots, d)
+}
+
+// valueChecker validates node values against their registered types.
+type valueChecker struct {
+	reg *value.Registry
+	// Capture names are fixed per definition, so sort them once instead of per node.
+	argNames map[*schema.Def][]string
+	d        *diag.Diagnostics
+}
+
+// checkValues validates every field value and the list argument on one node.
+func (v valueChecker) checkValues(n *schema.Node) {
+	def := n.Def
+	if def == nil {
+		return
+	}
+	fields := n.Fields
+	args, cached := v.argNames[def]
+	if !cached {
+		// Sorted args keep the diagnostic order deterministic.
+		args = slices.Sorted(maps.Keys(fields))
+		v.argNames[def] = args
+	}
+	for _, arg := range args {
+		val := fields[arg]
+		vt, _ := v.reg.Get(def.ArgType(arg))
+		if vt.Check == nil {
+			continue // An unregistered type has a nil Check; schema construction rejects unknown types.
+		}
+		if err := vt.Check(val); err != nil {
+			v.d.AddAt(
+				n.Line,
+				diag.Error,
+				"%s: invalid %s %q: %v",
+				n.Path(), arg, val, err,
+			)
+		}
+	}
+	if ls := def.ListSpec; ls.Arg != "" {
+		checkListArg(n, ls, v.reg, v.d)
+	}
 }
 
 // checkCardinality validates child cardinality at one level and then recurses.

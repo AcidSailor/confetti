@@ -45,62 +45,68 @@ func (dv *differ) buildGraph() {
 // definesOf returns one resource per label and key argument in a subtree so references can target one part of a composite key.
 func definesOf(n *schema.Node) []resource {
 	var out []resource
-	n.Walk(func(x *schema.Node) {
-		def := x.Def
-		if def == nil {
-			return
+	n.Walk(func(x *schema.Node) { out = appendDefines(out, x) })
+	return out
+}
+
+// appendDefines appends the resources one node defines.
+func appendDefines(out []resource, x *schema.Node) []resource {
+	def := x.Def
+	if def == nil {
+		return out
+	}
+	for _, label := range def.Labels() {
+		// Keyless labels satisfy presence-only Requires relations.
+		if len(def.KeyArgs) == 0 {
+			out = append(out, resource{label: label})
+			continue
 		}
-		for _, label := range def.Labels() {
-			// Keyless labels satisfy presence-only Requires relations.
-			if len(def.KeyArgs) == 0 {
-				out = append(out, resource{label: label})
-				continue
-			}
-			for _, a := range def.KeyArgs {
-				out = append(
-					out,
-					resource{label: label, arg: a, key: x.Fields[a]},
-				)
-			}
+		for _, a := range def.KeyArgs {
+			out = append(out, resource{label: label, arg: a, key: x.Fields[a]})
 		}
-	})
+	}
 	return out
 }
 
 // refsOf returns referenced resources in a subtree and expands semantic list values into separate references.
 func refsOf(n *schema.Node, d *diag.Diagnostics) []resource {
 	var out []resource
-	n.Walk(func(x *schema.Node) {
-		def := x.Def
-		if def == nil {
-			return
+	n.Walk(func(x *schema.Node) { out = appendRefs(out, x, d) })
+	return out
+}
+
+// appendRefs appends the resources one node references, expanding a semantic list into separate references.
+func appendRefs(
+	out []resource,
+	x *schema.Node,
+	d *diag.Diagnostics,
+) []resource {
+	def := x.Def
+	if def == nil {
+		return out
+	}
+	for _, r := range def.Relations {
+		if !r.IsRef() {
+			continue
 		}
-		for _, r := range def.Relations {
-			if !r.IsRef() {
+		if ls := def.ListSpec; ls.Arg != "" && ls.Arg == r.FromArg {
+			items, ok := resolveListArg(x, ls, d, "ref-ordering edges")
+			if !ok {
 				continue
 			}
-			if ls := def.ListSpec; ls.Arg != "" && ls.Arg == r.FromArg {
-				items, ok := resolveListArg(x, ls, d, "ref-ordering edges")
-				if !ok {
-					continue
-				}
-				for _, it := range items {
-					out = append(out, resource{
-						label: r.Label, arg: r.TargetKey, key: it,
-					})
-				}
-				continue
+			for _, it := range items {
+				out = append(out, resource{
+					label: r.Label, arg: r.TargetKey, key: it,
+				})
 			}
-			out = append(
-				out,
-				resource{
-					label: r.Label,
-					arg:   r.TargetKey,
-					key:   x.Fields[r.FromArg],
-				},
-			)
+			continue
 		}
-	})
+		out = append(out, resource{
+			label: r.Label,
+			arg:   r.TargetKey,
+			key:   x.Fields[r.FromArg],
+		})
+	}
 	return out
 }
 
@@ -250,42 +256,49 @@ func (dv *differ) deriveRefEdges() {
 // resourcesHeld returns comparable exclusive resources and warns about unresolvable lists.
 func resourcesHeld(n *schema.Node, d *diag.Diagnostics) []heldResource {
 	var out []heldResource
-	n.Walk(func(x *schema.Node) {
-		def := x.Def
-		if def == nil || len(def.KeyArgs) == 0 {
-			return
-		}
-		args := def.KeyArgs
-		if u := def.UniqueArgs; len(u) > 0 {
-			args = u
-		}
-		listIdx := -1
-		if def.ListSpec.Arg != "" {
-			listIdx = slices.Index(args, def.ListSpec.Arg)
-		}
-		// Exclude the list from the bucket key so overlapping spellings share a bucket.
-		parts := make([]string, len(args))
-		for i, a := range args {
-			if i != listIdx {
-				parts[i] = x.Fields[a]
-			}
-		}
-		key := strings.Join(parts, "\x00")
-		held := heldResource{resource: resourceFor(def, key), display: key}
-		if listIdx >= 0 {
-			ls := def.ListSpec
-			items, ok := resolveListArg(x, ls, d, "exclusive-resource ordering")
-			if !ok {
-				return
-			}
-			parts[listIdx] = listval.Canonical(items, ls.Sep, ls.Keywords())
-			held.members = listval.Intervals(items)
-			held.display = strings.Join(parts, "\x00")
-			held.isList = true
-		}
-		out = append(out, held)
-	})
+	n.Walk(func(x *schema.Node) { out = appendHeld(out, x, d) })
 	return out
+}
+
+// appendHeld appends the exclusive resource one node holds and warns about an unresolvable list.
+func appendHeld(
+	out []heldResource,
+	x *schema.Node,
+	d *diag.Diagnostics,
+) []heldResource {
+	def := x.Def
+	if def == nil || len(def.KeyArgs) == 0 {
+		return out
+	}
+	args := def.KeyArgs
+	if u := def.UniqueArgs; len(u) > 0 {
+		args = u
+	}
+	listIdx := -1
+	if def.ListSpec.Arg != "" {
+		listIdx = slices.Index(args, def.ListSpec.Arg)
+	}
+	// Exclude the list from the bucket key so overlapping spellings share a bucket.
+	parts := make([]string, len(args))
+	for i, a := range args {
+		if i != listIdx {
+			parts[i] = x.Fields[a]
+		}
+	}
+	key := strings.Join(parts, "\x00")
+	held := heldResource{resource: resourceFor(def, key), display: key}
+	if listIdx >= 0 {
+		ls := def.ListSpec
+		items, ok := resolveListArg(x, ls, d, "exclusive-resource ordering")
+		if !ok {
+			return out
+		}
+		parts[listIdx] = listval.Canonical(items, ls.Sep, ls.Keywords())
+		held.members = listval.Intervals(items)
+		held.display = strings.Join(parts, "\x00")
+		held.isList = true
+	}
+	return append(out, held)
 }
 
 // resolveListArg resolves a list argument and warns when ordering must skip the line.
@@ -376,44 +389,48 @@ type requirement struct {
 	label string
 }
 
+// requirementsOf returns the Requires declarations in a subtree.
 func requirementsOf(n *schema.Node) []requirement {
 	var out []requirement
-	n.Walk(func(x *schema.Node) {
-		def := x.Def
+	n.Walk(func(x *schema.Node) { out = appendRequirements(out, x) })
+	return out
+}
+
+// appendRequirements appends the Requires declarations one node carries.
+func appendRequirements(out []requirement, x *schema.Node) []requirement {
+	def := x.Def
+	if def == nil {
+		return out
+	}
+	for _, r := range def.Relations {
+		if r.IsRequires() {
+			out = append(out, requirement{tmpl: def.Template, label: r.Label})
+		}
+	}
+	return out
+}
+
+// labelResources returns every label instance in a configuration, keyed by definition and key value.
+func labelResources(c *schema.Config) map[resource]bool {
+	set := map[resource]bool{}
+	schema.Walk(c, func(n *schema.Node) {
+		def := n.Def
 		if def == nil {
 			return
 		}
-		for _, r := range def.Relations {
-			if r.IsRequires() {
-				out = append(
-					out,
-					requirement{tmpl: def.Template, label: r.Label},
-				)
-			}
+		// Definitions sharing a label do not preserve each other's presence.
+		for _, label := range def.Labels() {
+			set[resource{
+				label: label, def: def, key: ident.KeyValue(n),
+			}] = true
 		}
 	})
-	return out
+	return set
 }
 
 // survivingLabels returns labels provided by the same definition and key in both configurations.
 func survivingLabels(running, intended *schema.Config) map[string]bool {
-	collect := func(c *schema.Config) map[resource]bool {
-		set := map[resource]bool{}
-		schema.Walk(c, func(n *schema.Node) {
-			def := n.Def
-			if def == nil {
-				return
-			}
-			// Definitions sharing a label do not preserve each other's presence.
-			for _, label := range def.Labels() {
-				set[resource{
-					label: label, def: def, key: ident.KeyValue(n),
-				}] = true
-			}
-		})
-		return set
-	}
-	run, want := collect(running), collect(intended)
+	run, want := labelResources(running), labelResources(intended)
 	out := map[string]bool{}
 	for r := range run {
 		if want[r] {
