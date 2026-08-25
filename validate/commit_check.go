@@ -25,34 +25,39 @@ func CommitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	}
 	c := checker{index: map[target]bool{}, present: map[string]bool{}, d: d}
 
-	schema.Walk(cfg, func(n *schema.Node) {
-		def := n.Def
-		if def == nil {
-			return
-		}
-		for _, label := range def.Labels() {
-			c.present[label] = true
-			for _, arg := range def.KeyArgs {
-				c.index[target{label, arg, n.Fields[arg]}] = true
-			}
-		}
-	})
+	schema.Walk(cfg, c.record)
+	schema.Walk(cfg, c.checkNode)
+}
 
-	schema.Walk(cfg, func(n *schema.Node) {
-		def := n.Def
-		if def == nil {
-			return
+// record indexes the labels and key values one node declares.
+func (c checker) record(n *schema.Node) {
+	def := n.Def
+	if def == nil {
+		return
+	}
+	for _, label := range def.Labels() {
+		c.present[label] = true
+		for _, arg := range def.KeyArgs {
+			c.index[target{label, arg, n.Fields[arg]}] = true
 		}
-		for _, rel := range def.Relations {
-			vals, ok := relValues(n, rel, d)
-			if !ok {
-				continue
-			}
-			for _, v := range vals {
-				c.check(n, rel, v)
-			}
+	}
+}
+
+// checkNode validates every relation one node declares against the index.
+func (c checker) checkNode(n *schema.Node) {
+	def := n.Def
+	if def == nil {
+		return
+	}
+	for _, rel := range def.Relations {
+		vals, ok := relValues(n, rel, c.d)
+		if !ok {
+			continue
 		}
-	})
+		for _, v := range vals {
+			c.check(n, rel, v)
+		}
+	}
 }
 
 // relValues returns a presence sentinel or the expanded capture values to match.
