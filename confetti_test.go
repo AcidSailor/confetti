@@ -263,7 +263,7 @@ func TestCommitCheckPerItemListRef(t *testing.T) {
 }
 
 func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
-	noUsersVlan := func(cfg *schema.Config, d *diag.Diagnostics) {
+	noUsersVlan := func(cfg, _ *schema.Config, d *diag.Diagnostics) {
 		schema.Walk(cfg, func(n *schema.Node) {
 			// Bind to the schema definition instead of any node carrying a text field.
 			if n.Parent == nil || n.Parent.Def == nil ||
@@ -310,7 +310,7 @@ func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
 
 func TestCommitChecksRunExactlyOncePerCommitPath(t *testing.T) {
 	calls := 0
-	count := func(*schema.Config, *diag.Diagnostics) { calls++ }
+	count := func(_, _ *schema.Config, _ *diag.Diagnostics) { calls++ }
 	e := confetti.New(alpha.Schema(),
 		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(count))
@@ -342,8 +342,8 @@ func TestCommitChecksRunExactlyOncePerCommitPath(t *testing.T) {
 }
 
 func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
-	mark := func(msg string) func(*schema.Config, *diag.Diagnostics) {
-		return func(_ *schema.Config, d *diag.Diagnostics) {
+	mark := func(msg string) confetti.Validator {
+		return func(_, _ *schema.Config, d *diag.Diagnostics) {
 			d.Add(diag.Error, "%s", msg)
 		}
 	}
@@ -365,7 +365,7 @@ func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
 }
 
 func TestCommitCheckKeepsDiagnosticsFromClobberingValidator(t *testing.T) {
-	clobber := func(_ *schema.Config, d *diag.Diagnostics) { d.Items = nil }
+	clobber := func(_, _ *schema.Config, d *diag.Diagnostics) { d.Items = nil }
 	e := confetti.New(alpha.Schema(),
 		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(clobber))

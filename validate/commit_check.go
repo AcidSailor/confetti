@@ -17,8 +17,16 @@ type relationChecker struct {
 	d       *diag.Diagnostics
 }
 
-// CommitCheck validates relations (references, prerequisites, exclusions) against the assembled tree.
-func CommitCheck(cfg *schema.Config, d *diag.Diagnostics) {
+// CommitCheck validates relations (references, prerequisites, exclusions) against the assembled tree; a nil baseline provides no targets.
+func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
+	if baseline != nil && baseline.Schema != cfg.Schema {
+		d.Add(
+			diag.Error,
+			"validate: baseline and configuration use different schemas",
+		)
+		// Drop the unusable baseline but still check the tree the caller asked about.
+		baseline = nil
+	}
 	// Validate the complete schema, including definitions absent from the configuration.
 	if cfg.Schema != nil {
 		cfg.Schema.ValidateRelations(d)
@@ -29,6 +37,10 @@ func CommitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 		d:       d,
 	}
 
+	// Baseline nodes are relation targets only; their own relations are never checked.
+	if baseline != nil {
+		schema.Walk(baseline, c.record)
+	}
 	schema.Walk(cfg, c.record)
 	schema.Walk(cfg, c.checkRelations)
 }

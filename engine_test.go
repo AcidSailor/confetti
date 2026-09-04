@@ -8,12 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	confetti "github.com/acidsailor/confetti"
+	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/graph"
 	"github.com/acidsailor/confetti/internal/fixture/alpha"
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/merge"
 	"github.com/acidsailor/confetti/parse"
 	"github.com/acidsailor/confetti/remediate"
+	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/transform"
 )
@@ -339,4 +341,249 @@ func TestEngineRemediateClearsOldModeFirst(t *testing.T) {
 	require.False(t, od.HasErrors(), od.String())
 	assert.Equal(t, "interface Ethernet1/1\n  no switchport access vlan 20\n"+
 		"  no switchport\n  ip address 10.0.0.1/24\n", out)
+}
+
+const baselineReferrer = "interface Ethernet1/1\n  switchport access vlan 1\n"
+
+func TestWithBaselineResolvesRefOnEveryCommitPath(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	referrer, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	empty, d := e.Import("")
+	require.False(t, d.HasErrors(), d.String())
+
+	assert.False(t, e.CommitCheck(referrer).HasErrors())
+	_, rd := e.Remediate(empty, referrer)
+	assert.False(t, rd.HasErrors(), rd.String())
+	_, bd := e.Rollback(referrer, empty)
+	assert.False(t, bd.HasErrors(), bd.String())
+
+	// The baseline adds targets; it does not relax the check for other values.
+	other, d := e.Import("interface Ethernet1/1\n  switchport access vlan 2\n")
+	require.False(t, d.HasErrors(), d.String())
+	cd := e.CommitCheck(other)
+	require.True(t, cd.HasErrors())
+	assert.Contains(t, cd.String(), `vlan "2" does not exist`)
+}
+
+func TestWithBaselineNeverEntersPlanOrCompare(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	referrer, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	empty, d := e.Import("")
+	require.False(t, d.HasErrors(), d.String())
+
+	res, rd := e.Remediate(empty, referrer)
+	require.False(t, rd.HasErrors(), rd.String())
+	assert.Equal(t, baselineReferrer, render.Render(res.Tree))
+	back, bd := e.Rollback(empty, referrer)
+	require.False(t, bd.HasErrors(), bd.String())
+	assert.Equal(t, "no interface Ethernet1/1\n", render.Render(back.Tree))
+	view, cd := e.Compare(empty, referrer)
+	require.False(t, cd.HasErrors(), cd.String())
+	assert.Equal(t,
+		"+ interface Ethernet1/1\n+   switchport access vlan 1\n", view)
+}
+
+// assertBaselineOrderIndependent resolves baselineReferrer with the two options applied in either order.
+func assertBaselineOrderIndependent(t *testing.T, base, other confetti.Option) {
+	t.Helper()
+	for name, opts := range map[string][]confetti.Option{
+		"baseline first": {base, other},
+		"other first":    {other, base},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := confetti.New(remediateSchema(), opts...)
+			cfg, d := e.Import(baselineReferrer)
+			require.False(t, d.HasErrors(), d.String())
+			assert.False(t, e.CommitCheck(cfg).HasErrors())
+		})
+	}
+}
+
+func TestWithBaselineAppliesImportTextInBothOrders(t *testing.T) {
+	drop, err := transform.DropLines(`^!`)
+	require.NoError(t, err)
+	assertBaselineOrderIndependent(t,
+		confetti.WithBaseline("! built-ins\nvlan 1\n"),
+		confetti.WithImportText(drop))
+}
+
+func TestWithBaselineRejectsUnknownLinesEvenUnderDrop(t *testing.T) {
+	assert.PanicsWithValue(t,
+		"confetti: baseline does not import cleanly:\n"+
+			"1: error: unknown command: \"flux-capacitor enable\"\n",
+		func() {
+			confetti.New(remediateSchema(),
+				confetti.WithUnknown(parse.Drop),
+				confetti.WithBaseline("flux-capacitor enable\n"))
+		})
+}
+
+func TestWithBaselineAccumulates(t *testing.T) {
+	// Unterminated fragments must not splice into one line.
+	e := confetti.New(remediateSchema(),
+		confetti.WithBaseline("vlan 1"), confetti.WithBaseline("vlan 2"))
+	for _, id := range []string{"1", "2"} {
+		cfg, d := e.Import(
+			"interface Ethernet1/1\n  switchport access vlan " + id + "\n")
+		require.False(t, d.HasErrors(), d.String())
+		assert.False(t, e.CommitCheck(cfg).HasErrors(), id)
+	}
+}
+
+func TestWithBaselineReachesValidators(t *testing.T) {
+	var seen []string
+	record := func(_, baseline *schema.Config, _ *diag.Diagnostics) {
+		seen = nil
+		schema.Walk(
+			baseline,
+			func(n *schema.Node) { seen = append(seen, n.Text) },
+		)
+	}
+	e := confetti.New(remediateSchema(),
+		confetti.WithBaseline("vlan 1\n"),
+		confetti.WithCommitChecks(record))
+	cfg, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	e.CommitCheck(cfg)
+	assert.Equal(t, []string{"vlan 1"}, seen)
+}
+
+func TestWithBaselineToleratesMissingRequiredNodes(t *testing.T) {
+	s := remediateSchema()
+	s.Node("hostname {{ h:word }}").Card(schema.One)
+	e := confetti.New(s, confetti.WithBaseline("vlan 1\n"))
+	cfg, d := e.Import("hostname sw1\n" + baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	assert.False(t, e.CommitCheck(cfg).HasErrors())
+}
+
+func TestWithBaselinePanicsOnInvalidValue(t *testing.T) {
+	assert.PanicsWithValue(
+		t,
+		"confetti: baseline does not import cleanly:\n"+
+			"1: error: vlan 9999: invalid id \"9999\": out of range 1..4094\n",
+		func() {
+			confetti.New(remediateSchema(),
+				confetti.WithBaseline("vlan 9999\n"))
+		},
+	)
+}
+
+// A baseline is authored platform data, so every per-level rule still applies.
+func TestWithBaselinePanicsOnDuplicateKey(t *testing.T) {
+	assert.PanicsWithValue(
+		t,
+		"confetti: baseline does not import cleanly:\n"+
+			"2: error: vlan 1: duplicate key \"1\"\n",
+		func() {
+			confetti.New(remediateSchema(),
+				confetti.WithBaseline("vlan 1\nvlan 1\n"))
+		},
+	)
+}
+
+func TestValidatorAlwaysReceivesANonNilBaseline(t *testing.T) {
+	walked := false
+	record := func(_, baseline *schema.Config, _ *diag.Diagnostics) {
+		require.NotNil(t, baseline)
+		schema.Walk(baseline, func(*schema.Node) {})
+		walked = true
+	}
+	// No WithBaseline: the validator must still be able to walk the baseline.
+	e := confetti.New(remediateSchema(), confetti.WithCommitChecks(record))
+	cfg, d := e.Import("vlan 1\n")
+	require.False(t, d.HasErrors(), d.String())
+	require.NotPanics(t, func() { e.CommitCheck(cfg) })
+	assert.True(t, walked)
+}
+
+func TestValidatorCannotCorruptTheEngineBaseline(t *testing.T) {
+	wreck := func(_, baseline *schema.Config, _ *diag.Diagnostics) {
+		baseline.Root.Children = nil
+	}
+	e := confetti.New(remediateSchema(),
+		confetti.WithBaseline("vlan 1\n"),
+		confetti.WithCommitChecks(wreck))
+	running, d := e.Import("vlan 1\n")
+	require.False(t, d.HasErrors(), d.String())
+	intended, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+
+	// The first call runs the validator; the baseline check must still fire.
+	for range 2 {
+		_, rd := e.Remediate(running, intended)
+		assert.Contains(t, rd.String(), "removes device-provided")
+	}
+}
+
+func TestCommitCheckReportsSchemaMismatchAndStillChecksTheTree(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	foreign, d := confetti.New(remediateSchema()).
+		Import("interface Ethernet1/1\n  switchport access vlan 9\n")
+	require.False(t, d.HasErrors(), d.String())
+	cd := e.CommitCheck(foreign)
+	assert.Contains(t, cd.String(), "different schemas")
+	// The mismatch must not swallow the tree's own relation errors.
+	assert.Contains(t, cd.String(), `vlan "9" does not exist`)
+}
+
+// renumberVlan proves a tree transform reaches the baseline by changing a key value, not only text.
+type renumberVlan struct{ from, to string }
+
+func (r renumberVlan) Apply(cfg *schema.Config) {
+	schema.Walk(cfg, func(n *schema.Node) {
+		if n.Fields["id"] == r.from {
+			n.Fields["id"] = r.to
+			n.Text = "vlan " + r.to
+		}
+	})
+}
+
+func TestWithBaselineAppliesImportTreeInBothOrders(t *testing.T) {
+	assertBaselineOrderIndependent(t,
+		confetti.WithBaseline("vlan 4094\n"),
+		confetti.WithImportTree(renumberVlan{from: "4094", to: "1"}))
+}
+
+func TestWithBaselineNeverMerges(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	p1, d := e.Import("vlan 2\n")
+	require.False(t, d.HasErrors(), d.String())
+	p2, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	merged, md := e.Merge(merge.Options{}, p1, p2)
+	require.False(t, md.HasErrors(), md.String())
+	assert.Equal(t, "vlan 2\n"+baselineReferrer, render.Render(merged))
+}
+
+func TestCompareReportsBaselineNegation(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	running, d := e.Import("vlan 1\n")
+	require.False(t, d.HasErrors(), d.String())
+	intended, d := e.Import("")
+	require.False(t, d.HasErrors(), d.String())
+	view, cd := e.Compare(running, intended)
+	require.True(t, cd.HasErrors())
+	assert.Contains(t, cd.String(), "removes device-provided")
+	// Compare still returns its view alongside the Error.
+	assert.Contains(t, view, "vlan 1")
+}
+
+func TestWithBaselineRefusesToNegateBaselineObject(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	running, d := e.Import("vlan 1\n")
+	require.False(t, d.HasErrors(), d.String())
+	intended, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	_, rd := e.Remediate(running, intended)
+	require.True(t, rd.HasErrors())
+	assert.Contains(
+		t,
+		rd.String(),
+		`no vlan 1: removes device-provided vlan "1" declared by the baseline`,
+	)
+	_, bd := e.Rollback(intended, running)
+	assert.Contains(t, bd.String(), "removes device-provided")
 }

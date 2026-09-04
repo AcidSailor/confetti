@@ -114,7 +114,7 @@ func TestRenderToggleFlipPairFromDiff(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "interface Ethernet1/1\n  shutdown\n"),
 		mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n"),
-		remediate.Break,
+		remediate.Options{Cycle: remediate.Break},
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "  interface Ethernet1/1\n" +
@@ -133,7 +133,7 @@ func TestRenderToggleFlipShowsBothSubtrees(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "feature on\n  old child\n"),
 		mustParse(t, s, "feature off\n  new child\n"),
-		remediate.Abort,
+		remediate.Options{Cycle: remediate.Abort},
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- feature on\n" +
@@ -158,7 +158,7 @@ func TestRenderRemovedSectionFromDiff(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "interface Ethernet1/1\n  description A\n  shutdown\n"),
 		mustParse(t, s, ""),
-		remediate.Break,
+		remediate.Options{Cycle: remediate.Break},
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- interface Ethernet1/1\n" +
@@ -179,7 +179,7 @@ func TestRenderSectionHeaderModifyHeaderOnly(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "vlan 10 name FOO\n  shutdown\n"),
 		mustParse(t, s, "vlan 10 name BAR\n"),
-		remediate.Break,
+		remediate.Options{Cycle: remediate.Break},
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- vlan 10 name FOO\n" +
@@ -198,7 +198,7 @@ func TestRenderReplacePairFromDiff(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "vlan 10 state enable\n"),
 		mustParse(t, s, "vlan 10 state disable\n"),
-		remediate.Break,
+		remediate.Options{Cycle: remediate.Break},
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- vlan 10 state enable\n" +
@@ -221,7 +221,7 @@ func TestRenderNoSectionExitToken(t *testing.T) {
 		mustParse(t, s, "router bgp 65000\n"+
 			"  address-family ipv4 unicast\n"+
 			"    max-paths ebgp 8\n"),
-		remediate.Break,
+		remediate.Options{Cycle: remediate.Break},
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "+ router bgp 65000\n" +
@@ -239,7 +239,7 @@ func TestRenderBlockBody(t *testing.T) {
 	res, d := remediate.Diff(
 		mustParse(t, s, "banner motd ^\nhello\n^\n"),
 		mustParse(t, s, "banner motd ^\nworld\n^\n"),
-		remediate.Break,
+		remediate.Options{Cycle: remediate.Break},
 	)
 	require.False(t, d.HasErrors(), d.String())
 	want := "- banner motd ^\n" +

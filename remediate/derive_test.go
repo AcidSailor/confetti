@@ -41,7 +41,7 @@ func orderedDiff(
 ) (string, *diag.Diagnostics) {
 	t.Helper()
 	res, d := Diff(mustParse(t, s, running), mustParse(t, s, intended),
-		Abort)
+		Options{Cycle: Abort})
 	return render.Render(res.Tree), d
 }
 
@@ -171,7 +171,7 @@ func TestRefsOfMalformedListWarnsNotSilent(t *testing.T) {
 		"vlan 10\ninterface Ethernet1\n  switchport trunk allowed vlan 10,,20\n",
 	)
 	intended := mustParse(t, s, "")
-	_, d := Diff(running, intended, Break)
+	_, d := Diff(running, intended, Options{Cycle: Break})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "ref-ordering edges")
 	assert.Contains(t, d.String(), `"10,,20"`)
@@ -567,7 +567,7 @@ func TestRequiresUnsatisfiedIsErrorUnderBothCycles(t *testing.T) {
 		s := requireSchema()
 		_, d := Diff(
 			mustParse(t, s, ""), mustParse(t, s, "router bgp\n"),
-			cycle)
+			Options{Cycle: cycle})
 		require.True(t, d.HasErrors(), "cycle=%v", cycle)
 		assert.Contains(t, d.String(), `requires a "feature"`)
 	}
@@ -611,7 +611,7 @@ func TestOrderHookCycleFollowsPolicy(t *testing.T) {
 	res, d := Diff(
 		mustParse(t, s, ""),
 		mustParse(t, s, "alpha one\nbeta two\n"),
-		Abort,
+		Options{Cycle: Abort},
 	)
 	require.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "ordering cycle")
@@ -621,7 +621,7 @@ func TestOrderHookCycleFollowsPolicy(t *testing.T) {
 	res2, d2 := Diff(
 		mustParse(t, s2, ""),
 		mustParse(t, s2, "alpha one\nbeta two\n"),
-		Break,
+		Options{Cycle: Break},
 	)
 	assert.False(t, d2.HasErrors())
 	assert.Contains(t, d2.String(), "dropped ordering edge")
@@ -637,7 +637,7 @@ func TestCycleBreakNamesRefEndToEnd(t *testing.T) {
 		Ref("y", "a.x")
 	running := mustParse(t, s, "a 1\nb 1\n")
 	intended := mustParse(t, s, "")
-	_, d := Diff(running, intended, Break)
+	_, d := Diff(running, intended, Options{Cycle: Break})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "dropped ordering edge")
 	assert.Contains(t, d.String(), "(protecting ref ")
@@ -770,4 +770,167 @@ func TestRequiresSharedLabelAcrossDefinitionsIsNotSurvival(t *testing.T) {
 	out, d := orderedDiff(t, s, "feature lacp\n", "router bgp\nfeature vpc\n")
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "feature vpc\nrouter bgp\nno feature lacp\n", out)
+}
+
+func TestRequiresSatisfiedByBaseline(t *testing.T) {
+	// A device-provided prerequisite is neither kept nor added, yet the goal converges.
+	for _, cycle := range []Cycle{Abort, Break} {
+		s := requireSchema()
+		res, d := Diff(
+			mustParse(t, s, ""), mustParse(t, s, "router bgp\n"),
+			Options{Cycle: cycle, Baseline: mustParse(t, s, "feature bgp\n")})
+		require.False(t, d.HasErrors(), d.String())
+		assert.Equal(t, "router bgp\n", render.Render(res.Tree))
+	}
+}
+
+func TestBaselineNeverEntersThePlan(t *testing.T) {
+	// Removing the last user of a baseline prerequisite must not negate the baseline.
+	s := requireSchema()
+	res, d := Diff(
+		mustParse(t, s, "router bgp\n"), mustParse(t, s, ""),
+		Options{Baseline: mustParse(t, s, "feature bgp\n")})
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "no router bgp\n", render.Render(res.Tree))
+}
+
+func TestBaselineSchemaMismatchIsError(t *testing.T) {
+	s := requireSchema()
+	res, d := Diff(
+		mustParse(t, s, ""), mustParse(t, s, "router bgp\n"),
+		Options{Baseline: mustParse(t, requireSchema(), "feature bgp\n")})
+	require.True(t, d.HasErrors())
+	assert.Contains(
+		t,
+		d.String(),
+		"baseline and intended use different schemas",
+	)
+	assert.True(t, res.Empty())
+}
+
+func TestBaselineRemovalIsError(t *testing.T) {
+	// Running prints a device-provided object; a goal that omits it cannot negate it.
+	s := requireSchema()
+	res, d := Diff(
+		mustParse(t, s, "feature bgp\nrouter bgp\n"),
+		mustParse(t, s, "router bgp\n"),
+		Options{Baseline: mustParse(t, s, "feature bgp\n")})
+	require.True(t, d.HasErrors())
+	assert.Contains(
+		t,
+		d.String(),
+		`no feature bgp: removes device-provided feature "bgp" declared by the baseline`,
+	)
+	// The result stays available for inspection.
+	assert.Equal(t, "no feature bgp\n", render.Render(res.Tree))
+}
+
+// baselineIdentSchema gives one composite-keyed def and two keyless defs that share a Kind.
+func baselineIdentSchema() *schema.Schema {
+	s := schema.New()
+	s.Node("route-map {{ name:word }} permit {{ seq:word }}").
+		Card(schema.ZeroToN).Kind("rm").Key("name", "seq")
+	s.Node("feature bgp").Card(schema.ZeroToOne).Kind("feat")
+	s.Node("feature ospf").Card(schema.ZeroToOne).Kind("feat")
+	return s
+}
+
+// One shared component of a composite key is not the same object.
+func TestBaselineCompositeKeyMatchesInFull(t *testing.T) {
+	s := baselineIdentSchema()
+	_, d := Diff(
+		mustParse(t, s, "route-map OTHER permit 10\n"),
+		mustParse(t, s, ""),
+		Options{Baseline: mustParse(t, s, "route-map RESERVED permit 10\n")})
+	assert.False(t, d.HasErrors(), d.String())
+
+	// The same key in full still reports.
+	_, same := Diff(
+		mustParse(t, s, "route-map RESERVED permit 10\n"),
+		mustParse(t, s, ""),
+		Options{Baseline: mustParse(t, s, "route-map RESERVED permit 10\n")})
+	assert.True(t, same.HasErrors(), same.String())
+}
+
+// Definitions sharing a label are distinct objects.
+func TestBaselineKeylessLabelDoesNotCollideAcrossDefinitions(t *testing.T) {
+	s := baselineIdentSchema()
+	_, d := Diff(
+		mustParse(t, s, "feature ospf\n"),
+		mustParse(t, s, ""),
+		Options{Baseline: mustParse(t, s, "feature bgp\n")})
+	assert.False(t, d.HasErrors(), d.String())
+
+	_, same := Diff(
+		mustParse(t, s, "feature bgp\n"),
+		mustParse(t, s, ""),
+		Options{Baseline: mustParse(t, s, "feature bgp\n")})
+	assert.True(t, same.HasErrors(), same.String())
+}
+
+// An idempotent reissue changes a value without emitting a negation.
+func TestBaselineValueChangeIsNotANegation(t *testing.T) {
+	s := schema.New()
+	s.Node("vlan {{ id:word }} name {{ nm:word }}").
+		Card(schema.ZeroToN).Kind("vlan").Key("id").MarkIdempotent()
+	res, d := Diff(
+		mustParse(t, s, "vlan 1 name old\n"),
+		mustParse(t, s, "vlan 1 name new\n"),
+		Options{Baseline: mustParse(t, s, "vlan 1 name default\n")})
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "vlan 1 name new\n", render.Render(res.Tree))
+}
+
+// A toggle flip supersedes its partner without emitting a negation.
+func TestBaselineToggleFlipIsNotANegation(t *testing.T) {
+	s := schema.New()
+	up := s.Node("no shutdown").Card(schema.ZeroToOne)
+	down := s.Node("shutdown").Card(schema.ZeroToOne).Kind("admin-down")
+	up.Toggles(down)
+	res, d := Diff(
+		mustParse(t, s, "shutdown\n"),
+		mustParse(t, s, "no shutdown\n"),
+		Options{Baseline: mustParse(t, s, "shutdown\n")})
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "no shutdown\n", render.Render(res.Tree))
+}
+
+// A replacement does emit a negation, and the diagnostic must name that line.
+func TestBaselineReplacementNamesTheNegatedLine(t *testing.T) {
+	s := schema.New()
+	s.Node("vlan {{ id:word }} name {{ nm:word }}").
+		Card(schema.ZeroToN).Kind("vlan").Key("id")
+	_, d := Diff(
+		mustParse(t, s, "vlan 1 name old\n"),
+		mustParse(t, s, "vlan 1 name new\n"),
+		Options{Baseline: mustParse(t, s, "vlan 1 name default\n")})
+	require.True(t, d.HasErrors())
+	assert.Contains(t, d.String(),
+		`no vlan 1 name old: removes device-provided vlan "1"`)
+}
+
+// Every device-provided object a single removal negates must be reported.
+func TestBaselineRemovalReportsEveryObject(t *testing.T) {
+	s := schema.New()
+	vrf := s.Node("vrf context {{ name:word }}").
+		Card(schema.ZeroToN).Kind("vrf").Key("name")
+	vrf.Child("address-family {{ afi:word }}").
+		Card(schema.ZeroToN).Kind("af").Key("afi")
+	base := "vrf context default\n  address-family ipv4\n" +
+		"  address-family ipv6\n"
+	_, d := Diff(
+		mustParse(t, s, base),
+		mustParse(t, s, ""),
+		Options{Baseline: mustParse(t, s, base)})
+	require.True(t, d.HasErrors())
+	assert.Equal(t, 3, len(d.Items), d.String())
+}
+
+func TestBaselineKeptInBothIsNotAnError(t *testing.T) {
+	s := requireSchema()
+	_, d := Diff(
+		mustParse(t, s, "feature bgp\n"),
+		mustParse(t, s, "feature bgp\nrouter bgp\n"),
+		Options{Baseline: mustParse(t, s, "feature bgp\n")})
+	assert.False(t, d.HasErrors(), d.String())
 }

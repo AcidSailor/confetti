@@ -15,14 +15,25 @@ import (
 
 // ImportCheck validates node values, cardinality, duplicate keys, toggle exclusions, and required nodes within each level.
 func ImportCheck(cfg *schema.Config, d *diag.Diagnostics) {
+	valueCheck(cfg, d)
+	cardinalityChecker{d: d, requireAll: true}.
+		check(cfg.Root, cfg.Schema.Roots)
+}
+
+// FragmentCheck runs every ImportCheck rule except missing required nodes, so a partial tree can pass.
+func FragmentCheck(cfg *schema.Config, d *diag.Diagnostics) {
+	valueCheck(cfg, d)
+	cardinalityChecker{d: d}.check(cfg.Root, cfg.Schema.Roots)
+}
+
+// valueCheck validates node values and list arguments.
+func valueCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	v := valueChecker{
 		reg:      cfg.Schema.Registry,
 		argNames: map[*schema.Def][]string{},
 		d:        d,
 	}
 	schema.Walk(cfg, v.checkValues)
-
-	checkCardinality(cfg.Root, cfg.Schema.Roots, d)
 }
 
 // valueChecker validates node values against their registered types.
@@ -66,12 +77,15 @@ func (v valueChecker) checkValues(n *schema.Node) {
 	}
 }
 
-// checkCardinality validates child cardinality at one level and then recurses.
-func checkCardinality(
-	parent *schema.Node,
-	allowed []*schema.Def,
-	d *diag.Diagnostics,
-) {
+// cardinalityChecker validates one level's cardinality; requireAll also reports missing required nodes.
+type cardinalityChecker struct {
+	d          *diag.Diagnostics
+	requireAll bool
+}
+
+// check validates child cardinality at one level and then recurses.
+func (k cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
+	d := k.d
 	children := parent.Children
 	if len(children) == 0 && len(allowed) == 0 {
 		return
@@ -86,7 +100,7 @@ func checkCardinality(
 	for _, c := range children {
 		def := c.Def
 		if def == nil {
-			checkCardinality(c, nil, d)
+			k.check(c, nil)
 			continue
 		}
 		count[def]++
@@ -147,9 +161,12 @@ func checkCardinality(
 				}
 			}
 		}
-		checkCardinality(c, def.Children, d)
+		k.check(c, def.Children)
 	}
 
+	if !k.requireAll {
+		return
+	}
 	for _, sn := range allowed {
 		if sn.Cardinality != schema.One || len(sn.KeyArgs) > 0 ||
 			count[sn] > 0 {

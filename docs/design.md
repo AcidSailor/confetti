@@ -72,10 +72,14 @@ Layering rules:
 ## Pipelines
 
 ```
+New:       baseline text → Import pipeline with parse.Reject and
+           FragmentCheck instead of ImportCheck → panic on any diagnostic
 Import:    text transforms (outside block spans) → parse → fold
            (Respell → ListContinues → Members) → user tree transforms
            → ImportCheck
-CommitCheck: relations (refs, Requires, exclusions) over an assembled tree
+CommitCheck: relations (refs, Requires, exclusions) over an assembled tree,
+           with baseline objects as extra ref and Requires targets
+           (exclusions stay sibling-scoped)
            → custom validators (WithCommitChecks)
 Render:    user tree transforms → render → text transforms (outside blocks)
 Remediate: CommitCheck(intended) + Diff(running, intended)
@@ -159,6 +163,38 @@ The explanations record constraints that tests do not show.
   must not modify the tree: `Remediate` validates the caller's `intended`
   before `Diff`, so a mutation would silently change the remediation. A nil
   validator panics at registration.
+- **Baseline objects are relation targets and removal guards.**
+  `WithBaseline` declares objects the device provides but never prints. A
+  baseline is platform data, but the parsed baseline depends on engine-level
+  import transforms and `schema` cannot parse, so the Engine owns it. The
+  engine imports the text once in `New`, after every option, so import text
+  and tree transforms apply in any option order. It uses `parse.Reject`
+  regardless of `WithUnknown` and panics on any diagnostic, Warning included,
+  because the baseline is authored platform data. `New` runs `FragmentCheck`,
+  which keeps every per-level rule (values, duplicate keys, single-occupancy
+  slots, toggle exclusions) and drops only the `missing required` loop,
+  because a baseline is a fragment but is not exempt from the other rules.
+  `New` always builds a baseline, so no consumer handles a nil.
+  `CommitCheck` seeds its index from the baseline before it walks the tree
+  and never checks the baseline's own relations. Exclusions stay
+  sibling-scoped, so the baseline contributes no exclusion targets. Custom
+  validators receive a clone as their second argument: the baseline is shared
+  engine state that outlives the call, unlike `cfg`, which the caller owns.
+  `Diff` counts baseline labels as `Requires` survivors so `Compare`,
+  `Remediate`, and `Rollback` agree with the commit check. That branch is
+  label-only on purpose, because a device-provided object is permanent.
+  Baseline nodes never render, merge, or enter a plan. A plan whose emitted
+  artifact negates a baseline object reports an Error and keeps the Result
+  for inspection, because a device-provided object cannot be deleted and the
+  goal must state it. The boundary is the emitted line, not the intent: a
+  `Remove` and the negation half of a `Replace` report, while an idempotent
+  reissue, a toggle flip, and a list delta do not, because they emit no
+  negation. Baseline identity is definition plus full key value, so a shared
+  label or one component of a composite key cannot match. A baseline extends
+  the target set; it does not relax the check for other values. Baseline and
+  configuration must share one `*schema.Schema`. `Diff` reports a mismatch
+  and emits nothing; `CommitCheck` reports it, drops the baseline, and still
+  checks the tree the caller asked about.
 - **Toggle pairs are declared, never text-detected.** The `"no "`-prefix
   heuristic has no fallback. A test verifies that an undeclared pair emits
   separate remove and add operations.

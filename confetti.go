@@ -23,7 +23,11 @@ type Engine struct {
 	exportText   []transform.TextRule
 	importTree   []transform.TreeTransform
 	exportTree   []transform.TreeTransform
-	commitChecks []func(*schema.Config, *diag.Diagnostics)
+	commitChecks []Validator
+	// baselineText is construction-only; New consumes it.
+	baselineText string
+	// baseline holds device-provided objects; it adds relation targets, blocks their negation, and never renders, merges, or enters a plan.
+	baseline *schema.Config
 }
 
 // Option configures an Engine.
@@ -59,8 +63,11 @@ func WithExportTree(ts ...transform.TreeTransform) Option {
 	return func(e *Engine) { e.exportTree = append(e.exportTree, ts...) }
 }
 
-// WithCommitChecks appends whole-tree validators, which report into d and must not modify cfg, after the built-in commit check.
-func WithCommitChecks(fns ...func(*schema.Config, *diag.Diagnostics)) Option {
+// Validator checks an assembled tree against a copy of the engine baseline, which is never nil, reports into d, and must not modify cfg.
+type Validator func(cfg, baseline *schema.Config, d *diag.Diagnostics)
+
+// WithCommitChecks appends whole-tree validators that run after the built-in commit check.
+func WithCommitChecks(fns ...Validator) Option {
 	for _, fn := range fns {
 		if fn == nil {
 			panic("confetti: WithCommitChecks with nil func")
@@ -69,11 +76,35 @@ func WithCommitChecks(fns ...func(*schema.Config, *diag.Diagnostics)) Option {
 	return func(e *Engine) { e.commitChecks = append(e.commitChecks, fns...) }
 }
 
-// New constructs an Engine for the given schema.
+// WithBaseline appends configuration text for objects the device provides but never prints, such as default VRFs or built-in classes.
+func WithBaseline(text string) Option {
+	// Terminate every fragment so appending cannot merge two lines.
+	return func(e *Engine) {
+		e.baselineText += strings.TrimRight(text, "\n") + "\n"
+	}
+}
+
+// New constructs an Engine for the given schema and panics when the baseline reports any diagnostic.
 func New(s *schema.Schema, opts ...Option) *Engine {
 	e := &Engine{schema: s}
 	for _, o := range opts {
 		o(e)
+	}
+	// An always-present baseline keeps every consumer free of a nil case.
+	e.baseline = schema.NewConfig(s)
+	// Parse after every option so import transforms apply regardless of option order.
+	if e.baselineText != "" {
+		d := diag.New()
+		e.baseline = e.importWith(
+			e.baselineText,
+			parse.Reject,
+			validate.FragmentCheck,
+			d,
+		)
+		// The baseline is authored platform data, so a Warning is an authoring error too.
+		if len(d.Items) > 0 {
+			panic("confetti: baseline does not import cleanly:\n" + d.String())
+		}
 	}
 	return e
 }
@@ -81,12 +112,22 @@ func New(s *schema.Schema, opts ...Option) *Engine {
 // Import transforms, parses, folds, and validates configuration text.
 func (e *Engine) Import(text string) (*schema.Config, *diag.Diagnostics) {
 	d := diag.New()
+	return e.importWith(text, e.unknown, validate.ImportCheck, d), d
+}
+
+// importWith runs the import pipeline with an explicit unknown-command policy and final check.
+func (e *Engine) importWith(
+	text string,
+	unknown parse.Unknown,
+	check func(*schema.Config, *diag.Diagnostics),
+	d *diag.Diagnostics,
+) *schema.Config {
 	text = applyTextOutsideBlocks(e.schema, e.importText, text)
-	cfg := parse.Parse(e.schema, text, e.unknown, d)
+	cfg := parse.Parse(e.schema, text, unknown, d)
 	parse.Fold(cfg, d)
 	transform.ApplyTree(e.importTree, cfg)
-	validate.ImportCheck(cfg, d)
-	return cfg, d
+	check(cfg, d)
+	return cfg
 }
 
 // applyTextOutsideBlocks protects spans found before or after text rules so a rule cannot alter a block body or remove its terminator.
@@ -124,11 +165,20 @@ func (e *Engine) CommitCheck(cfg *schema.Config) *diag.Diagnostics {
 }
 
 func (e *Engine) commitCheck(cfg *schema.Config, d *diag.Diagnostics) {
-	validate.CommitCheck(cfg, d)
+	validate.CommitCheck(cfg, e.baseline, d)
+	if len(e.commitChecks) == 0 {
+		return
+	}
+	base := e.baseline
+	// A tree from another schema cannot use this baseline; CommitCheck already reported the mismatch.
+	if base.Schema != cfg.Schema {
+		base = schema.NewConfig(cfg.Schema)
+	}
 	// Each validator collects into its own Diagnostics so it cannot drop what earlier checks recorded.
 	for _, fn := range e.commitChecks {
 		vd := diag.New()
-		fn(cfg, vd)
+		// Clone because the baseline is shared engine state that outlives the call.
+		fn(cfg, schema.CloneConfig(base), vd)
 		d.Merge(vd)
 	}
 }
@@ -148,7 +198,7 @@ func (e *Engine) Remediate(
 ) (*remediate.Result, *diag.Diagnostics) {
 	d := diag.New()
 	e.commitCheck(intended, d)
-	res, rd := remediate.Diff(running, intended, e.cycle)
+	res, rd := remediate.Diff(running, intended, e.diffOptions())
 	d.Merge(rd)
 	return res, d
 }
@@ -159,7 +209,7 @@ func (e *Engine) Rollback(
 ) (*remediate.Result, *diag.Diagnostics) {
 	d := diag.New()
 	e.commitCheck(running, d)
-	res, rd := remediate.Diff(intended, running, e.cycle)
+	res, rd := remediate.Diff(intended, running, e.diffOptions())
 	d.Merge(rd)
 	return res, d
 }
@@ -168,8 +218,13 @@ func (e *Engine) Rollback(
 func (e *Engine) Compare(
 	running, intended *schema.Config,
 ) (string, *diag.Diagnostics) {
-	res, d := remediate.Diff(running, intended, e.cycle)
+	res, d := remediate.Diff(running, intended, e.diffOptions())
 	return compare.Render(res.Changes), d
+}
+
+// diffOptions returns the Diff options this engine was built with.
+func (e *Engine) diffOptions() remediate.Options {
+	return remediate.Options{Cycle: e.cycle, Baseline: e.baseline}
 }
 
 // Merge combines fragments in order with per-call conflict resolution and no commit check.
