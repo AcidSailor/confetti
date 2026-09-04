@@ -223,18 +223,22 @@ func (dv *differ) deriveExclusionEdges() {
 // definedIdents returns one resource per label in a subtree, keyed by definition and full key value so identity is exact.
 func definedIdents(n *schema.Node) []resource {
 	var out []resource
-	n.Walk(func(x *schema.Node) {
-		def := x.Def
-		if def == nil {
-			return
-		}
-		// Definitions sharing a label are distinct objects, so keep the def.
-		for _, label := range def.Labels() {
-			out = append(out, resource{
-				label: label, def: def, key: ident.KeyValue(x),
-			})
-		}
-	})
+	n.Walk(func(x *schema.Node) { out = appendIdents(out, x) })
+	return out
+}
+
+// appendIdents appends one resource per label the node carries.
+func appendIdents(out []resource, x *schema.Node) []resource {
+	def := x.Def
+	if def == nil {
+		return out
+	}
+	// Definitions sharing a label are distinct objects, so keep the def.
+	for _, label := range def.Labels() {
+		out = append(out, resource{
+			label: label, def: def, key: ident.KeyValue(x),
+		})
+	}
 	return out
 }
 

@@ -53,15 +53,21 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 
 	// Baseline nodes are relation targets and name holders; their own relations are never checked.
 	if baseline != nil {
-		schema.Walk(baseline, func(n *schema.Node) {
-			c.baseline[n] = true
-			c.record(n, true)
-		})
+		schema.Walk(baseline, c.recordBaseline)
 	}
-	schema.Walk(cfg, func(n *schema.Node) { c.record(n, false) })
+	schema.Walk(cfg, c.recordConfig)
 	schema.Walk(cfg, c.checkRelations)
 	schema.Walk(cfg, c.checkExclusive)
 }
+
+// recordBaseline marks a device-provided node and indexes what it declares.
+func (c relationChecker) recordBaseline(n *schema.Node) {
+	c.baseline[n] = true
+	c.record(n, true)
+}
+
+// recordConfig indexes what one node of the caller's configuration declares.
+func (c relationChecker) recordConfig(n *schema.Node) { c.record(n, false) }
 
 // record indexes the labels, key values, and exclusive name one node declares.
 func (c relationChecker) record(n *schema.Node, fromBaseline bool) {

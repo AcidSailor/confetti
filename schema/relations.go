@@ -138,40 +138,59 @@ func (si spaceIndex) report(d *diag.Diagnostics) {
 
 // ValidateRelations reports relation defects that depend on multiple definitions.
 func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
-	kinds := map[string]bool{}
-	keysOf := map[string]map[string]bool{}
-	var spaces spaceIndex
-	s.Walk(func(n *Def) {
-		if n.KindName != "" {
-			kinds[n.KindName] = true
-		}
-		spaces.add(n)
-		for _, label := range n.Labels() {
-			if keysOf[label] == nil {
-				keysOf[label] = map[string]bool{}
-			}
-			for _, a := range n.KeyArgs {
-				keysOf[label][a] = true
-			}
-		}
-	})
-	s.Walk(func(n *Def) {
-		// A label cannot be both identity-bearing and non-identity metadata.
-		for _, name := range n.TagNames {
-			if kinds[name] {
-				d.Add(diag.Error,
-					"%s: Tag %q collides with a Kind of the same name;"+
-						" relations could resolve against either", n.Template, name)
-			}
-		}
-		for _, rel := range n.Relations {
-			n.checkRelation(rel, keysOf, d)
-		}
-		n.checkNamespace(spaces, d)
-		n.checkScope(d)
-	})
+	rc := &relationCheck{
+		kinds:  map[string]bool{},
+		keysOf: map[string]map[string]bool{},
+		d:      d,
+	}
+	// Every definition must be indexed before any definition is checked.
+	s.Walk(rc.index)
+	s.Walk(rc.check)
 	s.checkScopeAnchors(d)
-	spaces.report(d)
+	rc.spaces.report(d)
+}
+
+// relationCheck holds what ValidateRelations indexes before it checks anything.
+type relationCheck struct {
+	// kinds records every declared Kind name so a Tag cannot shadow one.
+	kinds map[string]bool
+	// keysOf records the key args each label is keyed by, for relation targets.
+	keysOf map[string]map[string]bool
+	spaces spaceIndex
+	d      *diag.Diagnostics
+}
+
+// index records the labels, key args, and exclusive space one definition declares.
+func (rc *relationCheck) index(n *Def) {
+	if n.KindName != "" {
+		rc.kinds[n.KindName] = true
+	}
+	rc.spaces.add(n)
+	for _, label := range n.Labels() {
+		if rc.keysOf[label] == nil {
+			rc.keysOf[label] = map[string]bool{}
+		}
+		for _, a := range n.KeyArgs {
+			rc.keysOf[label][a] = true
+		}
+	}
+}
+
+// check reports every defect one definition declares against the index.
+func (rc *relationCheck) check(n *Def) {
+	// A label cannot be both identity-bearing and non-identity metadata.
+	for _, name := range n.TagNames {
+		if rc.kinds[name] {
+			rc.d.Add(diag.Error,
+				"%s: Tag %q collides with a Kind of the same name;"+
+					" relations could resolve against either", n.Template, name)
+		}
+	}
+	for _, rel := range n.Relations {
+		n.checkRelation(rel, rc.keysOf, rc.d)
+	}
+	n.checkNamespace(rc.spaces, rc.d)
+	n.checkScope(rc.d)
 }
 
 // checkScope reports an exclusive name this definition declares but cannot hold.
