@@ -344,7 +344,7 @@ func appendHeld(
 	x *schema.Node,
 	d *diag.Diagnostics,
 ) []heldResource {
-	// A needless move edge is harmless, a missing one emits a plan the device rejects.
+	// A missing move edge emits a plan the device rejects; a needless one at worst closes a cycle.
 	name, ok, err := ident.ExclusiveName(x, ident.Device)
 	if err != nil {
 		d.AddAt(
