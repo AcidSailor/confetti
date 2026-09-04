@@ -934,3 +934,42 @@ func TestBaselineKeptInBothIsNotAnError(t *testing.T) {
 		Options{Baseline: mustParse(t, s, "feature bgp\n")})
 	assert.False(t, d.HasErrors(), d.String())
 }
+
+// aclNamespaceSchema returns two Kinds that share one device-side name space.
+func aclNamespaceSchema(namespace bool) *schema.Schema {
+	s := schema.New()
+	ip := s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-access-list").Tag("access-list").Key("name")
+	mac := s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("mac-access-list").Tag("access-list").Key("name")
+	if namespace {
+		ip.Namespace("access-list")
+		mac.Namespace("access-list")
+	}
+	return s
+}
+
+func TestNamespaceFreesNameAcrossKindsBeforeClaim(t *testing.T) {
+	out, d := orderedDiff(t, aclNamespaceSchema(true),
+		"ip access-list L\n",
+		"mac access-list L\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "no ip access-list L\nmac access-list L\n", out)
+}
+
+func TestNamespaceDistinctNamesKeepDeclarationOrder(t *testing.T) {
+	out, d := orderedDiff(t, aclNamespaceSchema(true),
+		"ip access-list L\n",
+		"mac access-list M\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "mac access-list M\nno ip access-list L\n", out)
+}
+
+func TestTagWithoutNamespaceDerivesNoMoveEdge(t *testing.T) {
+	// Tags classify; only Namespace opts a label into exclusivity.
+	out, d := orderedDiff(t, aclNamespaceSchema(false),
+		"ip access-list L\n",
+		"mac access-list L\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "mac access-list L\nno ip access-list L\n", out)
+}

@@ -191,6 +191,7 @@ type Def struct {
 	Relations        []Relation
 	TagNames         []string // Non-identity labels; see Tag.
 	UniqueArgs       []string
+	NamespaceLabel   string // The label that scopes the exclusive resource; see Namespace.
 	Idempotent       bool
 	Negate           NegateStrategy
 	Merge            MergeStrategy
@@ -596,6 +597,23 @@ func (n *Def) Unique(args ...string) *Def {
 		n.mustArg("Unique", arg)
 	}
 	n.UniqueArgs = args
+	return n
+}
+
+// ExclusiveArgs returns the args that identify this definition's exclusive resource: Unique args when set, else the key args.
+func (n *Def) ExclusiveArgs() []string {
+	if len(n.UniqueArgs) > 0 {
+		return n.UniqueArgs
+	}
+	return n.KeyArgs
+}
+
+// Namespace scopes the exclusive resource by label instead of Kind so definitions with distinct Kinds release a shared name before claiming it.
+func (n *Def) Namespace(label string) *Def {
+	if label == "" {
+		panic("schema: Namespace label must be non-empty: " + n.Template)
+	}
+	n.NamespaceLabel = label
 	return n
 }
 

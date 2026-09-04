@@ -346,10 +346,7 @@ func appendHeld(
 	if def == nil || len(def.KeyArgs) == 0 {
 		return out
 	}
-	args := def.KeyArgs
-	if u := def.UniqueArgs; len(u) > 0 {
-		args = u
-	}
+	args := def.ExclusiveArgs()
 	listIdx := -1
 	if def.ListSpec.Arg != "" {
 		listIdx = slices.Index(args, def.ListSpec.Arg)
@@ -400,9 +397,12 @@ func resolveListArg(
 	return items, true
 }
 
-// resourceFor returns a Kind-keyed resource or uses the definition when Kind is empty.
+// resourceFor keys the resource by Namespace, then Kind, and by the definition itself when both are empty.
 func resourceFor(def *schema.Def, key string) resource {
-	r := resource{label: def.KindName, key: key}
+	r := resource{label: def.NamespaceLabel, key: key}
+	if r.label == "" {
+		r.label = def.KindName
+	}
 	if r.label == "" {
 		r.def = def
 	}

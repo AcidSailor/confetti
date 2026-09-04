@@ -421,3 +421,83 @@ func TestCommitCheckBaselineSchemaMismatchIsError(t *testing.T) {
 	// The unusable baseline is dropped, but the tree is still checked.
 	assert.Contains(t, d.String(), `vlan "1" does not exist`)
 }
+
+func TestCommitCheckNamespaceAcrossKindsIsValid(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	// Namespace before Tag must validate the same as after it.
+	s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Namespace("acl").Kind("mac-acl").Tag("acl").Key("name")
+	d := checkText(t, s, "ip access-list A\nmac access-list B\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckNamespaceNotCarriedIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Key("name").Namespace("acl")
+	s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name").Namespace("acl")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`Namespace "acl" is not a Kind or Tag of this definition`,
+	)
+}
+
+func TestCommitCheckNamespaceOnKeylessDefIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac access-list").Card(schema.ZeroToOne).
+		Kind("mac-acl").Tag("acl").Namespace("acl")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `Namespace "acl" needs a Key`)
+}
+
+func TestCommitCheckNamespaceWithOneMemberIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `Namespace "acl" has no other keyed member`)
+}
+
+func TestCommitCheckNamespaceHalfDeclaredIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`mac access-list {{ name:word }}: carries label "acl" used as a Namespace but does not declare Namespace("acl")`,
+	)
+}
+
+func TestCommitCheckNamespaceArityMismatchIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac access-list {{ name:word }} {{ seq:uint }}").
+		Card(schema.ZeroToN).
+		Kind("mac-acl").
+		Tag("acl").
+		Key("name", "seq").
+		Namespace("acl")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`Namespace "acl" members disagree on exclusive arg count`,
+	)
+}

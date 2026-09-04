@@ -263,6 +263,22 @@ The explanations record constraints that tests do not show.
 - **Declare exclusivity with `Unique`.** `Requires` is
   existential only. Use `OrderHook` for sequencing preferences that have no
   existence semantics.
+- **Exclusive resources are scoped by `Namespace`, then `Kind`; tags never
+  scope them.** Three mechanisms resolve labels, and only the exclusive
+  resource ignores tags, because a tag that classifies keyed definitions
+  must not derive move edges between unrelated commands.
+
+  | Mechanism | Resolves on |
+  | --- | --- |
+  | `CommitCheck` record, `Ref`, `Requires` | `Labels()`: Kind and Tags |
+  | Reference ordering (`appendDefines`) | `Labels()`: Kind and Tags |
+  | Exclusive resources (`resourceFor`) | `Namespace`, else `Kind` |
+
+  Definitions with distinct Kinds that share one device-side name space
+  declare the same `Namespace(label)`. `ValidateRelations` rejects a
+  namespace that the definition does not carry, one without a `Key`, one
+  with a single keyed member, members that disagree on exclusive arg count,
+  and a keyed carrier of the label that does not declare the namespace.
 - **Sibling exclusions order removals before additions.** `Diff` does not check
   intermediate states, but the emitted operations must remain valid for the
   device. Each conflicting sibling is removed before its excluder is installed

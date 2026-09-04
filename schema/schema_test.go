@@ -1001,3 +1001,29 @@ func TestToggleGroupMergeKindTwicePanicsBothOrders(t *testing.T) {
 		b.MergeKeepFirst()
 	})
 }
+
+func TestNamespaceSetsLabelAndRejectsEmpty(t *testing.T) {
+	n := New().Node("ip access-list {{ name:word }}").Namespace("acl")
+	assert.Equal(t, "acl", n.NamespaceLabel)
+	assert.Panics(t, func() {
+		New().Node("ip access-list {{ name:word }}").Namespace("")
+	})
+}
+
+func TestNamespaceAndUniqueHoldInBothCallOrders(t *testing.T) {
+	first := New().Node("slot {{ id:word }} owner {{ own:word }}").
+		Key("id", "own").Unique("id").Namespace("slots")
+	second := New().Node("slot {{ id:word }} owner {{ own:word }}").
+		Namespace("slots").Unique("id").Key("id", "own")
+	for _, n := range []*Def{first, second} {
+		assert.Equal(t, []string{"id"}, n.UniqueArgs)
+		assert.Equal(t, "slots", n.NamespaceLabel)
+	}
+}
+
+func TestExclusiveArgsPreferUniqueOverKey(t *testing.T) {
+	n := New().Node("slot {{ id:word }} owner {{ own:word }}").Key("id", "own")
+	assert.Equal(t, []string{"id", "own"}, n.ExclusiveArgs())
+	n.Unique("id")
+	assert.Equal(t, []string{"id"}, n.ExclusiveArgs())
+}

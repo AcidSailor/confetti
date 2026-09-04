@@ -34,13 +34,26 @@ func (r Relation) IsExclusion() bool {
 	return r.Scope == ScopeSiblings && r.Want == Absent
 }
 
+// namespaceIndex records which labels scope exclusive resources and the arg count of the first declaring member.
+type namespaceIndex struct {
+	members map[string]int
+	arity   map[string]int
+}
+
 // ValidateRelations reports relation defects that depend on multiple definitions.
 func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 	kinds := map[string]bool{}
 	keysOf := map[string]map[string]bool{}
+	ns := namespaceIndex{members: map[string]int{}, arity: map[string]int{}}
 	s.Walk(func(n *Def) {
 		if n.KindName != "" {
 			kinds[n.KindName] = true
+		}
+		if label := n.NamespaceLabel; label != "" && len(n.KeyArgs) > 0 {
+			if ns.members[label] == 0 {
+				ns.arity[label] = len(n.ExclusiveArgs())
+			}
+			ns.members[label]++
 		}
 		for _, label := range n.Labels() {
 			if keysOf[label] == nil {
@@ -63,7 +76,49 @@ func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 		for _, rel := range n.Relations {
 			n.checkRelation(rel, keysOf, d)
 		}
+		n.checkNamespace(ns, d)
 	})
+}
+
+// checkNamespace reports a Namespace this definition cannot join or one it silently stays out of.
+func (n *Def) checkNamespace(ns namespaceIndex, d *diag.Diagnostics) {
+	if label := n.NamespaceLabel; label != "" {
+		switch {
+		case !n.HasLabel(label):
+			d.Add(diag.Error,
+				"%s: Namespace %q is not a Kind or Tag of this definition",
+				n.Template, label)
+		case len(n.KeyArgs) == 0:
+			d.Add(
+				diag.Error,
+				"%s: Namespace %q needs a Key to hold a name",
+				n.Template,
+				label,
+			)
+		case ns.members[label] < 2:
+			d.Add(diag.Error,
+				"%s: Namespace %q has no other keyed member", n.Template, label)
+		case ns.arity[label] != len(n.ExclusiveArgs()):
+			d.Add(diag.Error,
+				"%s: Namespace %q members disagree on exclusive arg count",
+				n.Template, label)
+		}
+	}
+	if len(n.KeyArgs) == 0 {
+		return
+	}
+	// A keyed carrier outside the namespace would never release the shared name.
+	for _, label := range n.Labels() {
+		if ns.members[label] > 0 && n.NamespaceLabel != label {
+			d.Add(
+				diag.Error,
+				"%s: carries label %q used as a Namespace but does not declare Namespace(%q)",
+				n.Template,
+				label,
+				label,
+			)
+		}
+	}
 }
 
 // checkRelation reports one relation whose label or key match cannot resolve against any definition.

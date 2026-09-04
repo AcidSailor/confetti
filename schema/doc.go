@@ -9,7 +9,8 @@
 // therefore affects schema behavior.
 //
 // Relations target labels: a definition's Kind name or Tags. Ref, Requires,
-// and ExcludeTag build the supported relations. ValidateRelations checks
+// and ExcludeTag build the supported relations. Unique and Namespace scope
+// the exclusive resource a keyed definition holds. ValidateRelations checks
 // constraints that depend on multiple definitions.
 //
 // Remediation changes contain read-only references to caller-owned trees.
