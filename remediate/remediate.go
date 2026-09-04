@@ -13,6 +13,13 @@ const (
 	Break              // Drop the greatest-keyed edge in the cycle, report a Warning, continue.
 )
 
+// Options configures Diff; the zero value aborts on cycles and has no baseline.
+type Options struct {
+	Cycle Cycle
+	// Baseline holds device-provided objects that satisfy Requires without appearing in either configuration.
+	Baseline *schema.Config
+}
+
 // Result contains an operation-tagged remediation tree and its change log in emission order.
 type Result struct {
 	Tree    *schema.Config
@@ -37,7 +44,7 @@ func (r *Result) Empty() bool {
 // Diff returns the remediation from running to intended without modifying either input; both trees must use the same schema.
 func Diff(
 	running, intended *schema.Config,
-	cycle Cycle,
+	o Options,
 ) (*Result, *diag.Diagnostics) {
 	d := diag.New()
 	out := schema.NewConfig(intended.Schema)
@@ -48,10 +55,14 @@ func Diff(
 		)
 		return &Result{Tree: out}, d
 	}
+	if o.Baseline != nil && o.Baseline.Schema != intended.Schema {
+		d.Add(diag.Error, "remediate: baseline uses a different schema")
+		return &Result{Tree: out}, d
+	}
 	dv := &differ{
-		running: running, intended: intended,
+		running: running, intended: intended, baseline: o.Baseline,
 		order: buildOrderIndex(intended.Schema),
-		cycle: cycle, d: d,
+		cycle: o.Cycle, d: d,
 	}
 	dv.collect(running.Root, intended.Root, nil, nil)
 	dv.buildGraph()

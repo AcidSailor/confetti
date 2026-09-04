@@ -428,12 +428,19 @@ func labelResources(c *schema.Config) map[resource]bool {
 	return set
 }
 
-// survivingLabels returns labels provided by the same definition and key in both configurations.
-func survivingLabels(running, intended *schema.Config) map[string]bool {
+// survivingLabels returns labels provided by the same definition and key in both configurations or by the baseline.
+func survivingLabels(
+	running, intended, baseline *schema.Config,
+) map[string]bool {
 	run, want := labelResources(running), labelResources(intended)
 	out := map[string]bool{}
 	for r := range run {
 		if want[r] {
+			out[r.label] = true
+		}
+	}
+	if baseline != nil {
+		for r := range labelResources(baseline) {
 			out[r.label] = true
 		}
 	}
@@ -443,7 +450,7 @@ func survivingLabels(running, intended *schema.Config) map[string]bool {
 // deriveRequireEdges orders Requires users after prerequisite adds and before prerequisite removals when no instance survives.
 func (dv *differ) deriveRequireEdges() {
 	ops, d := dv.ops, dv.d
-	survivors := survivingLabels(dv.running, dv.intended)
+	survivors := survivingLabels(dv.running, dv.intended, dv.baseline)
 
 	// The order index already contains every reachable definition.
 	declared := map[string]bool{}

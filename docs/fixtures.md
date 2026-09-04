@@ -40,6 +40,9 @@ Vendor-grounded constructs and why they exist:
   add/remove delta forms.
 - Import drop rules (`!` comments, `version`, `exit`, config preamble)
   mirror real `show running-config` noise.
+- `Baseline()` declares VLAN 1 and the default VRF. NX-OS provides both and
+  prints neither, so `switchport access vlan 1` and `vrf member default`
+  resolve only through the engine baseline.
 
 Unverified / docs-only (re-verify on a lab device if it ever matters):
 

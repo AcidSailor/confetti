@@ -40,12 +40,12 @@ type op struct {
 
 // differ carries one Diff invocation's shared state through collect, derive, and schedule.
 type differ struct {
-	running, intended *schema.Config
-	order             map[*schema.Def]int
-	cycle             Cycle
-	d                 *diag.Diagnostics
-	ops               []op
-	g                 *graph.Graph
+	running, intended, baseline *schema.Config
+	order                       map[*schema.Def]int
+	cycle                       Cycle
+	d                           *diag.Diagnostics
+	ops                         []op
+	g                           *graph.Graph
 	// why stores the first reason for each edge for Break cycle warnings.
 	why map[[2]int]string
 }

@@ -35,7 +35,7 @@ func TestChangesPairSourceNodes(t *testing.T) {
 		"vlan 99\n"+
 		"interface Ethernet1/1\n"+
 		"  description B\n")
-	res, d := Diff(running, intended, Break)
+	res, d := Diff(running, intended, Options{Cycle: Break})
 	require.False(t, d.HasErrors(), d.String())
 
 	// vlan 10 and the interface header are kept: no Change for either.
@@ -78,7 +78,7 @@ func TestChangesOrderMatchesArtifact(t *testing.T) {
 	s := testSchema()
 	running := mustParse(t, s,
 		"vlan 50\ninterface Ethernet1/1\n  switchport access vlan 50\n")
-	res, d := Diff(running, mustParse(t, s, ""), Break)
+	res, d := Diff(running, mustParse(t, s, ""), Options{Cycle: Break})
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, res.Changes, 2)
 	assert.Equal(t, graph.Remove, res.Changes[0].Action)
@@ -90,7 +90,7 @@ func TestChangesOrderMatchesArtifact(t *testing.T) {
 func TestChangesSectionAddIsOneChange(t *testing.T) {
 	s := testSchema()
 	intended := mustParse(t, s, "interface Ethernet1/1\n  description A\n")
-	res, d := Diff(mustParse(t, s, ""), intended, Break)
+	res, d := Diff(mustParse(t, s, ""), intended, Options{Cycle: Break})
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, res.Changes, 1)
 	c := res.Changes[0]
@@ -110,7 +110,7 @@ func TestChangesReplaceIsOneEntry(t *testing.T) {
 		Card(schema.ZeroToN).Kind("vlan").Key("id")
 	running := mustParse(t, s, "vlan 10 state enable\n")
 	intended := mustParse(t, s, "vlan 10 state disable\n")
-	res, d := Diff(running, intended, Break)
+	res, d := Diff(running, intended, Options{Cycle: Break})
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, res.Changes, 1)
 	c := res.Changes[0]
@@ -125,7 +125,7 @@ func TestChangesToggleFlipCarriesBothSides(t *testing.T) {
 	s := testSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n")
-	res, d := Diff(running, intended, Break)
+	res, d := Diff(running, intended, Options{Cycle: Break})
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, res.Changes, 1)
 	c := res.Changes[0]
@@ -139,7 +139,7 @@ func TestChangesToggleFlipCarriesBothSides(t *testing.T) {
 	// Pair the reverse direction symmetrically.
 	running2 := mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n")
 	intended2 := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
-	res2, d2 := Diff(running2, intended2, Break)
+	res2, d2 := Diff(running2, intended2, Options{Cycle: Break})
 	require.False(t, d2.HasErrors(), d2.String())
 	require.Len(t, res2.Changes, 1)
 	assert.Same(
@@ -162,7 +162,7 @@ func TestChangesStrictCycleEmpty(t *testing.T) {
 	res, d := Diff(
 		mustParse(t, s, ""),
 		mustParse(t, s, "alpha one\nbeta two\n"),
-		Abort,
+		Options{Cycle: Abort},
 	)
 	require.True(t, d.HasErrors())
 	assert.Empty(t, res.Changes)

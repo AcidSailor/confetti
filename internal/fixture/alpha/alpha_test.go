@@ -261,3 +261,19 @@ func TestAlphaTrunkContinuationEndToEnd(t *testing.T) {
 	require.False(t, rd.HasErrors(), rd.String())
 	assert.True(t, res.Empty())
 }
+
+func TestAlphaBaselineResolvesBuiltInsWithoutPlanningThem(t *testing.T) {
+	e := Engine()
+	in := "interface Ethernet1/1\n" +
+		"  switchport access vlan 1\n" +
+		"  vrf member default\n"
+	cfg, d := e.Import(in)
+	require.False(t, d.HasErrors(), d.String())
+	require.False(t, e.CommitCheck(cfg).HasErrors())
+	empty, d := e.Import("")
+	require.False(t, d.HasErrors(), d.String())
+	res, rd := e.Remediate(empty, cfg)
+	require.False(t, rd.HasErrors(), rd.String())
+	out, _ := e.Render(res.Tree)
+	assert.Equal(t, in, out)
+}

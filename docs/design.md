@@ -72,10 +72,12 @@ Layering rules:
 ## Pipelines
 
 ```
+New:       baseline text → Import pipeline with parse.Reject → panic on Error
 Import:    text transforms (outside block spans) → parse → fold
            (Respell → ListContinues → Members) → user tree transforms
            → ImportCheck
-CommitCheck: relations (refs, Requires, exclusions) over an assembled tree
+CommitCheck: relations (refs, Requires, exclusions) over an assembled tree,
+           with baseline objects as extra targets
            → custom validators (WithCommitChecks)
 Render:    user tree transforms → render → text transforms (outside blocks)
 Remediate: CommitCheck(intended) + Diff(running, intended)
@@ -149,6 +151,16 @@ The explanations record constraints that tests do not show.
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
   `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
   platform-independent.
+- **Baseline objects are relation targets only.** `WithBaseline` declares
+  objects the device provides but never prints. The engine imports the text
+  once in `New`, after every option, so import transforms apply in any option
+  order. It uses `parse.Reject` regardless of `WithUnknown` and panics on an
+  Error because the baseline is authored platform data. `CommitCheck` seeds
+  its index from the baseline before it walks the tree and never checks the
+  baseline's own relations. `Diff` counts baseline labels as `Requires`
+  survivors so `Compare`, `Remediate`, and `Rollback` agree with the commit
+  check. Baseline nodes never render, merge, or enter a plan. A baseline
+  extends the target set; it does not relax the check for other values.
 - **Whole-tree validators belong to `Engine`.** `OrderHook` and `MergeFunc`
   are schema behavior. Validators are Engine composition, so Engines that
   share a schema can use different validator sets. `WithCommitChecks` appends

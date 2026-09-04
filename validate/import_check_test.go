@@ -225,7 +225,7 @@ func TestValidateSkipsNilDefNodes(t *testing.T) {
 	cfg.Root.AddChild(schema.NewNode("bogus unmatched line"))
 	d := diag.New()
 	ImportCheck(cfg, d)
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 

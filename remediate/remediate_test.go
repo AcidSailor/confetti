@@ -19,7 +19,7 @@ func remediation(t *testing.T, running, intended string) (string, *Result) {
 	res, d := Diff(
 		mustParse(t, s, running),
 		mustParse(t, s, intended),
-		Break,
+		Options{Cycle: Break},
 	)
 	require.False(t, d.HasErrors(), d.String())
 	return render.Render(res.Tree), res
@@ -124,7 +124,7 @@ func TestDiffDoesNotMutateInputs(t *testing.T) { // aliasing guard
 	s := testSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  description A\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  description B\n")
-	_, _ = Diff(running, intended, Break)
+	_, _ = Diff(running, intended, Options{Cycle: Break})
 	assert.Equal(
 		t,
 		"interface Ethernet1/1\n  description A\n",
@@ -189,14 +189,14 @@ func TestDiffUnmatchedNodeDefensive(t *testing.T) { // E11
 	// Import never produces def==nil nodes, so the tree is hand-built.
 	running := schema.NewConfig(s)
 	running.Root.AddChild(schema.NewNode("flux-capacitor on"))
-	res, d := Diff(running, schema.NewConfig(s), Break)
+	res, d := Diff(running, schema.NewConfig(s), Options{Cycle: Break})
 	assert.Equal(t, "no flux-capacitor on\n", render.Render(res.Tree))
 	assert.Contains(t, d.String(), "negating unmatched line")
 
 	// intended-only unmatched node => OpAdd verbatim, no warning.
 	intended := schema.NewConfig(s)
 	intended.Root.AddChild(schema.NewNode("flux-capacitor on"))
-	res2, d2 := Diff(schema.NewConfig(s), intended, Break)
+	res2, d2 := Diff(schema.NewConfig(s), intended, Options{Cycle: Break})
 	assert.Equal(t, "flux-capacitor on\n", render.Render(res2.Tree))
 	assert.NotContains(t, d2.String(), "negating unmatched line")
 }
@@ -273,7 +273,7 @@ func TestDiffSymmetryOrdering(t *testing.T) {
 	b := mustParse(t, s,
 		"vlan 20\ninterface Ethernet1/1\n  switchport access vlan 20\n")
 
-	fwd, d := Diff(a, b, Abort)
+	fwd, d := Diff(a, b, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(
 		t,
@@ -281,7 +281,7 @@ func TestDiffSymmetryOrdering(t *testing.T) {
 		render.Render(fwd.Tree),
 	)
 
-	rev, d2 := Diff(b, a, Abort)
+	rev, d2 := Diff(b, a, Options{Cycle: Abort})
 	require.False(t, d2.HasErrors(), d2.String())
 	assert.Equal(
 		t,
@@ -305,7 +305,7 @@ func TestDiffSectionHeaderFieldChange(t *testing.T) {
 	s := headerFieldSchema()
 	running := mustParse(t, s, "vlan 10 name FOO\n")
 	intended := mustParse(t, s, "vlan 10 name BAR\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.False(t, res.Empty())
 	assert.Equal(t, "vlan 10 name BAR\n", render.Render(res.Tree))
@@ -325,7 +325,7 @@ func TestDiffSectionHeaderFieldChangeWithChildChange(t *testing.T) {
 	s := headerFieldSchema()
 	running := mustParse(t, s, "vlan 10 name FOO\n  shutdown\n")
 	intended := mustParse(t, s, "vlan 10 name BAR\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t,
 		"vlan 10 name BAR\nvlan 10 name BAR\n  no shutdown\n",
@@ -337,7 +337,7 @@ func TestDiffSectionHeaderUnchangedNoModify(t *testing.T) {
 	s := headerFieldSchema()
 	running := mustParse(t, s, "vlan 10 name FOO\n  shutdown\n")
 	intended := mustParse(t, s, "vlan 10 name FOO\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "vlan 10 name FOO\n  no shutdown\n",
 		render.Render(res.Tree))
@@ -352,7 +352,7 @@ func TestDiffDuplicateRunningIdentWarns(t *testing.T) {
 	s := testSchema()
 	running := mustParse(t, s, "vlan 10\nvlan 10\n")
 	intended := mustParse(t, s, "vlan 10\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.True(t, res.Empty()) // surfaced, not remediated
 	assert.Contains(t, d.String(), "duplicate")
@@ -365,7 +365,7 @@ func TestDiffDuplicateIdempotentRunningValueWarns(t *testing.T) {
 	running := mustParse(t, s,
 		"interface Ethernet1/1\n  description A\n  description B\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  description A\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.True(t, res.Empty())
 	assert.Contains(t, d.String(), "duplicate")
@@ -388,7 +388,7 @@ func TestDiffSchemaMismatch(t *testing.T) {
 		testSchema(),
 		"vlan 10\n",
 	) // different *Schema instance
-	res, d := Diff(running, intended, Break)
+	res, d := Diff(running, intended, Options{Cycle: Break})
 	assert.True(t, d.HasErrors())
 	assert.True(t, res.Empty())
 }
@@ -407,7 +407,7 @@ func TestDiffBlockBodyChangeIsModify(t *testing.T) {
 	s := bannerSchema()
 	run := mustParse(t, s, "banner motd ^\nold body\n^\n")
 	intd := mustParse(t, s, "banner motd ^\nnew body\n^\n")
-	res, d := Diff(run, intd, Break)
+	res, d := Diff(run, intd, Options{Cycle: Break})
 	require.False(t, d.HasErrors())
 	assert.Equal(t, "banner motd ^\nnew body\n^\n", render.Render(res.Tree))
 	assert.Equal(t, schema.OpModify, res.Tree.Root.Children[0].Op)
@@ -417,7 +417,7 @@ func TestDiffBlockIdenticalIsNoop(t *testing.T) {
 	s := bannerSchema()
 	run := mustParse(t, s, "banner motd ^\nsame\n^\n")
 	intd := mustParse(t, s, "banner motd ^\nsame\n^\n")
-	res, _ := Diff(run, intd, Break)
+	res, _ := Diff(run, intd, Options{Cycle: Break})
 	assert.True(t, res.Empty())
 }
 
@@ -426,7 +426,7 @@ func TestDiffBlockAddAndRemove(t *testing.T) {
 	res, _ := Diff(
 		mustParse(t, s, ""),
 		mustParse(t, s, "banner motd ^\nhi\n^\n"),
-		Break,
+		Options{Cycle: Break},
 	)
 	assert.Equal(
 		t,
@@ -437,7 +437,7 @@ func TestDiffBlockAddAndRemove(t *testing.T) {
 	res2, _ := Diff(
 		mustParse(t, s, "banner motd ^\nhi\n^\n"),
 		mustParse(t, s, ""),
-		Break,
+		Options{Cycle: Break},
 	)
 	assert.Equal(
 		t,
@@ -460,7 +460,7 @@ func TestDiffKeyedLeafIdempotentIsModify(t *testing.T) {
 	s := keyedLeafSchema(true)
 	run := mustParse(t, s, "ip route 10.0.0.0/8 via 1.1.1.1\n")
 	intd := mustParse(t, s, "ip route 10.0.0.0/8 via 2.2.2.2\n")
-	res, d := Diff(run, intd, Break)
+	res, d := Diff(run, intd, Options{Cycle: Break})
 	require.False(t, d.HasErrors())
 	assert.Equal(
 		t,
@@ -474,7 +474,7 @@ func TestDiffKeyedLeafReplacePair(t *testing.T) {
 	s := keyedLeafSchema(false)
 	run := mustParse(t, s, "ip route 10.0.0.0/8 via 1.1.1.1\n")
 	intd := mustParse(t, s, "ip route 10.0.0.0/8 via 2.2.2.2\n")
-	res, d := Diff(run, intd, Break)
+	res, d := Diff(run, intd, Options{Cycle: Break})
 	require.False(t, d.HasErrors())
 	// negate-first: never two values for one key on-device
 	assert.Equal(t,
@@ -490,7 +490,7 @@ func TestDiffKeyedLeafUnchangedIsNoop(t *testing.T) {
 	s := keyedLeafSchema(false)
 	run := mustParse(t, s, "ip route 10.0.0.0/8 via 1.1.1.1\n")
 	intd := mustParse(t, s, "ip route 10.0.0.0/8 via 1.1.1.1\n")
-	res, _ := Diff(run, intd, Break)
+	res, _ := Diff(run, intd, Options{Cycle: Break})
 	assert.True(t, res.Empty())
 }
 
@@ -504,7 +504,7 @@ func TestDiffKeyedLeafSymmetry(t *testing.T) {
 	back, _ := Diff(
 		mustParse(t, s, intd),
 		mustParse(t, s, run),
-		Break,
+		Options{Cycle: Break},
 	)
 	assert.Equal(
 		t,
@@ -516,7 +516,7 @@ func TestDiffKeyedLeafSymmetry(t *testing.T) {
 	back2, _ := Diff(
 		mustParse(t, s2, intd),
 		mustParse(t, s2, run),
-		Break,
+		Options{Cycle: Break},
 	)
 	assert.Equal(t,
 		"no ip route 10.0.0.0/8 via 2.2.2.2\nip route 10.0.0.0/8 via 1.1.1.1\n",
@@ -533,7 +533,7 @@ func TestDiffKeyedCrossDefPairs(t *testing.T) {
 		Card(schema.ZeroToN).Kind("vlan").Key("id").MarkIdempotent()
 	run := mustParse(t, s, "vlan 10 state enable\n")
 	intd := mustParse(t, s, "vlan 10 name CORE state enable\n")
-	res, d := Diff(run, intd, Break)
+	res, d := Diff(run, intd, Options{Cycle: Break})
 	require.False(t, d.HasErrors())
 	out := render.Render(res.Tree)
 	assert.Equal(t, "vlan 10 name CORE state enable\n", out)
@@ -548,7 +548,7 @@ func TestDiffFullLineBlockBodyIsReplacePair(t *testing.T) {
 		BlockUntil("quit")
 	run := mustParse(t, s, "certificate ca1\nbodyA\nquit\n")
 	intd := mustParse(t, s, "certificate ca1\nbodyB\nquit\n")
-	res, d := Diff(run, intd, Break)
+	res, d := Diff(run, intd, Options{Cycle: Break})
 	require.False(t, d.HasErrors())
 	assert.Equal(t,
 		"no certificate ca1\ncertificate ca1\nbodyB\nquit\n",
@@ -562,7 +562,7 @@ func TestDiffKeyedBlockBodyChange(t *testing.T) {
 		Card(schema.ZeroToN).Key("name").BlockUntil("quit")
 	run := mustParse(t, s, "certificate ca1\nbodyA\nquit\n")
 	intd := mustParse(t, s, "certificate ca1\nbodyB\nquit\n")
-	res, d := Diff(run, intd, Break)
+	res, d := Diff(run, intd, Options{Cycle: Break})
 	require.False(t, d.HasErrors())
 	assert.False(t, res.Empty())
 	assert.Equal(t,
@@ -590,7 +590,7 @@ func TestDiffReplacesKeyedSectionWhenDefChanges(t *testing.T) {
 	b.Child("b-child").Card(schema.ZeroToOne)
 	running := mustParse(t, s, "mode 1 a\n  a-child\n")
 	intended := mustParse(t, s, "mode 1 b\n  b-child\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(
 		t,
@@ -614,7 +614,7 @@ func TestToggleFlipOldRefOrdersBeforeTargetRemoval(t *testing.T) {
 	running := mustParse(t, s,
 		"targets\n  target 1\nfeatures\n  feature on\n    use 1\n")
 	intended := mustParse(t, s, "targets\nfeatures\n  feature off\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Less(
@@ -633,7 +633,7 @@ func TestToggleFlipOldRequiresOrdersBeforeTargetRemoval(t *testing.T) {
 	features.Child("feature off").Card(schema.ZeroToOne).Toggles(on)
 	running := mustParse(t, s, "targets\n  target\nfeatures\n  feature on\n")
 	intended := mustParse(t, s, "targets\nfeatures\n  feature off\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Less(
@@ -662,7 +662,7 @@ func TestToggleFlipFreesOldExclusiveResourceBeforeClaim(t *testing.T) {
 		s,
 		"destination\n  claim 1\nfeatures\n  feature off\n",
 	)
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Less(
@@ -684,7 +684,7 @@ func TestDiffUndeclaredTogglePairEmitsBoth(t *testing.T) {
 	iface.Child("no shutdown").Card(schema.ZeroToOne)
 	running := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Equal(t, 2, strings.Count(out, "no shutdown"))
@@ -706,7 +706,7 @@ func TestDiffToggleGroupThreeWayFlip(t *testing.T) {
 	s := duplexSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  duplex full\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  duplex half\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Equal(t, "interface Ethernet1/1\n  duplex half\n", out)
@@ -723,7 +723,7 @@ func TestDiffToggleGroupThreeWayReverse(t *testing.T) {
 	s := duplexSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  duplex half\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  duplex full\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Equal(t, "interface Ethernet1/1\n  duplex full\n", out)
@@ -736,7 +736,7 @@ func TestDiffToggleGroupIllegalDoubleRunning(t *testing.T) {
 	running := mustParse(t, s,
 		"interface Ethernet1/1\n  duplex auto\n  duplex full\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  duplex half\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Contains(t, out, "duplex half")
@@ -765,7 +765,7 @@ func TestDiffCustomNegationWord(t *testing.T) {
 	running := mustParse(t, s,
 		"interface Ethernet1/1\n  description X\n  undo logging\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Contains(t, out, "undo description X") // prepend form
@@ -793,7 +793,7 @@ func TestDiffProtectedSectionRefusesBothPolicies(t *testing.T) {
 		"router bgp 65000\n  neighbor 10.0.0.1 remote-as 65001\nlogging on\n")
 	intended := mustParse(t, s, "logging on\n")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "refusing to delete protected")
 		out := render.Render(res.Tree)
@@ -809,7 +809,7 @@ func TestDiffProtectedIdentityChangeRefuses(t *testing.T) {
 	s := protectedSchema()
 	running := mustParse(t, s, "router bgp 65000\n")
 	intended := mustParse(t, s, "router bgp 65001\n")
-	_, d := Diff(running, intended, Break)
+	_, d := Diff(running, intended, Options{Cycle: Break})
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "refusing to delete protected")
 }
@@ -820,7 +820,7 @@ func TestDiffProtectedToggleFlipIsNotDeletion(t *testing.T) {
 	s := protectedSchema()
 	running := mustParse(t, s, "shutdown\n")
 	intended := mustParse(t, s, "no shutdown\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "no shutdown\n", render.Render(res.Tree))
 }
@@ -835,7 +835,7 @@ func TestDiffProtectedReplacePairRefuses(t *testing.T) {
 	running := mustParse(t, s, "neighbor 10.0.0.1 remote-as 65001\n")
 	intended := mustParse(t, s, "neighbor 10.0.0.1 remote-as 65002\n")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "refusing to replace protected")
 		out := render.Render(res.Tree)
@@ -855,7 +855,7 @@ func TestDiffProtectedDescendantInRemovedSectionRefuses(t *testing.T) {
 	running := mustParse(t, s, "interface Ethernet1/1\n  critical monitor\n")
 	intended := mustParse(t, s, "")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "refusing to delete protected")
 		out := render.Render(res.Tree)
@@ -873,7 +873,7 @@ func TestDiffProtectedModifyAllowed(t *testing.T) {
 		Card(schema.ZeroToOne).MarkIdempotent().Protect()
 	running := mustParse(t, s, "interface Ethernet1/1\n  description A\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  description B\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Contains(t, render.Render(res.Tree), "description B")
 }
@@ -889,7 +889,7 @@ func TestDiffProtectedReplaceKindUnifiedAsymmetric(t *testing.T) {
 	running := mustParse(t, s, "neighbor 10.0.0.1 remote-as 65001\n")
 	intended := mustParse(t, s, "neighbor 10.0.0.1 description foo\n")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "refusing to replace protected")
 		out := render.Render(res.Tree)
@@ -907,7 +907,7 @@ func TestDiffProtectedDescendantInToggleFlipRefuses(t *testing.T) {
 	running := mustParse(t, s, "feature on\n  critical monitor\n")
 	intended := mustParse(t, s, "feature off\n")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "refusing to delete protected")
 		out := render.Render(res.Tree)
@@ -921,10 +921,10 @@ func TestDiffProtectedRollbackDirectionRefuses(t *testing.T) {
 	running := mustParse(t, s, "logging on\n")
 	intended := mustParse(t, s, "router bgp 65000\nlogging on\n")
 	// Forward adds the protected section (fine)…
-	_, d := Diff(running, intended, Abort)
+	_, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	// …its rollback (reversed args) deletes it: refused.
-	_, rd := Diff(intended, running, Abort)
+	_, rd := Diff(intended, running, Options{Cycle: Abort})
 	assert.True(t, rd.HasErrors())
 	assert.Contains(t, rd.String(), "refusing to delete protected")
 }
@@ -949,7 +949,7 @@ func TestDiffEmptyOnRemoveSectionNegatesChildren(t *testing.T) { // E7c
 	s := emptyOnRemoveSchema()
 	running := mustParse(t, s, "vlan database\n  vlan 10\n  vlan 20\n")
 	intended := mustParse(t, s, "")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Equal(t, "vlan database\n  no vlan 20\n  no vlan 10\n", out)
@@ -961,7 +961,7 @@ func TestDiffEmptyOnRemoveEmptySectionIsNoop(t *testing.T) {
 	s := emptyOnRemoveSchema()
 	running := mustParse(t, s, "vlan database\n")
 	intended := mustParse(t, s, "")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.True(t, res.Empty())
 	assert.Equal(t, "", render.Render(res.Tree))
@@ -981,7 +981,7 @@ func TestDiffEmptyOnRemoveProtectedChildPartial(t *testing.T) {
 		"vlan database\n  vlan 10\n  critical monitor\n")
 	intended := mustParse(t, s, "")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "refusing to delete protected")
 		out := render.Render(res.Tree)
@@ -1004,7 +1004,7 @@ func TestDiffEmptyOnRemoveProtectedDescendantRefuses(t *testing.T) {
 		"vlan database\n  vlan 10\n  group 5\n    critical monitor\n")
 	intended := mustParse(t, s, "")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "refusing to delete protected")
 		assert.Contains(t, d.String(), "critical monitor")
@@ -1025,7 +1025,7 @@ func TestDiffEmptyOnRemoveNestedSectionHeaderNegated(t *testing.T) {
 	grp.Child("member {{ id:vlan }}").Card(schema.ZeroToN).Key("id")
 	running := mustParse(t, s, "vlan database\n  group 5\n    member 1\n")
 	intended := mustParse(t, s, "")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "vlan database\n  no group 5\n",
 		render.Render(res.Tree))
@@ -1036,7 +1036,7 @@ func TestDiffEmptyOnRemoveChangesPerChild(t *testing.T) {
 	s := emptyOnRemoveSchema()
 	running := mustParse(t, s, "vlan database\n  vlan 10\n  vlan 20\n")
 	intended := mustParse(t, s, "")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, res.Changes, 2)
 	for _, c := range res.Changes {
@@ -1059,7 +1059,7 @@ func TestDiffEmptyOnRemoveRefOrderingAcrossSections(t *testing.T) {
 		"vlan database\n  vlan 10\ninterface Ethernet1/1\n  switchport access vlan 10\n",
 	)
 	intended := mustParse(t, s, "interface Ethernet1/1\n")
-	res, d := Diff(running, intended, Abort)
+	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Less(t,
@@ -1080,7 +1080,7 @@ func TestDiffEmptyOnRemoveReplacePairRefuses(t *testing.T) {
 	running := mustParse(t, s, "vlan database 5\n  member 1\n")
 	intended := mustParse(t, s, "vlan database 5 disabled\n")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "no removal form")
 		out := render.Render(res.Tree)
@@ -1100,7 +1100,7 @@ func TestDiffEmptyOnRemoveChildlessDefErrors(t *testing.T) {
 	running := mustParse(t, s, "feature lldp\n")
 	intended := mustParse(t, s, "")
 	for _, cycle := range []Cycle{Abort, Break} {
-		res, d := Diff(running, intended, cycle)
+		res, d := Diff(running, intended, Options{Cycle: cycle})
 		assert.True(t, d.HasErrors(), "cycle=%v must Error", cycle)
 		assert.Contains(t, d.String(), "cannot converge")
 		assert.Equal(t, "", render.Render(res.Tree))

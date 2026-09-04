@@ -32,7 +32,7 @@ func TestCommitCheckDanglingRef(t *testing.T) {
 		parse.Reject,
 		d,
 	)
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), `vlan "10" does not exist`)
 }
@@ -45,7 +45,7 @@ func TestCommitCheckResolvedRef(t *testing.T) {
 		parse.Reject,
 		d,
 	)
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -71,7 +71,7 @@ func TestCommitCheckCollectsMultiple(t *testing.T) {
 		"router bgp 65000\n  neighbor 1.1.1.1 route-map MISSING in\n"
 	cfg := parse.Parse(multiRefSchema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.Contains(t, d.String(), `vlan "10" does not exist`)
 	assert.Contains(t, d.String(), `route-map "MISSING" does not exist`)
 }
@@ -83,7 +83,7 @@ func TestCommitCheckMultiKeyRefResolves(t *testing.T) {
 		"router bgp 65000\n  neighbor 1.1.1.1 route-map FOO in\n"
 	cfg := parse.Parse(multiRefSchema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -98,7 +98,7 @@ func TestCommitCheckMalformedListReportsInvalidList(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(s, "allowed vlan 10,,20\n", parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	require.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), `invalid vlans "10,,20"`)
 	assert.NotContains(t, d.String(), "does not exist")
@@ -119,7 +119,7 @@ func TestCommitCheckRequiresMissing(t *testing.T) {
 		requiresSchema(), "router bgp 65000\n", parse.Reject, d,
 	)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	require.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), `requires a feature-bgp instance`)
 	assert.Equal(t, 1, d.Items[0].Line, "points at the requiring line")
@@ -134,7 +134,7 @@ func TestCommitCheckRequiresSatisfied(t *testing.T) {
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -143,7 +143,7 @@ func TestCommitCheckRequiresAbsentBothIsFine(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(requiresSchema(), "", parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -170,7 +170,7 @@ func TestCommitCheckExcludeTagConflict(t *testing.T) {
 		"  switchport access vlan 20\n  ip address 10.0.0.1/24\n"
 	cfg := parse.Parse(l2l3Schema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	require.True(t, d.HasErrors())
 	assert.Contains(
 		t, d.String(), `mutually exclusive with "switchport" (line 2)`,
@@ -184,7 +184,7 @@ func TestCommitCheckExcludeTagSameSetCoexists(t *testing.T) {
 	in := "interface Ethernet1/1\n  switchport\n  switchport access vlan 20\n"
 	cfg := parse.Parse(l2l3Schema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -194,7 +194,7 @@ func TestCommitCheckExcludeTagIgnoresGrandchildren(t *testing.T) {
 		"  hsrp 1\n    ip 10.0.0.254\n"
 	cfg := parse.Parse(l2l3Schema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -204,7 +204,7 @@ func TestCommitCheckExcludeTagScopedToParentInstance(t *testing.T) {
 		"interface Ethernet1/2\n  ip address 10.0.0.1/24\n"
 	cfg := parse.Parse(l2l3Schema(), in, parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -219,7 +219,7 @@ func TestCommitCheckRequiresSatisfiedByTag(t *testing.T) {
 		s, "feature lacp\nport-channel 10\n", parse.Reject, d,
 	)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -235,7 +235,7 @@ func TestCommitCheckRefResolvesThroughTag(t *testing.T) {
 		s, "vlan 10\nmember 10\nmember 20\n", parse.Reject, d,
 	)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	require.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), `bridge "20" does not exist`)
 	assert.NotContains(t, d.String(), `"10" does not exist`)
@@ -250,7 +250,7 @@ func TestCommitCheckDanglingRefCarriesReferrerLine(t *testing.T) {
 		d,
 	)
 	require.False(t, d.HasErrors(), d.String())
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	require.True(t, d.HasErrors())
 	assert.Equal(t, 2, d.Items[0].Line, "points at the referring line")
 }
@@ -260,7 +260,7 @@ func checkText(t *testing.T, s *schema.Schema, in string) *diag.Diagnostics {
 	t.Helper()
 	d := diag.New()
 	cfg := parse.Parse(s, in, parse.Reject, d)
-	CommitCheck(cfg, d)
+	CommitCheck(cfg, nil, d)
 	return d
 }
 
@@ -358,4 +358,45 @@ func TestCommitCheckUnsupportedRelationShapesAreErrors(t *testing.T) {
 	d := checkText(t, s, "feature\n")
 	require.True(t, d.HasErrors(), d.String())
 	assert.Equal(t, 2, strings.Count(d.String(), "is unsupported"), d.String())
+}
+
+func TestCommitCheckBaselineResolvesRef(t *testing.T) {
+	d := diag.New()
+	s := refSchema()
+	baseline := parse.Parse(s, "vlan 1\n", parse.Reject, d)
+	cfg := parse.Parse(
+		s,
+		"interface Ethernet1/1\n  switchport access vlan 1\n",
+		parse.Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, baseline, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckBaselineSatisfiesRequires(t *testing.T) {
+	d := diag.New()
+	s := requiresSchema()
+	baseline := parse.Parse(s, "feature bgp\n", parse.Reject, d)
+	cfg := parse.Parse(s, "router bgp 65000\n", parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, baseline, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckBaselineRelationsAreNotChecked(t *testing.T) {
+	// A baseline line with a dangling reference is a target, not a subject.
+	d := diag.New()
+	s := refSchema()
+	baseline := parse.Parse(
+		s,
+		"interface Ethernet1/9\n  switchport access vlan 99\n",
+		parse.Reject,
+		d,
+	)
+	cfg := parse.Parse(s, "vlan 10\n", parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, baseline, d)
+	assert.False(t, d.HasErrors(), d.String())
 }

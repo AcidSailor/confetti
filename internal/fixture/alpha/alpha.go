@@ -120,9 +120,17 @@ func ImportTransforms() []transform.TextRule {
 	return rules
 }
 
-// Engine returns an alpha engine with import transforms and opts.
+// Baseline lists objects the platform provides without printing them in the running configuration.
+func Baseline() string {
+	return "vlan 1\nvrf context default\n"
+}
+
+// Engine returns an alpha engine with import transforms, the baseline, and opts.
 func Engine(opts ...confetti.Option) *confetti.Engine {
-	base := []confetti.Option{confetti.WithImportText(ImportTransforms()...)}
+	base := []confetti.Option{
+		confetti.WithImportText(ImportTransforms()...),
+		confetti.WithBaseline(Baseline()),
+	}
 	return confetti.New(Schema(), append(base, opts...)...)
 }
 

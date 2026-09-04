@@ -115,7 +115,7 @@ func TestDiffListDeltaChangeLog(t *testing.T) {
 		"interface eth1\n  switchport trunk allowed vlan 10,20\n")
 	intended := mustParse(t, s,
 		"interface eth1\n  switchport trunk allowed vlan 10,30\n")
-	res, d := Diff(running, intended, Break)
+	res, d := Diff(running, intended, Options{Cycle: Break})
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, res.Changes, 1)
 	c := res.Changes[0]

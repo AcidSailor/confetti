@@ -14,6 +14,7 @@ import (
 	"github.com/acidsailor/confetti/merge"
 	"github.com/acidsailor/confetti/parse"
 	"github.com/acidsailor/confetti/remediate"
+	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/transform"
 )
@@ -339,4 +340,85 @@ func TestEngineRemediateClearsOldModeFirst(t *testing.T) {
 	require.False(t, od.HasErrors(), od.String())
 	assert.Equal(t, "interface Ethernet1/1\n  no switchport access vlan 20\n"+
 		"  no switchport\n  ip address 10.0.0.1/24\n", out)
+}
+
+const baselineReferrer = "interface Ethernet1/1\n  switchport access vlan 1\n"
+
+func TestWithBaselineResolvesRefOnEveryCommitPath(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	referrer, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	empty, d := e.Import("")
+	require.False(t, d.HasErrors(), d.String())
+
+	assert.False(t, e.CommitCheck(referrer).HasErrors())
+	_, rd := e.Remediate(empty, referrer)
+	assert.False(t, rd.HasErrors(), rd.String())
+	_, bd := e.Rollback(referrer, empty)
+	assert.False(t, bd.HasErrors(), bd.String())
+
+	// The baseline adds targets; it does not relax the check for other values.
+	other, d := e.Import("interface Ethernet1/1\n  switchport access vlan 2\n")
+	require.False(t, d.HasErrors(), d.String())
+	cd := e.CommitCheck(other)
+	require.True(t, cd.HasErrors())
+	assert.Contains(t, cd.String(), `vlan "2" does not exist`)
+}
+
+func TestWithBaselineNeverEntersPlanOrCompare(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	referrer, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	empty, d := e.Import("")
+	require.False(t, d.HasErrors(), d.String())
+
+	res, rd := e.Remediate(empty, referrer)
+	require.False(t, rd.HasErrors(), rd.String())
+	assert.Equal(t, baselineReferrer, render.Render(res.Tree))
+	back, bd := e.Rollback(empty, referrer)
+	require.False(t, bd.HasErrors(), bd.String())
+	assert.Equal(t, "no interface Ethernet1/1\n", render.Render(back.Tree))
+	view, cd := e.Compare(empty, referrer)
+	require.False(t, cd.HasErrors(), cd.String())
+	assert.NotContains(t, view, "+ vlan 1\n")
+}
+
+func TestWithBaselineAppliesImportTextInBothOrders(t *testing.T) {
+	drop, err := transform.DropLines(`^!`)
+	require.NoError(t, err)
+	text, rule := confetti.WithBaseline(
+		"! built-ins\nvlan 1\n",
+	), confetti.WithImportText(
+		drop,
+	)
+	for name, opts := range map[string][]confetti.Option{
+		"baseline first": {text, rule},
+		"rule first":     {rule, text},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := confetti.New(remediateSchema(), opts...)
+			cfg, d := e.Import(baselineReferrer)
+			require.False(t, d.HasErrors(), d.String())
+			assert.False(t, e.CommitCheck(cfg).HasErrors())
+		})
+	}
+}
+
+func TestWithBaselineRejectsUnknownLinesEvenUnderDrop(t *testing.T) {
+	assert.PanicsWithValue(t,
+		"confetti: baseline does not import cleanly:\n"+
+			"1: error: unknown command: \"flux-capacitor enable\"\n",
+		func() {
+			confetti.New(remediateSchema(),
+				confetti.WithUnknown(parse.Drop),
+				confetti.WithBaseline("flux-capacitor enable\n"))
+		})
+}
+
+func TestWithBaselineAccumulates(t *testing.T) {
+	e := confetti.New(remediateSchema(),
+		confetti.WithBaseline("vlan 1\n"), confetti.WithBaseline("vlan 2\n"))
+	cfg, d := e.Import("interface Ethernet1/1\n  switchport access vlan 2\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.False(t, e.CommitCheck(cfg).HasErrors())
 }

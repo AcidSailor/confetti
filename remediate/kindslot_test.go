@@ -59,7 +59,7 @@ func rawDiff(
 	res, d := Diff(
 		mustParse(t, s, running),
 		mustParse(t, s, intended),
-		Break,
+		Options{Cycle: Break},
 	)
 	return render.Render(res.Tree), d
 }
@@ -349,7 +349,7 @@ func TestKindSlotIntendedCarriesBothSpellings(t *testing.T) {
 			"router bgp 65000\n  default-originate route-map RM\n"),
 		mustParse(t, s, "router bgp 65000\n"+
 			"  default-originate route-map RM2\n  default-originate\n"),
-		Abort,
+		Options{Cycle: Abort},
 	)
 	assert.True(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "duplicate spelling")
@@ -386,7 +386,7 @@ func TestSplitSlotStrictIsError(t *testing.T) {
 	_, d := Diff(
 		mustParse(t, s, "router bgp 65000\n  local-as 65001\n"),
 		mustParse(t, s, "router bgp 65000\n  local-as 65002\n"),
-		Abort,
+		Options{Cycle: Abort},
 	)
 	assert.True(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "split single-occupancy slot")
