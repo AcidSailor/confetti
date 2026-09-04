@@ -498,7 +498,7 @@ func TestCommitCheckNamespaceArityMismatchIsError(t *testing.T) {
 	assert.Contains(
 		t,
 		d.String(),
-		`Namespace "acl" members disagree on exclusive arg count`,
+		`exclusive name space "acl": members disagree on exclusive arg count`,
 	)
 }
 
@@ -521,7 +521,14 @@ func TestCommitCheckNamespaceCollisionIsError(t *testing.T) {
 		d.String(),
 		`mac access-list L: name "L" under label "acl" is already held by "ip access-list L" (line 1)`,
 	)
-	assert.Equal(t, 2, d.Items[0].Line, "points at the later holder")
+	// Locate the collision by message so an unrelated earlier item cannot pass it.
+	for _, it := range d.Items {
+		if strings.Contains(it.Message, `name "L"`) {
+			assert.Equal(t, 2, it.Line, "points at the later holder")
+			return
+		}
+	}
+	t.Fatal("no collision diagnostic: " + d.String())
 }
 
 func TestCommitCheckNamespaceDistinctNamesCoexist(t *testing.T) {
@@ -584,6 +591,53 @@ func TestCommitCheckListSpellingDoesNotChangeVerdict(t *testing.T) {
 	disjoint := checkText(t, prioNamespaceSchema(),
 		"ip prio 1,2,3 value a\nmac prio 4 value b\n")
 	assert.False(t, disjoint.HasErrors(), disjoint.String())
+}
+
+// One list can overlap several disjoint holders, and each is a separate fix.
+func TestCommitCheckListReportsEveryOverlappingHolder(t *testing.T) {
+	d := checkText(
+		t,
+		prioNamespaceSchema(),
+		"ip prio 10-20 value a\nmac prio 30-40 value b\nip prio 15-35 value c\n",
+	)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `is already held by "ip prio 10-20 value a"`)
+	assert.Contains(t, d.String(),
+		`is already held by "mac prio 30-40 value b"`)
+}
+
+// A baseline list the device supplies is not a line the caller can fix.
+func TestCommitCheckBaselineUnresolvableListWarnsWithoutALine(t *testing.T) {
+	d := diag.New()
+	s := prioNamespaceSchema()
+	baseline := parse.Parse(s, "ip prio 9-1 value a\n", parse.Reject, d)
+	cfg := parse.Parse(s, "mac prio 4 value b\n", parse.Reject, d)
+	CommitCheck(cfg, baseline, d)
+	assert.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "baseline ip prio 9-1 value a")
+	assert.Contains(t, d.String(), "warning")
+	// A baseline position is not a line number in the configuration the caller wrote.
+	assert.NotContains(t, d.String(), "1: warning")
+}
+
+// A configuration list the caller wrote keeps its own line.
+func TestCommitCheckUnresolvableListWarnsAtItsLine(t *testing.T) {
+	d := checkText(t, prioNamespaceSchema(),
+		"mac prio 4 value b\nip prio 9-1 value a\n")
+	assert.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "2: warning")
+	assert.Contains(t, d.String(), `unresolvable list "9-1"`)
+	assert.NotContains(t, d.String(), "baseline")
+}
+
+// An unusable baseline is named, not silently dropped onto the configuration.
+func TestCommitCheckBaselineWithoutNodesIsReported(t *testing.T) {
+	d := diag.New()
+	s := aclNamespaceSchema()
+	cfg := parse.Parse(s, "ip access-list L\n", parse.Reject, d)
+	CommitCheck(cfg, &schema.Config{Schema: s}, d)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "baseline has no parsed nodes")
 }
 
 // A third claim must be checked against every earlier one, not only the first.
@@ -778,18 +832,23 @@ func TestValidateRelationsScopeAnchorOnEveryPathIsValid(t *testing.T) {
 	assert.False(t, d.HasErrors(), d.String())
 }
 
-func TestValidateRelationsScopeNeedsKeyAndOneExtent(t *testing.T) {
+func TestValidateRelationsScopeNeedsKey(t *testing.T) {
 	s := schema.New()
 	box := s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Key("b")
 	box.Child("flag").Card(schema.ZeroToOne).Kind("flag").ScopedByDevice()
-	box.Child("claim {{ id:word }}").Card(schema.ZeroToN).
-		Kind("claim").Key("id").ScopedBy(box).ScopedByDevice()
 	d := checkText(t, s, "box a\n")
 	require.True(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(),
 		"a declared exclusive scope needs a Key to hold a name")
-	assert.Contains(t, d.String(),
-		"ScopedBy and ScopedByDevice name different extents")
+}
+
+// Unique without a Key declares a name nothing holds, like every other extent.
+func TestValidateRelationsUniqueNeedsKey(t *testing.T) {
+	s := schema.New()
+	s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Unique("b")
+	d := checkText(t, s, "box a\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "Unique needs a Key to hold a name")
 }
 
 // An empty config and unmatched lines must degrade, not panic.

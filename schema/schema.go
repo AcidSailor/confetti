@@ -593,7 +593,7 @@ func (n *Def) HasLabel(name string) bool {
 		(n.KindName == name || slices.Contains(n.TagNames, name))
 }
 
-// Unique restricts exclusive resource identity to captured key arguments so remediation frees the resource before moving it.
+// Unique restricts exclusive resource identity to the named captures so remediation frees the resource before moving it; each arg must have a type that cannot match empty, and the definition still needs a Key to hold the name.
 func (n *Def) Unique(args ...string) *Def {
 	for _, arg := range args {
 		// An exclusive name that can be empty would bucket every instance together.
@@ -620,14 +620,19 @@ func (n *Def) ExclusiveLabel() string {
 	return n.KindName
 }
 
-// Namespace scopes the exclusive resource by label instead of Kind so definitions with distinct Kinds release a shared name before claiming it.
+// Namespace scopes the exclusive resource by label instead of Kind and makes the name space device-wide unless ScopedBy narrows it, so definitions with distinct Kinds release a shared name before claiming it.
 func (n *Def) Namespace(label string) *Def {
 	if label == "" {
 		panic("schema: Namespace label must be non-empty: " + n.Template)
 	}
+	if n.NamespaceLabel != "" && n.NamespaceLabel != label {
+		panic("schema: Namespace set twice: " + n.Template)
+	}
 	n.NamespaceLabel = label
 	return n
 }
+
+const scopeExtentTwice = "schema: ScopedBy and ScopedByDevice are mutually exclusive: "
 
 // ScopedBy gives each instance of anchor its own exclusive name space, so the same name under two anchors is two objects.
 func (n *Def) ScopedBy(anchor *Def) *Def {
@@ -638,14 +643,40 @@ func (n *Def) ScopedBy(anchor *Def) *Def {
 		panic("schema: ScopedBy anchor may not be the definition itself: " +
 			n.Template)
 	}
+	// Guard both setters so either call order reports the conflict.
+	if n.DeviceScoped {
+		panic(scopeExtentTwice + n.Template)
+	}
+	if n.ScopeAnchor != nil && n.ScopeAnchor != anchor {
+		panic("schema: ScopedBy anchor set twice: " + n.Template)
+	}
 	n.ScopeAnchor = anchor
 	return n
 }
 
 // ScopedByDevice makes the exclusive name space cover the whole configuration, so a name moves between owners rather than repeating.
 func (n *Def) ScopedByDevice() *Def {
+	if n.ScopeAnchor != nil {
+		panic(scopeExtentTwice + n.Template)
+	}
 	n.DeviceScoped = true
 	return n
+}
+
+// ScopeExtent returns the ancestor whose instance opens the exclusive name space and whether that space is device-wide; both zero means the extent is undeclared.
+func (n *Def) ScopeExtent() (anchor *Def, device bool) {
+	switch {
+	case n.ScopeAnchor != nil:
+		return n.ScopeAnchor, false
+	case n.DeviceScoped || n.NamespaceLabel != "":
+		return nil, true
+	}
+	return nil, false
+}
+
+// DeclaresSpace reports whether the definition explicitly places its exclusive name in a shared space.
+func (n *Def) DeclaresSpace() bool {
+	return n.NamespaceLabel != "" || n.ScopeAnchor != nil || n.DeviceScoped
 }
 
 // List declares a leaf capture as an idempotent unordered set with numeric ranges and elements of elemType.

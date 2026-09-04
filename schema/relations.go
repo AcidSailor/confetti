@@ -38,35 +38,101 @@ func (r Relation) IsExclusion() bool {
 	return r.Scope == ScopeSiblings && r.Want == Absent
 }
 
-// nsMembers records what the keyed members of one Namespace label declare.
-type nsMembers struct {
-	count  int
-	arity  int  // The exclusive arg count the first keyed member fixed.
-	varied bool // Set when a later member declares a different count.
+// spaceShape is what every member of one exclusive name space must agree on.
+type spaceShape struct {
+	arity   int  // The exclusive arg count.
+	listIdx int  // The List position among the exclusive args, or -1.
+	anchor  *Def // The ScopedBy anchor, or nil.
+	device  bool // Whether the space covers the whole configuration.
 }
 
-// namespaceIndex holds the keyed members of each Namespace label in declaration order.
-type namespaceIndex struct {
+// shapeOf returns the exclusive name shape one definition declares.
+func shapeOf(n *Def) spaceShape {
+	args := n.ExclusiveArgs()
+	s := spaceShape{arity: len(args), listIdx: -1}
+	if n.ListSpec.Arg != "" {
+		s.listIdx = slices.Index(args, n.ListSpec.Arg)
+	}
+	s.anchor, s.device = n.ScopeExtent()
+	return s
+}
+
+// exclusiveSpace records what the keyed members of one exclusive name space declare.
+type exclusiveSpace struct {
+	members    int
+	namespaced int  // Members declaring the label as their Namespace.
+	declared   bool // Set when a member declares a Namespace or an extent.
+	// shape is what the first member fixed; each varied flag records a later disagreement.
+	shape        spaceShape
+	variedArity  bool
+	variedList   bool
+	variedExtent bool
+}
+
+// spaceIndex holds the keyed members of each exclusive name space in declaration order.
+type spaceIndex struct {
 	order  []string
-	byName map[string]*nsMembers
+	byName map[string]*exclusiveSpace
 }
 
-// add registers one keyed member that carries the label it declares.
-func (ns *namespaceIndex) add(n *Def) {
-	label := n.NamespaceLabel
-	// A member that fails the other checks must not fix the arity or the count.
-	if label == "" || len(n.KeyArgs) == 0 || !n.HasLabel(label) {
+// add registers one keyed definition in the space its exclusive label names.
+func (si *spaceIndex) add(n *Def) {
+	// A member that fails its own checks must not fix the shape for the rest.
+	if len(n.KeyArgs) == 0 {
 		return
 	}
-	m := ns.byName[label]
-	if m == nil {
-		m = &nsMembers{arity: len(n.ExclusiveArgs())}
-		ns.byName[label] = m
-		ns.order = append(ns.order, label)
+	if n.NamespaceLabel != "" && !n.HasLabel(n.NamespaceLabel) {
+		return
 	}
-	m.count++
-	if len(n.ExclusiveArgs()) != m.arity {
-		m.varied = true
+	label := n.ExclusiveLabel()
+	// An empty label means the definition alone names its space, shared with nothing.
+	if label == "" {
+		return
+	}
+	if si.byName == nil {
+		si.byName = map[string]*exclusiveSpace{}
+	}
+	got := shapeOf(n)
+	sp := si.byName[label]
+	if sp == nil {
+		sp = &exclusiveSpace{shape: got}
+		si.byName[label] = sp
+		si.order = append(si.order, label)
+	}
+	sp.members++
+	if n.NamespaceLabel == label {
+		sp.namespaced++
+	}
+	sp.declared = sp.declared || n.DeclaresSpace()
+	sp.variedArity = sp.variedArity || got.arity != sp.shape.arity
+	sp.variedList = sp.variedList || got.listIdx != sp.shape.listIdx
+	sp.variedExtent = sp.variedExtent ||
+		got.anchor != sp.shape.anchor || got.device != sp.shape.device
+}
+
+// report reports members of one shared name space that disagree on its shape.
+func (si spaceIndex) report(d *diag.Diagnostics) {
+	// One report per label; blaming each member would depend on declaration order.
+	for _, label := range si.order {
+		sp := si.byName[label]
+		// Members that never declared a shared space cannot disagree about one.
+		if !sp.declared || sp.members < 2 {
+			continue
+		}
+		for _, defect := range [...]struct {
+			varied bool
+			what   string
+		}{
+			{sp.variedArity, "exclusive arg count"},
+			{sp.variedList, "which exclusive arg is a List"},
+			{sp.variedExtent, "the exclusive-name extent"},
+		} {
+			if defect.varied {
+				d.Add(diag.Error,
+					"exclusive name space %q: members disagree on %s",
+					label, defect.what)
+			}
+		}
 	}
 }
 
@@ -74,12 +140,12 @@ func (ns *namespaceIndex) add(n *Def) {
 func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 	kinds := map[string]bool{}
 	keysOf := map[string]map[string]bool{}
-	ns := namespaceIndex{byName: map[string]*nsMembers{}}
+	var spaces spaceIndex
 	s.Walk(func(n *Def) {
 		if n.KindName != "" {
 			kinds[n.KindName] = true
 		}
-		ns.add(n)
+		spaces.add(n)
 		for _, label := range n.Labels() {
 			if keysOf[label] == nil {
 				keysOf[label] = map[string]bool{}
@@ -101,76 +167,71 @@ func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 		for _, rel := range n.Relations {
 			n.checkRelation(rel, keysOf, d)
 		}
-		n.checkNamespace(ns, d)
+		n.checkNamespace(spaces, d)
 		n.checkScope(d)
 	})
 	s.checkScopeAnchors(d)
-	// One report per label; blaming each member would depend on declaration order.
-	for _, label := range ns.order {
-		if ns.byName[label].varied {
-			d.Add(diag.Error,
-				"Namespace %q members disagree on exclusive arg count", label)
-		}
-	}
+	spaces.report(d)
 }
 
-// checkScope reports a declared exclusive-name extent this definition cannot carry.
+// checkScope reports an exclusive name this definition declares but cannot hold.
 func (n *Def) checkScope(d *diag.Diagnostics) {
-	if n.ScopeAnchor == nil && !n.DeviceScoped {
+	// An exclusive name is held by the key, so without one nothing holds it.
+	if len(n.KeyArgs) > 0 {
 		return
 	}
-	if n.ScopeAnchor != nil && n.DeviceScoped {
-		d.Add(
-			diag.Error,
-			"%s: ScopedBy and ScopedByDevice name different extents",
-			n.Template,
-		)
-	}
-	if len(n.KeyArgs) == 0 {
+	if n.ScopeAnchor != nil || n.DeviceScoped {
 		d.Add(
 			diag.Error,
 			"%s: a declared exclusive scope needs a Key to hold a name",
 			n.Template,
 		)
 	}
+	if len(n.UniqueArgs) > 0 {
+		d.Add(diag.Error, "%s: Unique needs a Key to hold a name", n.Template)
+	}
 }
 
 // checkScopeAnchors reports a ScopedBy anchor that is not an ancestor on every path to the definition naming it.
 func (s *Schema) checkScopeAnchors(d *diag.Diagnostics) {
-	var unanchored []*Def
-	seen := map[*Def]bool{}
-	var walk func(n *Def, chain []*Def)
-	walk = func(n *Def, chain []*Def) {
-		// A recursive grammar revisits the same definition without new ancestors.
-		if slices.Contains(chain, n) {
-			return
+	var anchored []*Def
+	s.Walk(func(n *Def) {
+		if n.ScopeAnchor != nil {
+			anchored = append(anchored, n)
 		}
-		if a := n.ScopeAnchor; a != nil && !slices.Contains(chain, a) &&
-			!seen[n] {
-			seen[n] = true
-			unanchored = append(unanchored, n)
+	})
+	for _, n := range anchored {
+		// A path that avoids the anchor is a path on which it is not an ancestor.
+		if s.reaches(n, n.ScopeAnchor) {
+			d.Add(
+				diag.Error,
+				"%s: ScopedBy anchor %q is not an ancestor on every path to this definition",
+				n.Template,
+				n.ScopeAnchor.Template,
+			)
 		}
-		chain = append(slices.Clone(chain), n)
-		for _, c := range n.Children {
-			walk(c, chain)
-		}
-	}
-	for _, r := range s.Roots {
-		walk(r, nil)
-	}
-	for _, n := range unanchored {
-		d.Add(
-			diag.Error,
-			"%s: ScopedBy anchor %q is not an ancestor on every path to this definition",
-			n.Template,
-			n.ScopeAnchor.Template,
-		)
 	}
 }
 
+// reaches reports whether any root reaches target without passing through skip.
+func (s *Schema) reaches(target, skip *Def) bool {
+	// Marking skip as seen removes every path through it; seen also ends recursion.
+	seen := map[*Def]bool{skip: true}
+	var walk func(*Def) bool
+	walk = func(n *Def) bool {
+		if seen[n] {
+			return false
+		}
+		seen[n] = true
+		return n == target || slices.ContainsFunc(n.Children, walk)
+	}
+	return slices.ContainsFunc(s.Roots, walk)
+}
+
 // checkNamespace reports the first defect that makes this definition's Namespace unusable, plus a keyed label it stays out of.
-func (n *Def) checkNamespace(ns namespaceIndex, d *diag.Diagnostics) {
+func (n *Def) checkNamespace(spaces spaceIndex, d *diag.Diagnostics) {
 	if label := n.NamespaceLabel; label != "" {
+		sp := spaces.byName[label]
 		switch {
 		case !n.HasLabel(label):
 			d.Add(diag.Error,
@@ -183,7 +244,8 @@ func (n *Def) checkNamespace(ns namespaceIndex, d *diag.Diagnostics) {
 				n.Template,
 				label,
 			)
-		case ns.byName[label].count < 2:
+		// A space this definition qualifies for is registered, so nil means none.
+		case sp == nil || sp.namespaced < 2:
 			d.Add(diag.Error,
 				"%s: Namespace %q has no other keyed member", n.Template, label)
 		}
@@ -193,7 +255,8 @@ func (n *Def) checkNamespace(ns namespaceIndex, d *diag.Diagnostics) {
 	}
 	// A keyed carrier outside the namespace would never release the shared name.
 	for _, label := range n.Labels() {
-		if ns.byName[label] != nil && n.NamespaceLabel != label {
+		sp := spaces.byName[label]
+		if sp != nil && sp.namespaced > 0 && n.NamespaceLabel != label {
 			d.Add(
 				diag.Error,
 				"%s: carries label %q used as a Namespace but does not declare Namespace(%q)",

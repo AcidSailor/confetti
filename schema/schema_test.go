@@ -1078,7 +1078,7 @@ func TestNamespaceArityDisagreementReportedOncePerLabel(t *testing.T) {
 		s.ValidateRelations(d)
 		return d
 	}
-	const want = `Namespace "acl" members disagree on exclusive arg count`
+	const want = `exclusive name space "acl": members disagree on exclusive arg count`
 	for _, oddFirst := range []bool{true, false} {
 		d := build(oddFirst)
 		assert.Equal(t, 1, strings.Count(d.String(), want),
@@ -1100,6 +1100,100 @@ func TestNamespaceMisdeclaredMemberDoesNotSeedArity(t *testing.T) {
 	assert.Contains(t, d.String(),
 		`Namespace "acl" is not a Kind or Tag of this definition`)
 	assert.NotContains(t, d.String(), "disagree on exclusive arg count")
+}
+
+// Members that disagree on the extent silently occupy different name spaces.
+func TestSpaceExtentDisagreementIsError(t *testing.T) {
+	build := func(scopedFirst bool) *diag.Diagnostics {
+		s := New()
+		box := s.Node("box {{ b:word }}").Card(ZeroToN).Kind("box").Key("b")
+		af := box.Child("af {{ a:word }}").Card(ZeroToN).Kind("af").Key("a")
+		wide := func() {
+			af.Child("ip acl {{ name:word }}").Card(ZeroToN).
+				Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+		}
+		narrow := func() {
+			af.Child("mac acl {{ name:word }}").Card(ZeroToN).
+				Kind("mac-acl").Tag("acl").Key("name").
+				Namespace("acl").ScopedBy(box)
+		}
+		if scopedFirst {
+			narrow()
+			wide()
+		} else {
+			wide()
+			narrow()
+		}
+		d := diag.New()
+		s.ValidateRelations(d)
+		return d
+	}
+	const want = `exclusive name space "acl": members disagree on the exclusive-name extent`
+	for _, scopedFirst := range []bool{true, false} {
+		d := build(scopedFirst)
+		assert.Equal(t, 1, strings.Count(d.String(), want),
+			"scopedFirst=%v: %s", scopedFirst, d.String())
+	}
+}
+
+// A List arg blanks its own position in the name, so members must agree on it.
+func TestSpaceListDisagreementIsError(t *testing.T) {
+	build := func(listFirst bool) *diag.Diagnostics {
+		s := New()
+		listed := func() {
+			s.Node("ip grp {{ v:word }} ids {{ ids:word }}").Card(ZeroToN).
+				Kind("ip-grp").Tag("grp").Key("v").Unique("ids").
+				List("ids", "uint").Namespace("grp")
+		}
+		plain := func() {
+			s.Node("mac grp {{ v:word }} ids {{ ids:word }}").Card(ZeroToN).
+				Kind("mac-grp").Tag("grp").Key("v").Unique("ids").
+				Namespace("grp")
+		}
+		if listFirst {
+			listed()
+			plain()
+		} else {
+			plain()
+			listed()
+		}
+		d := diag.New()
+		s.ValidateRelations(d)
+		return d
+	}
+	const want = `exclusive name space "grp": members disagree on which exclusive arg is a List`
+	for _, listFirst := range []bool{true, false} {
+		d := build(listFirst)
+		assert.Equal(t, 1, strings.Count(d.String(), want),
+			"listFirst=%v: %s", listFirst, d.String())
+	}
+}
+
+// Definitions that never declared a shared space must not be held to one shape.
+func TestUndeclaredKindSpaceIsNotHeldToOneShape(t *testing.T) {
+	s := New()
+	s.Node("slot {{ a:word }}").Card(ZeroToN).Kind("slot").Key("a")
+	s.Node("wide slot {{ a:word }} {{ b:word }}").Card(ZeroToN).
+		Kind("slot").Key("a", "b")
+	d := diag.New()
+	s.ValidateRelations(d)
+	assert.NotContains(t, d.String(), "members disagree")
+}
+
+// A recursive grammar must terminate and must not invent a missing anchor.
+func TestScopeAnchorCheckHandlesRecursiveGrammar(t *testing.T) {
+	s := New()
+	box := s.Node("box {{ b:word }}").Card(ZeroToN).Kind("box").Key("b")
+	inner := box.Child("inner {{ i:word }}").
+		Card(ZeroToN).
+		Kind("inner").
+		Key("i")
+	inner.Adopt(inner)
+	inner.Child("claim {{ id:word }}").Card(ZeroToN).
+		Kind("claim").Key("id").ScopedBy(box)
+	d := diag.New()
+	assert.NotPanics(t, func() { s.ValidateRelations(d) })
+	assert.NotContains(t, d.String(), "is not an ancestor on every path")
 }
 
 func TestScopedByRejectsNilAndSelf(t *testing.T) {
@@ -1131,6 +1225,52 @@ func TestScopedByHoldsInBothCallOrders(t *testing.T) {
 func TestScopedByDeviceSetsExtent(t *testing.T) {
 	n := New().Node("claim {{ id:word }}").Key("id").ScopedByDevice()
 	assert.True(t, n.DeviceScoped)
+	anchor, device := n.ScopeExtent()
+	assert.Nil(t, anchor)
+	assert.True(t, device)
+}
+
+// Two extents on one definition are an authoring error in either call order.
+func TestScopedByAndScopedByDevicePanicInBothCallOrders(t *testing.T) {
+	build := func() (*Def, *Def) {
+		s := New()
+		box := s.Node("box {{ b:word }}").Key("b")
+		return box, box.Child("claim {{ id:word }}").Key("id")
+	}
+	box, claim := build()
+	assert.Panics(t, func() { claim.ScopedBy(box).ScopedByDevice() })
+	box, claim = build()
+	assert.Panics(t, func() { claim.ScopedByDevice().ScopedBy(box) })
+}
+
+// Setting one extent twice hides the discarded declaration.
+func TestScopeDeclarationsRejectBeingSetTwice(t *testing.T) {
+	s := New()
+	a := s.Node("box {{ b:word }}").Key("b")
+	b := s.Node("crate {{ c:word }}").Key("c")
+	claim := a.Child("claim {{ id:word }}").Key("id").ScopedBy(a)
+	assert.Panics(t, func() { claim.ScopedBy(b) })
+	assert.NotPanics(t, func() { claim.ScopedBy(a) })
+
+	n := s.Node("acl {{ name:word }}").Key("name").Tag("acl").Namespace("acl")
+	assert.Panics(t, func() { n.Namespace("other") })
+}
+
+// Namespace fixes a device-wide extent; ScopedBy narrows the same space.
+func TestNamespaceImpliesDeviceExtentUnlessScopedBy(t *testing.T) {
+	s := New()
+	box := s.Node("box {{ b:word }}").Key("b")
+	wide := box.Child("acl {{ name:word }}").Key("name").
+		Tag("acl").Namespace("acl")
+	anchor, device := wide.ScopeExtent()
+	assert.Nil(t, anchor)
+	assert.True(t, device, "Namespace alone is device-wide")
+
+	narrow := box.Child("mac acl {{ name:word }}").Key("name").
+		Tag("acl").Namespace("acl").ScopedBy(box)
+	anchor, device = narrow.ScopeExtent()
+	assert.Equal(t, box, anchor, "ScopedBy wins over the Namespace default")
+	assert.False(t, device)
 }
 
 func TestExclusiveLabelPrefersNamespaceOverKind(t *testing.T) {

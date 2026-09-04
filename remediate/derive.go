@@ -344,36 +344,33 @@ func appendHeld(
 	x *schema.Node,
 	d *diag.Diagnostics,
 ) []heldResource {
-	def := x.Def
-	if def == nil || len(def.KeyArgs) == 0 {
+	// A needless move edge is harmless, a missing one emits a plan the device rejects.
+	name, ok, err := ident.ExclusiveName(x, ident.Device)
+	if err != nil {
+		d.AddAt(
+			x.Line,
+			diag.Warning,
+			"%s: unresolvable list %q: exclusive-resource ordering for this line skipped (%v)",
+			x.Path(),
+			x.Fields[x.Def.ListSpec.Arg],
+			err,
+		)
 		return out
 	}
-	args := def.ExclusiveArgs()
-	listIdx := -1
-	if def.ListSpec.Arg != "" {
-		listIdx = slices.Index(args, def.ListSpec.Arg)
+	if !ok {
+		return out
 	}
-	// Exclude the list from the bucket key so overlapping spellings share a bucket.
-	parts := make([]string, len(args))
-	for i, a := range args {
-		if i != listIdx {
-			parts[i] = x.Fields[a]
-		}
-	}
-	key := strings.Join(parts, "\x00")
-	held := heldResource{resource: resourceFor(x, key), display: key}
-	if listIdx >= 0 {
-		ls := def.ListSpec
-		items, ok := resolveListArg(x, ls, d, "exclusive-resource ordering")
-		if !ok {
-			return out
-		}
-		parts[listIdx] = listval.Canonical(items, ls.Sep, ls.Keywords())
-		held.members = listval.Intervals(items)
-		held.display = strings.Join(parts, "\x00")
-		held.isList = true
-	}
-	return append(out, held)
+	return append(out, heldResource{
+		resource: resource{
+			label: name.Scope.Label,
+			def:   name.Scope.Def,
+			owner: name.Scope.Owner,
+			key:   name.Key,
+		},
+		members: name.Members,
+		display: name.Display,
+		isList:  name.IsList,
+	})
 }
 
 // resolveListArg resolves a list argument and warns when ordering must skip the line.
@@ -397,12 +394,6 @@ func resolveListArg(
 		return nil, false
 	}
 	return items, true
-}
-
-// resourceFor scopes the keyed resource by the node's exclusive name space; a needless move edge is harmless, a missing one is not.
-func resourceFor(x *schema.Node, key string) resource {
-	s := ident.ScopeOf(x, ident.Device)
-	return resource{label: s.Label, def: s.Def, owner: s.Owner, key: key}
 }
 
 // deriveMoveEdges orders each resource release before a new claim on the same resource.
@@ -445,14 +436,19 @@ func (a heldResource) conflicts(b heldResource) bool {
 	return !a.isList && !b.isList
 }
 
-// String formats the exclusive resource and value for cycle warnings.
+// String formats the exclusive resource, its name space, and value for cycle warnings.
 func (a heldResource) String() string {
 	name := a.label
 	if name == "" && a.def != nil {
 		name = a.def.Template
 	}
-	return fmt.Sprintf("%s %q", name,
+	out := fmt.Sprintf("%s %q", name,
 		strings.ReplaceAll(a.display, "\x00", ","))
+	// Two anchor spaces share a label, so the owner is what tells them apart.
+	if a.owner != "" {
+		out += " under " + ident.OwnerPath(a.owner)
+	}
+	return out
 }
 
 // requirement is one Requires declaration found in an op's subtree.

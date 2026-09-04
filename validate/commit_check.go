@@ -33,6 +33,11 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 		// Drop the unusable baseline but still check the tree the caller asked about.
 		baseline = nil
 	}
+	// A baseline with no tree supplies nothing; say so instead of blaming the configuration.
+	if baseline != nil && baseline.Root == nil {
+		d.Add(diag.Error, "validate: baseline has no parsed nodes")
+		baseline = nil
+	}
 	// Validate the complete schema, including definitions absent from the configuration.
 	if cfg.Schema != nil {
 		cfg.Schema.ValidateRelations(d)
@@ -46,20 +51,20 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 		d:        d,
 	}
 
-	// Baseline nodes are relation targets only; their own relations are never checked.
+	// Baseline nodes are relation targets and name holders; their own relations are never checked.
 	if baseline != nil {
 		schema.Walk(baseline, func(n *schema.Node) {
 			c.baseline[n] = true
-			c.record(n)
+			c.record(n, true)
 		})
 	}
-	schema.Walk(cfg, c.record)
+	schema.Walk(cfg, func(n *schema.Node) { c.record(n, false) })
 	schema.Walk(cfg, c.checkRelations)
 	schema.Walk(cfg, c.checkExclusive)
 }
 
-// record indexes the labels and key values one node declares.
-func (c relationChecker) record(n *schema.Node) {
+// record indexes the labels, key values, and exclusive name one node declares.
+func (c relationChecker) record(n *schema.Node, fromBaseline bool) {
 	def := n.Def
 	if def == nil {
 		return
@@ -70,7 +75,7 @@ func (c relationChecker) record(n *schema.Node) {
 			c.index[target{label, arg, n.Fields[arg]}] = true
 		}
 	}
-	if cl, ok := claimOf(n, c.d); ok {
+	if cl, ok := c.claimOf(n, fromBaseline); ok {
 		c.claims[n] = cl
 		c.held[cl.holder] = append(c.held[cl.holder], cl)
 	}

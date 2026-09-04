@@ -12,8 +12,10 @@ import (
 type Extent int
 
 const (
+	// The zero value names no extent; the two callers must choose on purpose.
+	_ Extent = iota
 	// PerOwner gives each enclosing object its own name space.
-	PerOwner Extent = iota
+	PerOwner
 	// Device gives the whole configuration one name space.
 	Device
 )
@@ -28,7 +30,7 @@ type Scope struct {
 	Owner string
 }
 
-// String renders the name space for diagnostics.
+// String renders the label of the name space for diagnostics; the owner is not shown.
 func (s Scope) String() string {
 	switch {
 	case s.Label != "":
@@ -40,15 +42,11 @@ func (s Scope) String() string {
 	}
 }
 
-// ScopeOf returns the name space a node's exclusive name lives in.
-//
-// An undeclared extent is resolved with dflt, and the two callers choose
-// opposite defaults on purpose. Ordering passes Device because a needless
-// release-before-claim edge is harmless while a missing one emits an invalid
-// plan. Validation passes PerOwner because rejecting a valid configuration is
-// worse than missing a collision. ScopedBy or ScopedByDevice removes the
-// guess, and both callers then agree exactly.
+// ScopeOf returns the name space a node's exclusive name lives in, resolving an undeclared extent with dflt; see the package docs for why the two callers pass opposite defaults.
 func ScopeOf(n *schema.Node, dflt Extent) Scope {
+	if dflt != PerOwner && dflt != Device {
+		panic("ident: ScopeOf needs an explicit Extent")
+	}
 	// An unmatched node has no definition, so it lives in no name space.
 	if n == nil || n.Def == nil {
 		return Scope{}
@@ -58,10 +56,12 @@ func ScopeOf(n *schema.Node, dflt Extent) Scope {
 	if s.Label == "" {
 		s.Def = def
 	}
+	anchor, device := def.ScopeExtent()
 	switch {
-	case def.ScopeAnchor != nil:
-		s.Owner = pathKey(anchorOf(n, def.ScopeAnchor))
-	case def.DeviceScoped || def.NamespaceLabel != "":
+	case anchor != nil:
+		// Outside every anchor the node falls back to the device-wide space.
+		s.Owner = pathKey(anchorOf(n, anchor))
+	case device:
 		s.Owner = ""
 	case dflt == PerOwner:
 		s.Owner = pathKey(n.Parent)
@@ -75,6 +75,22 @@ func OwnerKey(n *schema.Node) string {
 		return ""
 	}
 	return pathKey(n.Parent)
+}
+
+// OwnerPath renders an owner key for diagnostics; definitions appear as authored.
+func OwnerPath(key string) string {
+	if key == "" {
+		return ""
+	}
+	parts := strings.Split(key, "\x02")
+	for i, p := range parts {
+		f := strings.Split(p, "\x01")
+		if len(f) != 3 {
+			continue
+		}
+		parts[i] = strings.TrimSpace(f[1] + " " + f[2])
+	}
+	return strings.Join(parts, " / ")
 }
 
 // anchorOf returns the nearest ancestor of n defined by anchor, or nil when the node sits outside every anchor.

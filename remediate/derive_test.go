@@ -983,7 +983,7 @@ func TestUnscopedClaimFreesAcrossOwnersBeforeClaim(t *testing.T) {
 		"box a\n  claim 1\n",
 		"box b\n  claim 1\n")
 	require.False(t, d.HasErrors(), d.String())
-	assert.Less(t, strings.Index(out, "no box a"), strings.Index(out, "box b"))
+	assert.Equal(t, "no box a\nbox b\n  claim 1\n", out)
 }
 
 // ScopedBy says the two boxes hold different names, so no release must precede the claim.
@@ -992,7 +992,7 @@ func TestScopedByDerivesNoMoveEdgeAcrossAnchors(t *testing.T) {
 		"box a\n  claim 1\n",
 		"box b\n  claim 1\n")
 	require.False(t, d.HasErrors(), d.String())
-	assert.Less(t, strings.Index(out, "box b"), strings.Index(out, "no box a"))
+	assert.Equal(t, "box b\n  claim 1\nno box a\n", out)
 }
 
 func TestTagWithoutNamespaceDerivesNoMoveEdge(t *testing.T) {
