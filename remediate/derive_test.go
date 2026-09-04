@@ -965,6 +965,36 @@ func TestNamespaceDistinctNamesKeepDeclarationOrder(t *testing.T) {
 	assert.Equal(t, "mac access-list M\nno ip access-list L\n", out)
 }
 
+// boxClaimSchema holds a claim under a box, optionally scoping the name space to one box.
+func boxClaimSchema(scoped bool) *schema.Schema {
+	s := schema.New()
+	box := s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Key("b")
+	claim := box.Child("claim {{ id:word }}").Card(schema.ZeroToN).
+		Kind("claim").Key("id")
+	if scoped {
+		claim.ScopedBy(box)
+	}
+	return s
+}
+
+// An undeclared extent keeps the conservative device-wide assumption in ordering.
+func TestUnscopedClaimFreesAcrossOwnersBeforeClaim(t *testing.T) {
+	out, d := orderedDiff(t, boxClaimSchema(false),
+		"box a\n  claim 1\n",
+		"box b\n  claim 1\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Less(t, strings.Index(out, "no box a"), strings.Index(out, "box b"))
+}
+
+// ScopedBy says the two boxes hold different names, so no release must precede the claim.
+func TestScopedByDerivesNoMoveEdgeAcrossAnchors(t *testing.T) {
+	out, d := orderedDiff(t, boxClaimSchema(true),
+		"box a\n  claim 1\n",
+		"box b\n  claim 1\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Less(t, strings.Index(out, "box b"), strings.Index(out, "no box a"))
+}
+
 func TestTagWithoutNamespaceDerivesNoMoveEdge(t *testing.T) {
 	// Tags classify; only Namespace opts a label into exclusivity.
 	out, d := orderedDiff(t, aclNamespaceSchema(false),

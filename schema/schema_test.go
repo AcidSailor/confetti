@@ -1,8 +1,10 @@
 package schema
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/acidsailor/confetti/diag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1026,6 +1028,109 @@ func TestExclusiveArgsPreferUniqueOverKey(t *testing.T) {
 	assert.Equal(t, []string{"id", "own"}, n.ExclusiveArgs())
 	n.Unique("id")
 	assert.Equal(t, []string{"id"}, n.ExclusiveArgs())
+}
+
+// An exclusive name that can be empty would bucket every instance together.
+func TestUniqueEmptyMatchingTypePanics(t *testing.T) {
+	s := New()
+	require.NoError(t, s.Registry.Register(value.Type{
+		Name:    "maybe",
+		Pattern: `[a-z]*`,
+	}))
+	assert.Panics(t, func() {
+		s.Node("slot {{ id:word }} desc {{ d:maybe }}").Key("id").Unique("d")
+	})
+}
+
+func TestExclusiveArgsClonesSoCallersCannotWriteBack(t *testing.T) {
+	n := New().Node("slot {{ id:word }} owner {{ own:word }}").Key("id", "own")
+	got := n.ExclusiveArgs()
+	got[0] = "written"
+	assert.Equal(t, []string{"id", "own"}, n.KeyArgs)
+
+	n.Unique("id")
+	got = n.ExclusiveArgs()
+	got[0] = "written"
+	assert.Equal(t, []string{"id"}, n.UniqueArgs)
+}
+
+// The blamed member must not depend on which one the author declared first.
+func TestNamespaceArityDisagreementReportedOncePerLabel(t *testing.T) {
+	build := func(oddFirst bool) *diag.Diagnostics {
+		s := New()
+		two := func() {
+			s.Node("mac acl {{ name:word }} {{ seq:uint }}").Card(ZeroToN).
+				Kind("mac-acl").Tag("acl").Key("name", "seq").Namespace("acl")
+		}
+		one := func(tmpl, kind string) {
+			s.Node(tmpl).Card(ZeroToN).Kind(kind).Tag("acl").
+				Key("name").Namespace("acl")
+		}
+		if oddFirst {
+			two()
+		}
+		one("ip acl {{ name:word }}", "ip-acl")
+		one("arp acl {{ name:word }}", "arp-acl")
+		if !oddFirst {
+			two()
+		}
+		d := diag.New()
+		s.ValidateRelations(d)
+		return d
+	}
+	const want = `Namespace "acl" members disagree on exclusive arg count`
+	for _, oddFirst := range []bool{true, false} {
+		d := build(oddFirst)
+		assert.Equal(t, 1, strings.Count(d.String(), want),
+			"oddFirst=%v: %s", oddFirst, d.String())
+	}
+}
+
+// A member that fails an earlier check must not fix the arity for the rest.
+func TestNamespaceMisdeclaredMemberDoesNotSeedArity(t *testing.T) {
+	s := New()
+	s.Node("bogus {{ a:word }} {{ b:word }}").Card(ZeroToN).
+		Key("a", "b").Namespace("acl")
+	s.Node("ip acl {{ name:word }}").Card(ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac acl {{ name:word }}").Card(ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name").Namespace("acl")
+	d := diag.New()
+	s.ValidateRelations(d)
+	assert.Contains(t, d.String(),
+		`Namespace "acl" is not a Kind or Tag of this definition`)
+	assert.NotContains(t, d.String(), "disagree on exclusive arg count")
+}
+
+func TestScopedByRejectsNilAndSelf(t *testing.T) {
+	s := New()
+	box := s.Node("box {{ b:word }}").Key("b")
+	claim := box.Child("claim {{ id:word }}").Key("id")
+	assert.Panics(t, func() { claim.ScopedBy(nil) })
+	assert.Panics(t, func() { claim.ScopedBy(claim) })
+}
+
+func TestScopedByHoldsInBothCallOrders(t *testing.T) {
+	build := func(anchorFirst bool) *Def {
+		s := New()
+		box := s.Node("box {{ b:word }}").Key("b")
+		n := box.Child("claim {{ id:word }}")
+		if anchorFirst {
+			return n.ScopedBy(box).Key("id").Kind("claim")
+		}
+		return n.Kind("claim").Key("id").ScopedBy(box)
+	}
+	for _, anchorFirst := range []bool{true, false} {
+		n := build(anchorFirst)
+		assert.Equal(t, "box {{ b:word }}", n.ScopeAnchor.Template)
+		assert.Equal(t, []string{"id"}, n.KeyArgs)
+		assert.Equal(t, "claim", n.ExclusiveLabel())
+	}
+}
+
+func TestScopedByDeviceSetsExtent(t *testing.T) {
+	n := New().Node("claim {{ id:word }}").Key("id").ScopedByDevice()
+	assert.True(t, n.DeviceScoped)
 }
 
 func TestExclusiveLabelPrefersNamespaceOverKind(t *testing.T) {

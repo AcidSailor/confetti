@@ -192,6 +192,8 @@ type Def struct {
 	TagNames         []string // Non-identity labels; see Tag.
 	UniqueArgs       []string
 	NamespaceLabel   string // The label that scopes the exclusive resource; see Namespace.
+	ScopeAnchor      *Def   // The ancestor whose instance opens the name space; see ScopedBy.
+	DeviceScoped     bool   // The name space covers the whole configuration; see ScopedByDevice.
 	Idempotent       bool
 	Negate           NegateStrategy
 	Merge            MergeStrategy
@@ -594,7 +596,8 @@ func (n *Def) HasLabel(name string) bool {
 // Unique restricts exclusive resource identity to captured key arguments so remediation frees the resource before moving it.
 func (n *Def) Unique(args ...string) *Def {
 	for _, arg := range args {
-		n.mustArg("Unique", arg)
+		// An exclusive name that can be empty would bucket every instance together.
+		n.mustNonEmptyArg("Unique", arg)
 	}
 	n.UniqueArgs = args
 	return n
@@ -602,10 +605,11 @@ func (n *Def) Unique(args ...string) *Def {
 
 // ExclusiveArgs returns the args that identify this definition's exclusive resource: Unique args when set, else the key args.
 func (n *Def) ExclusiveArgs() []string {
+	// Clone so a caller appending to the result cannot write into UniqueArgs or KeyArgs.
 	if len(n.UniqueArgs) > 0 {
-		return n.UniqueArgs
+		return slices.Clone(n.UniqueArgs)
 	}
-	return n.KeyArgs
+	return slices.Clone(n.KeyArgs)
 }
 
 // ExclusiveLabel returns the label that scopes this definition's exclusive resource: Namespace when set, else Kind.
@@ -622,6 +626,25 @@ func (n *Def) Namespace(label string) *Def {
 		panic("schema: Namespace label must be non-empty: " + n.Template)
 	}
 	n.NamespaceLabel = label
+	return n
+}
+
+// ScopedBy gives each instance of anchor its own exclusive name space, so the same name under two anchors is two objects.
+func (n *Def) ScopedBy(anchor *Def) *Def {
+	if anchor == nil {
+		panic("schema: ScopedBy anchor must be non-nil: " + n.Template)
+	}
+	if anchor == n {
+		panic("schema: ScopedBy anchor may not be the definition itself: " +
+			n.Template)
+	}
+	n.ScopeAnchor = anchor
+	return n
+}
+
+// ScopedByDevice makes the exclusive name space cover the whole configuration, so a name moves between owners rather than repeating.
+func (n *Def) ScopedByDevice() *Def {
+	n.DeviceScoped = true
 	return n
 }
 

@@ -77,8 +77,11 @@ func Of(n *schema.Node) Ident {
 	}
 }
 
-// KeyValue joins a keyed node's key arguments for pairing and duplicate detection.
+// KeyValue joins a keyed node's key arguments for pairing and duplicate detection; an unmatched node has no key.
 func KeyValue(n *schema.Node) string {
+	if n == nil || n.Def == nil {
+		return ""
+	}
 	keys := n.Def.KeyArgs
 	parts := make([]string, len(keys))
 	for i, a := range keys {

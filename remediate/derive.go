@@ -18,6 +18,8 @@ type resource struct {
 	arg   string
 	def   *schema.Def
 	key   string
+	// owner separates exclusive name spaces; references leave it empty.
+	owner string
 }
 
 // String renders a resource for diagnostics.
@@ -359,7 +361,7 @@ func appendHeld(
 		}
 	}
 	key := strings.Join(parts, "\x00")
-	held := heldResource{resource: resourceFor(def, key), display: key}
+	held := heldResource{resource: resourceFor(x, key), display: key}
 	if listIdx >= 0 {
 		ls := def.ListSpec
 		items, ok := resolveListArg(x, ls, d, "exclusive-resource ordering")
@@ -397,13 +399,10 @@ func resolveListArg(
 	return items, true
 }
 
-// resourceFor keys the resource by ExclusiveLabel or by the definition itself when the label is empty.
-func resourceFor(def *schema.Def, key string) resource {
-	r := resource{label: def.ExclusiveLabel(), key: key}
-	if r.label == "" {
-		r.def = def
-	}
-	return r
+// resourceFor scopes the keyed resource by the node's exclusive name space; a needless move edge is harmless, a missing one is not.
+func resourceFor(x *schema.Node, key string) resource {
+	s := ident.ScopeOf(x, ident.Device)
+	return resource{label: s.Label, def: s.Def, owner: s.Owner, key: key}
 }
 
 // deriveMoveEdges orders each resource release before a new claim on the same resource.

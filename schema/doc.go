@@ -10,7 +10,8 @@
 //
 // Relations target labels: a definition's Kind name or Tags. Ref, Requires,
 // and ExcludeTag build the supported relations. Unique and Namespace scope
-// the exclusive resource a keyed definition holds. ValidateRelations checks
+// the exclusive resource a keyed definition holds, and ScopedBy or
+// ScopedByDevice declares how far that name reaches. ValidateRelations checks
 // constraints that depend on multiple definitions.
 //
 // Remediation changes contain read-only references to caller-owned trees.
