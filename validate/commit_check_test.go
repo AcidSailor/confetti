@@ -418,4 +418,6 @@ func TestCommitCheckBaselineSchemaMismatchIsError(t *testing.T) {
 		d.String(),
 		"baseline and configuration use different schemas",
 	)
+	// The unusable baseline is dropped, but the tree is still checked.
+	assert.Contains(t, d.String(), `vlan "1" does not exist`)
 }

@@ -62,6 +62,16 @@ func (n *Node) CloneValue() *Node {
 	return c
 }
 
+// CloneTree deep-copies a subtree, including source position and operation, into an unparented node.
+func (n *Node) CloneTree() *Node {
+	c := n.CloneValue()
+	c.RealIndent, c.Line, c.Op = n.RealIndent, n.Line, n.Op
+	for _, ch := range n.Children {
+		c.AddChild(ch.CloneTree())
+	}
+	return c
+}
+
 // SetValueFrom deep-copies src value state while preserving this node's tree position and children.
 func (n *Node) SetValueFrom(src *Node) {
 	n.Def = src.Def
@@ -139,6 +149,15 @@ type Config struct {
 // NewConfig returns an empty Config bound to s.
 func NewConfig(s *Schema) *Config {
 	return &Config{Schema: s, Root: NewNode("")}
+}
+
+// CloneConfig deep-copies a configuration so a caller cannot mutate the original.
+func CloneConfig(c *Config) *Config {
+	out := NewConfig(c.Schema)
+	for _, ch := range c.Root.Children {
+		out.Root.AddChild(ch.CloneTree())
+	}
+	return out
 }
 
 // Walk visits every real node (excludes the sentinel root) in pre-order.

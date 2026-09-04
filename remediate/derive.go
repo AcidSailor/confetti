@@ -22,10 +22,11 @@ type resource struct {
 
 // String renders a resource for diagnostics.
 func (r resource) String() string {
-	if r.arg == "" {
+	if r.key == "" {
 		return r.label
 	}
-	return fmt.Sprintf("%s.%s=%q", r.label, r.arg, r.key)
+	return fmt.Sprintf("%s %q", r.label,
+		strings.ReplaceAll(r.key, "\x00", ","))
 }
 
 // heldResource adds list members and cycle-warning text to a resource.
@@ -205,29 +206,71 @@ func (dv *differ) deriveExclusionEdges() {
 	}
 }
 
-// checkBaselineRemovals reports each operation that would negate an object the baseline declares as device-provided.
+// definedIdents returns one resource per label in a subtree, keyed by definition and full key value so identity is exact.
+func definedIdents(n *schema.Node) []resource {
+	var out []resource
+	n.Walk(func(x *schema.Node) {
+		def := x.Def
+		if def == nil {
+			return
+		}
+		// Definitions sharing a label are distinct objects, so keep the def.
+		for _, label := range def.Labels() {
+			out = append(out, resource{
+				label: label, def: def, key: ident.KeyValue(x),
+			})
+		}
+	})
+	return out
+}
+
+// negatedSubtree returns the subtree an operation negates in the emitted plan, or nil when it emits no negation line.
+func negatedSubtree(o op) *schema.Node {
+	switch o.action {
+	case graph.Remove:
+		return o.src
+	case graph.Replace:
+		return o.runSrc
+	}
+	// A toggle flip, a list delta, and an idempotent reissue change a value without negating it.
+	return nil
+}
+
+// negatedPath renders the emitted negation line with its kept sections.
+func negatedPath(o op) string {
+	n := o.node
+	if o.pre != nil {
+		n = o.pre
+	}
+	return strings.Join(append(secTexts(o.secs), n.Text), " / ")
+}
+
+// checkBaselineRemovals reports each operation whose plan negates an object the baseline declares as device-provided.
 func (dv *differ) checkBaselineRemovals() {
 	if dv.baseline == nil {
 		return
 	}
 	provided := map[resource]bool{}
-	for _, r := range definesOf(dv.baseline.Root) {
+	for _, r := range definedIdents(dv.baseline.Root) {
 		provided[r] = true
 	}
 	for _, o := range dv.ops {
-		rm := removedSubtree(o)
+		rm := negatedSubtree(o)
 		if rm == nil {
 			continue
 		}
-		for _, r := range definesOf(rm) {
-			if provided[r] {
-				dv.d.Add(
-					diag.Error,
-					"%s: removes device-provided %s declared by the baseline",
-					opPath(o), r,
-				)
-				break
+		// Report every distinct baseline object the operation negates, once each.
+		seen := map[resource]bool{}
+		for _, r := range definedIdents(rm) {
+			if !provided[r] || seen[r] {
+				continue
 			}
+			seen[r] = true
+			dv.d.Add(
+				diag.Error,
+				"%s: removes device-provided %s declared by the baseline",
+				negatedPath(o), r,
+			)
 		}
 	}
 }
@@ -464,6 +507,7 @@ func labelResources(c *schema.Config) map[resource]bool {
 }
 
 // survivingLabels returns labels provided by the same definition and key in both configurations or by the baseline.
+// The baseline branch is label-only on purpose: a device-provided object is permanent, so every label it carries survives.
 func survivingLabels(
 	running, intended, baseline *schema.Config,
 ) map[string]bool {

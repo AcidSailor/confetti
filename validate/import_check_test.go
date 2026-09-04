@@ -398,7 +398,7 @@ func TestImportCheckThreeKindSpellingsReportEachExtra(t *testing.T) {
 	)
 }
 
-func TestValueCheckSkipsRequiredNodes(t *testing.T) {
+func TestFragmentCheckSkipsRequiredNodes(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("hostname {{ h:word }}").Card(schema.One)
@@ -406,13 +406,33 @@ func TestValueCheckSkipsRequiredNodes(t *testing.T) {
 	d := diag.New()
 	cfg := parse.Parse(s, "vlan 1\n", parse.Reject, d)
 	require.False(t, d.HasErrors(), d.String())
-	ValueCheck(cfg, d)
+	FragmentCheck(cfg, d)
 	assert.False(t, d.HasErrors(), d.String())
 	ImportCheck(cfg, d)
 	assert.Contains(t, d.String(), `missing required "hostname {{ h:word }}"`)
 
 	bad := parse.Parse(s, "vlan 9999\n", parse.Reject, diag.New())
 	vd := diag.New()
-	ValueCheck(bad, vd)
+	FragmentCheck(bad, vd)
 	assert.True(t, vd.HasErrors())
+}
+
+// FragmentCheck must keep every per-level rule; only missing required nodes are fragment-sensitive.
+func TestFragmentCheckKeepsPerLevelRules(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Key("id")
+	fast := s.Node("mode fast").Card(schema.ZeroToOne).Kind("mode")
+	slow := s.Node("mode slow").Card(schema.ZeroToOne).Kind("mode")
+	fast.Toggles(slow)
+
+	cfg := parse.Parse(s, "vlan 1\nvlan 1\n", parse.Reject, diag.New())
+	d := diag.New()
+	FragmentCheck(cfg, d)
+	assert.Contains(t, d.String(), `duplicate key "1"`)
+
+	cfg2 := parse.Parse(s, "mode fast\nmode slow\n", parse.Reject, diag.New())
+	d2 := diag.New()
+	FragmentCheck(cfg2, d2)
+	assert.True(t, d2.HasErrors(), d2.String())
 }

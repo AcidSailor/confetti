@@ -24,7 +24,8 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 			diag.Error,
 			"validate: baseline and configuration use different schemas",
 		)
-		return
+		// Drop the unusable baseline but still check the tree the caller asked about.
+		baseline = nil
 	}
 	// Validate the complete schema, including definitions absent from the configuration.
 	if cfg.Schema != nil {

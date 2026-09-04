@@ -14,6 +14,6 @@
 // carries the cycle policy and an optional baseline. Cycle affects only
 // ordering cycles: Abort reports an Error and emits nothing; Break drops the
 // greatest-keyed edge and reports a Warning. Baseline labels satisfy Requires
-// without producing operations, and an operation that would negate a
-// baseline resource reports an Error.
+// without producing operations, and an operation whose plan negates a
+// baseline object reports an Error. A value change is not a negation.
 package remediate

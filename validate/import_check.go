@@ -15,12 +15,19 @@ import (
 
 // ImportCheck validates node values, cardinality, duplicate keys, toggle exclusions, and required nodes within each level.
 func ImportCheck(cfg *schema.Config, d *diag.Diagnostics) {
-	ValueCheck(cfg, d)
-	checkCardinality(cfg.Root, cfg.Schema.Roots, d)
+	valueCheck(cfg, d)
+	cardinalityChecker{d: d, requireAll: true}.
+		check(cfg.Root, cfg.Schema.Roots)
 }
 
-// ValueCheck validates node values and list arguments only, so a fragment can pass without every required node.
-func ValueCheck(cfg *schema.Config, d *diag.Diagnostics) {
+// FragmentCheck runs every ImportCheck rule except missing required nodes, so a partial tree can pass.
+func FragmentCheck(cfg *schema.Config, d *diag.Diagnostics) {
+	valueCheck(cfg, d)
+	cardinalityChecker{d: d}.check(cfg.Root, cfg.Schema.Roots)
+}
+
+// valueCheck validates node values and list arguments.
+func valueCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	v := valueChecker{
 		reg:      cfg.Schema.Registry,
 		argNames: map[*schema.Def][]string{},
@@ -70,12 +77,15 @@ func (v valueChecker) checkValues(n *schema.Node) {
 	}
 }
 
-// checkCardinality validates child cardinality at one level and then recurses.
-func checkCardinality(
-	parent *schema.Node,
-	allowed []*schema.Def,
-	d *diag.Diagnostics,
-) {
+// cardinalityChecker validates one level's cardinality; requireAll also reports missing required nodes.
+type cardinalityChecker struct {
+	d          *diag.Diagnostics
+	requireAll bool
+}
+
+// check validates child cardinality at one level and then recurses.
+func (c cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
+	d := c.d
 	children := parent.Children
 	if len(children) == 0 && len(allowed) == 0 {
 		return
@@ -87,10 +97,10 @@ func checkCardinality(
 	// Map each canonical toggle member to the first present group member.
 	toggleSeen := map[*schema.Def]*schema.Node{}
 
-	for _, c := range children {
-		def := c.Def
+	for _, cc := range children {
+		def := cc.Def
 		if def == nil {
-			checkCardinality(c, nil, d)
+			c.check(cc, nil)
 			continue
 		}
 		count[def]++
@@ -98,13 +108,13 @@ func checkCardinality(
 			canon := def.ToggleCanonical()
 			// The duplicate check below handles two nodes with the same definition.
 			if first, seen := toggleSeen[canon]; !seen {
-				toggleSeen[canon] = c
+				toggleSeen[canon] = cc
 			} else if first.Def != def {
 				d.AddAt(
-					c.Line,
+					cc.Line,
 					diag.Error,
 					"%s: mutually exclusive with %q (line %d)",
-					c.Path(),
+					cc.Path(),
 					first.Text,
 					first.Line,
 				)
@@ -113,13 +123,13 @@ func checkCardinality(
 		switch {
 		case len(def.KeyArgs) > 0:
 			// Reuse the shared pairing identity so duplicates match what remediate and merge pair.
-			id := ident.Of(c)
+			id := ident.Of(cc)
 			if seenKey[id] {
 				d.AddAt(
-					c.Line,
+					cc.Line,
 					diag.Error,
 					"%s: duplicate key %q",
-					c.Path(),
+					cc.Path(),
 					id.Key,
 				)
 			}
@@ -127,10 +137,10 @@ func checkCardinality(
 		case ident.SingleOccupancy(def):
 			if count[def] > 1 {
 				d.AddAt(
-					c.Line,
+					cc.Line,
 					diag.Error,
 					"%s: duplicate (only one allowed)",
-					c.Path(),
+					cc.Path(),
 				)
 			}
 			// Same-definition duplicates were reported above.
@@ -138,22 +148,25 @@ func checkCardinality(
 				first, ok := kindSeen[def.KindName]
 				switch {
 				case !ok:
-					kindSeen[def.KindName] = c
+					kindSeen[def.KindName] = cc
 				case first.Def != def:
 					d.AddAt(
-						c.Line,
+						cc.Line,
 						diag.Error,
 						"%s: duplicate spelling of slot %q (line %d)",
-						c.Path(),
+						cc.Path(),
 						first.Text,
 						first.Line,
 					)
 				}
 			}
 		}
-		checkCardinality(c, def.Children, d)
+		c.check(cc, def.Children)
 	}
 
+	if !c.requireAll {
+		return
+	}
 	for _, sn := range allowed {
 		if sn.Cardinality != schema.One || len(sn.KeyArgs) > 0 ||
 			count[sn] > 0 {

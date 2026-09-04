@@ -40,9 +40,8 @@ Vendor-grounded constructs and why they exist:
   add/remove delta forms.
 - Import drop rules (`!` comments, `version`, `exit`, config preamble)
   mirror real `show running-config` noise.
-- `Baseline()` declares VLAN 1 and the default VRF. NX-OS provides both and
-  prints neither, so `switchport access vlan 1` and `vrf member default`
-  resolve only through the engine baseline.
+- Reference configurations print neither `vlan 1` nor `vrf context default`,
+  so `Baseline()` declares both.
 
 Unverified / docs-only (re-verify on a lab device if it ever matters):
 
@@ -57,6 +56,9 @@ Unverified / docs-only (re-verify on a lab device if it ever matters):
   from references.
 - Reserved-vlan sub-range (3968–4095) not modeled; keyword domain is flat
   `1-4094`.
+- `Baseline()` models VLAN 1 and the default VRF as device-provided, and
+  `vrf member default` as their referrer. The device behavior was not
+  confirmed on a lab image.
 - Single-line banner form (`banner motd ^text^` on one line) out of scope.
 
 ## beta (OcNOS lineage)

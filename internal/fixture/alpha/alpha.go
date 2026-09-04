@@ -120,7 +120,7 @@ func ImportTransforms() []transform.TextRule {
 	return rules
 }
 
-// Baseline lists objects the platform provides without printing them in the running configuration.
+// Baseline lists objects the platform provides without printing them in the running configuration; see docs/fixtures.md.
 func Baseline() string {
 	return "vlan 1\nvrf context default\n"
 }

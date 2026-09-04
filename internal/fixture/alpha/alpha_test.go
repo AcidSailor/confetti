@@ -277,3 +277,14 @@ func TestAlphaBaselineResolvesBuiltInsWithoutPlanningThem(t *testing.T) {
 	out, _ := e.Render(res.Tree)
 	assert.Equal(t, in, out)
 }
+
+func TestAlphaBaselineRefusesToNegateABuiltIn(t *testing.T) {
+	e := Engine()
+	running, d := e.Import("vlan 1\n")
+	require.False(t, d.HasErrors(), d.String())
+	empty, d := e.Import("")
+	require.False(t, d.HasErrors(), d.String())
+	_, rd := e.Remediate(running, empty)
+	require.True(t, rd.HasErrors())
+	assert.Contains(t, rd.String(), "removes device-provided")
+}

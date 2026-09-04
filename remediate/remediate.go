@@ -16,7 +16,7 @@ const (
 // Options configures Diff; the zero value aborts on cycles and has no baseline.
 type Options struct {
 	Cycle Cycle
-	// Baseline holds device-provided objects that satisfy Requires without appearing in either configuration.
+	// Baseline holds device-provided objects that satisfy Requires without appearing in either configuration; negating one is an Error.
 	Baseline *schema.Config
 }
 
@@ -41,7 +41,7 @@ func (r *Result) Empty() bool {
 	return empty
 }
 
-// Diff returns the remediation from running to intended without modifying either input; both trees must use the same schema.
+// Diff returns the remediation from running to intended without modifying any input; running, intended, and any baseline must use the same schema.
 func Diff(
 	running, intended *schema.Config,
 	o Options,

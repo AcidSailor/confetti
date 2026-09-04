@@ -69,9 +69,10 @@ to break a cycle.
 
 Use `WithBaseline` for objects the device provides but never prints, such as
 the default VRF or built-in class maps. The text imports with the same schema
-and transforms. Baseline objects resolve references and prerequisites only.
-They never render, merge, or appear in a remediation. A plan that would negate
-a baseline object reports an error:
+and transforms. Baseline objects resolve references and prerequisites, and
+they never render, merge, or appear in a remediation. A plan that would negate
+one reports an error. `New` panics if the baseline text does not import
+cleanly, because it is authored platform data:
 
 ```go
 e := confetti.New(mySchema, confetti.WithBaseline("vlan 1\nvrf context default\n"))

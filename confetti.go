@@ -24,8 +24,9 @@ type Engine struct {
 	importTree   []transform.TreeTransform
 	exportTree   []transform.TreeTransform
 	commitChecks []Validator
+	// baselineText is construction-only; New consumes it.
 	baselineText []string
-	// baseline holds device-provided objects; it is a relation target only and never renders, merges, or enters a plan.
+	// baseline holds device-provided objects; it adds relation targets, blocks their negation, and never renders, merges, or enters a plan.
 	baseline *schema.Config
 }
 
@@ -62,7 +63,7 @@ func WithExportTree(ts ...transform.TreeTransform) Option {
 	return func(e *Engine) { e.exportTree = append(e.exportTree, ts...) }
 }
 
-// Validator checks an assembled tree against the engine baseline, reports into d, and must not modify either tree.
+// Validator checks an assembled tree against a copy of the engine baseline, which is never nil, reports into d, and must not modify cfg.
 type Validator func(cfg, baseline *schema.Config, d *diag.Diagnostics)
 
 // WithCommitChecks appends whole-tree validators that run after the built-in commit check.
@@ -80,26 +81,39 @@ func WithBaseline(text string) Option {
 	return func(e *Engine) { e.baselineText = append(e.baselineText, text) }
 }
 
-// New constructs an Engine for the given schema and panics when the baseline does not import cleanly.
+// New constructs an Engine for the given schema and panics when the baseline reports any diagnostic.
 func New(s *schema.Schema, opts ...Option) *Engine {
 	e := &Engine{schema: s}
 	for _, o := range opts {
 		o(e)
 	}
+	// An always-present baseline keeps every consumer free of a nil case.
+	e.baseline = schema.NewConfig(s)
 	// Parse after every option so import transforms apply regardless of option order.
 	if len(e.baselineText) > 0 {
 		d := diag.New()
 		e.baseline = e.importWith(
-			strings.Join(e.baselineText, "\n"),
+			baselineSource(e.baselineText),
 			parse.Reject,
-			validate.ValueCheck,
+			validate.FragmentCheck,
 			d,
 		)
-		if d.HasErrors() {
+		// The baseline is authored platform data, so a Warning is an authoring error too.
+		if len(d.Items) > 0 {
 			panic("confetti: baseline does not import cleanly:\n" + d.String())
 		}
 	}
 	return e
+}
+
+// baselineSource terminates every fragment so joining cannot merge two lines or leave a blank one.
+func baselineSource(parts []string) string {
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(strings.TrimRight(p, "\n"))
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // Import transforms, parses, folds, and validates configuration text.
@@ -159,10 +173,16 @@ func (e *Engine) CommitCheck(cfg *schema.Config) *diag.Diagnostics {
 
 func (e *Engine) commitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	validate.CommitCheck(cfg, e.baseline, d)
+	base := e.baseline
+	// A tree from another schema cannot use this baseline; CommitCheck reports the mismatch.
+	if base.Schema != cfg.Schema {
+		base = schema.NewConfig(cfg.Schema)
+	}
 	// Each validator collects into its own Diagnostics so it cannot drop what earlier checks recorded.
 	for _, fn := range e.commitChecks {
 		vd := diag.New()
-		fn(cfg, e.baseline, vd)
+		// Clone because the baseline is shared engine state that outlives the call.
+		fn(cfg, schema.CloneConfig(base), vd)
 		d.Merge(vd)
 	}
 }
