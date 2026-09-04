@@ -400,3 +400,22 @@ func TestCommitCheckBaselineRelationsAreNotChecked(t *testing.T) {
 	CommitCheck(cfg, baseline, d)
 	assert.False(t, d.HasErrors(), d.String())
 }
+
+func TestCommitCheckBaselineSchemaMismatchIsError(t *testing.T) {
+	d := diag.New()
+	baseline := parse.Parse(refSchema(), "vlan 1\n", parse.Reject, d)
+	cfg := parse.Parse(
+		refSchema(),
+		"interface Ethernet1/1\n  switchport access vlan 1\n",
+		parse.Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, baseline, d)
+	require.True(t, d.HasErrors())
+	assert.Contains(
+		t,
+		d.String(),
+		"baseline and configuration use different schemas",
+	)
+}

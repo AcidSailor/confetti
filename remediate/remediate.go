@@ -56,7 +56,10 @@ func Diff(
 		return &Result{Tree: out}, d
 	}
 	if o.Baseline != nil && o.Baseline.Schema != intended.Schema {
-		d.Add(diag.Error, "remediate: baseline uses a different schema")
+		d.Add(
+			diag.Error,
+			"remediate: baseline and intended use different schemas",
+		)
 		return &Result{Tree: out}, d
 	}
 	dv := &differ{
@@ -65,6 +68,7 @@ func Diff(
 		cycle: o.Cycle, d: d,
 	}
 	dv.collect(running.Root, intended.Root, nil, nil)
+	dv.checkBaselineRemovals()
 	dv.buildGraph()
 	seq := dv.schedule()
 	if seq == nil {

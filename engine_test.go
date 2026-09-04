@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	confetti "github.com/acidsailor/confetti"
+	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/graph"
 	"github.com/acidsailor/confetti/internal/fixture/alpha"
 	"github.com/acidsailor/confetti/internal/testtypes"
@@ -421,4 +422,54 @@ func TestWithBaselineAccumulates(t *testing.T) {
 	cfg, d := e.Import("interface Ethernet1/1\n  switchport access vlan 2\n")
 	require.False(t, d.HasErrors(), d.String())
 	assert.False(t, e.CommitCheck(cfg).HasErrors())
+}
+
+func TestWithBaselineReachesValidators(t *testing.T) {
+	var seen []string
+	record := func(_, baseline *schema.Config, _ *diag.Diagnostics) {
+		seen = nil
+		schema.Walk(
+			baseline,
+			func(n *schema.Node) { seen = append(seen, n.Text) },
+		)
+	}
+	e := confetti.New(remediateSchema(),
+		confetti.WithBaseline("vlan 1\n"),
+		confetti.WithCommitChecks(record))
+	cfg, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	e.CommitCheck(cfg)
+	assert.Equal(t, []string{"vlan 1"}, seen)
+}
+
+func TestWithBaselineSkipsRequiredNodes(t *testing.T) {
+	s := remediateSchema()
+	s.Node("hostname {{ h:word }}").Card(schema.One)
+	e := confetti.New(s, confetti.WithBaseline("vlan 1\n"))
+	cfg, d := e.Import("hostname sw1\n" + baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	assert.False(t, e.CommitCheck(cfg).HasErrors())
+	assert.PanicsWithValue(
+		t,
+		"confetti: baseline does not import cleanly:\n"+
+			"1: error: vlan 9999: invalid id \"9999\": out of range 1..4094\n",
+		func() { confetti.New(remediateSchema(), confetti.WithBaseline("vlan 9999\n")) },
+	)
+}
+
+func TestWithBaselineRefusesToNegateBaselineObject(t *testing.T) {
+	e := confetti.New(remediateSchema(), confetti.WithBaseline("vlan 1\n"))
+	running, d := e.Import("vlan 1\n")
+	require.False(t, d.HasErrors(), d.String())
+	intended, d := e.Import(baselineReferrer)
+	require.False(t, d.HasErrors(), d.String())
+	_, rd := e.Remediate(running, intended)
+	require.True(t, rd.HasErrors())
+	assert.Contains(
+		t,
+		rd.String(),
+		`vlan 1: removes device-provided vlan.id="1" declared by the baseline`,
+	)
+	_, bd := e.Rollback(intended, running)
+	assert.Contains(t, bd.String(), "removes device-provided")
 }

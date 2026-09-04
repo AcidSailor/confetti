@@ -70,7 +70,8 @@ to break a cycle.
 Use `WithBaseline` for objects the device provides but never prints, such as
 the default VRF or built-in class maps. The text imports with the same schema
 and transforms. Baseline objects resolve references and prerequisites only.
-They never render, merge, or appear in a remediation:
+They never render, merge, or appear in a remediation. A plan that would negate
+a baseline object reports an error:
 
 ```go
 e := confetti.New(mySchema, confetti.WithBaseline("vlan 1\nvrf context default\n"))
@@ -78,7 +79,8 @@ e := confetti.New(mySchema, confetti.WithBaseline("vlan 1\nvrf context default\n
 
 Use `WithCommitChecks` for whole-tree rules that do not fit the schema. The
 validators run after the built-in check in `CommitCheck`, `Remediate`, and
-`Rollback`. A validator reports diagnostics and must not modify the tree:
+`Rollback`. A validator receives the tree and the baseline, reports
+diagnostics, and must not modify either tree:
 
 ```go
 e := confetti.New(mySchema, confetti.WithCommitChecks(checkPlatformRules))

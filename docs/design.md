@@ -72,7 +72,8 @@ Layering rules:
 ## Pipelines
 
 ```
-New:       baseline text → Import pipeline with parse.Reject → panic on Error
+New:       baseline text → Import pipeline with parse.Reject and ValueCheck
+           instead of ImportCheck → panic on Error
 Import:    text transforms (outside block spans) → parse → fold
            (Respell → ListContinues → Members) → user tree transforms
            → ImportCheck
@@ -155,12 +156,20 @@ The explanations record constraints that tests do not show.
   objects the device provides but never prints. The engine imports the text
   once in `New`, after every option, so import transforms apply in any option
   order. It uses `parse.Reject` regardless of `WithUnknown` and panics on an
-  Error because the baseline is authored platform data. `CommitCheck` seeds
-  its index from the baseline before it walks the tree and never checks the
-  baseline's own relations. `Diff` counts baseline labels as `Requires`
+  Error because the baseline is authored platform data. A baseline is a
+  fragment, so `New` runs `ValueCheck` and skips the whole-config
+  `missing required` check. `CommitCheck` seeds its index from the baseline
+  before it walks the tree and never checks the baseline's own relations.
+  Custom validators receive the baseline as their second argument so they can
+  agree with the built-in check. `Diff` counts baseline labels as `Requires`
   survivors so `Compare`, `Remediate`, and `Rollback` agree with the commit
-  check. Baseline nodes never render, merge, or enter a plan. A baseline
-  extends the target set; it does not relax the check for other values.
+  check. Baseline nodes never render, merge, or enter a plan. A plan that
+  would negate a resource the baseline declares reports an Error and keeps
+  the Result for inspection, because a device-provided object cannot be
+  deleted and the goal must state it. A baseline extends the target set; it
+  does not relax the check for other values. Baseline and configuration must
+  share one `*schema.Schema`; a mismatch is an Error in both `CommitCheck`
+  and `Diff`.
 - **Whole-tree validators belong to `Engine`.** `OrderHook` and `MergeFunc`
   are schema behavior. Validators are Engine composition, so Engines that
   share a schema can use different validator sets. `WithCommitChecks` appends

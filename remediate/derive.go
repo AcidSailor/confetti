@@ -20,6 +20,14 @@ type resource struct {
 	key   string
 }
 
+// String renders a resource for diagnostics.
+func (r resource) String() string {
+	if r.arg == "" {
+		return r.label
+	}
+	return fmt.Sprintf("%s.%s=%q", r.label, r.arg, r.key)
+}
+
 // heldResource adds list members and cycle-warning text to a resource.
 type heldResource struct {
 	resource
@@ -192,6 +200,33 @@ func (dv *differ) deriveExclusionEdges() {
 			}
 			if label, ok := conflictLabel(added.Def, removed.Def); ok {
 				dv.addEdge(j, i, "mutually exclusive label %q", label)
+			}
+		}
+	}
+}
+
+// checkBaselineRemovals reports each operation that would negate an object the baseline declares as device-provided.
+func (dv *differ) checkBaselineRemovals() {
+	if dv.baseline == nil {
+		return
+	}
+	provided := map[resource]bool{}
+	for _, r := range definesOf(dv.baseline.Root) {
+		provided[r] = true
+	}
+	for _, o := range dv.ops {
+		rm := removedSubtree(o)
+		if rm == nil {
+			continue
+		}
+		for _, r := range definesOf(rm) {
+			if provided[r] {
+				dv.d.Add(
+					diag.Error,
+					"%s: removes device-provided %s declared by the baseline",
+					opPath(o), r,
+				)
+				break
 			}
 		}
 	}

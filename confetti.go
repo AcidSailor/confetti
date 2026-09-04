@@ -23,7 +23,7 @@ type Engine struct {
 	exportText   []transform.TextRule
 	importTree   []transform.TreeTransform
 	exportTree   []transform.TreeTransform
-	commitChecks []func(*schema.Config, *diag.Diagnostics)
+	commitChecks []Validator
 	baselineText []string
 	// baseline holds device-provided objects; it is a relation target only and never renders, merges, or enters a plan.
 	baseline *schema.Config
@@ -62,8 +62,11 @@ func WithExportTree(ts ...transform.TreeTransform) Option {
 	return func(e *Engine) { e.exportTree = append(e.exportTree, ts...) }
 }
 
-// WithCommitChecks appends whole-tree validators, which report into d and must not modify cfg, after the built-in commit check.
-func WithCommitChecks(fns ...func(*schema.Config, *diag.Diagnostics)) Option {
+// Validator checks an assembled tree against the engine baseline, reports into d, and must not modify either tree.
+type Validator func(cfg, baseline *schema.Config, d *diag.Diagnostics)
+
+// WithCommitChecks appends whole-tree validators that run after the built-in commit check.
+func WithCommitChecks(fns ...Validator) Option {
 	for _, fn := range fns {
 		if fn == nil {
 			panic("confetti: WithCommitChecks with nil func")
@@ -89,6 +92,7 @@ func New(s *schema.Schema, opts ...Option) *Engine {
 		e.baseline = e.importWith(
 			strings.Join(e.baselineText, "\n"),
 			parse.Reject,
+			validate.ValueCheck,
 			d,
 		)
 		if d.HasErrors() {
@@ -101,20 +105,21 @@ func New(s *schema.Schema, opts ...Option) *Engine {
 // Import transforms, parses, folds, and validates configuration text.
 func (e *Engine) Import(text string) (*schema.Config, *diag.Diagnostics) {
 	d := diag.New()
-	return e.importWith(text, e.unknown, d), d
+	return e.importWith(text, e.unknown, validate.ImportCheck, d), d
 }
 
-// importWith runs the import pipeline with an explicit unknown-command policy.
+// importWith runs the import pipeline with an explicit unknown-command policy and final check.
 func (e *Engine) importWith(
 	text string,
 	unknown parse.Unknown,
+	check func(*schema.Config, *diag.Diagnostics),
 	d *diag.Diagnostics,
 ) *schema.Config {
 	text = applyTextOutsideBlocks(e.schema, e.importText, text)
 	cfg := parse.Parse(e.schema, text, unknown, d)
 	parse.Fold(cfg, d)
 	transform.ApplyTree(e.importTree, cfg)
-	validate.ImportCheck(cfg, d)
+	check(cfg, d)
 	return cfg
 }
 
@@ -157,7 +162,7 @@ func (e *Engine) commitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	// Each validator collects into its own Diagnostics so it cannot drop what earlier checks recorded.
 	for _, fn := range e.commitChecks {
 		vd := diag.New()
-		fn(cfg, vd)
+		fn(cfg, e.baseline, vd)
 		d.Merge(vd)
 	}
 }

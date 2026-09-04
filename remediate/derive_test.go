@@ -800,6 +800,36 @@ func TestBaselineSchemaMismatchIsError(t *testing.T) {
 		mustParse(t, s, ""), mustParse(t, s, "router bgp\n"),
 		Options{Baseline: mustParse(t, requireSchema(), "feature bgp\n")})
 	require.True(t, d.HasErrors())
-	assert.Contains(t, d.String(), "baseline uses a different schema")
+	assert.Contains(
+		t,
+		d.String(),
+		"baseline and intended use different schemas",
+	)
 	assert.True(t, res.Empty())
+}
+
+func TestBaselineRemovalIsError(t *testing.T) {
+	// Running prints a device-provided object; a goal that omits it cannot negate it.
+	s := requireSchema()
+	res, d := Diff(
+		mustParse(t, s, "feature bgp\nrouter bgp\n"),
+		mustParse(t, s, "router bgp\n"),
+		Options{Baseline: mustParse(t, s, "feature bgp\n")})
+	require.True(t, d.HasErrors())
+	assert.Contains(
+		t,
+		d.String(),
+		`feature bgp: removes device-provided feature.name="bgp" declared by the baseline`,
+	)
+	// The result stays available for inspection.
+	assert.Equal(t, "no feature bgp\n", render.Render(res.Tree))
+}
+
+func TestBaselineKeptInBothIsNotAnError(t *testing.T) {
+	s := requireSchema()
+	_, d := Diff(
+		mustParse(t, s, "feature bgp\n"),
+		mustParse(t, s, "feature bgp\nrouter bgp\n"),
+		Options{Baseline: mustParse(t, s, "feature bgp\n")})
+	assert.False(t, d.HasErrors(), d.String())
 }

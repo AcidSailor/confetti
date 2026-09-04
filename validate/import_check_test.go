@@ -397,3 +397,22 @@ func TestImportCheckThreeKindSpellingsReportEachExtra(t *testing.T) {
 		d.String(),
 	)
 }
+
+func TestValueCheckSkipsRequiredNodes(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("hostname {{ h:word }}").Card(schema.One)
+	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Key("id")
+	d := diag.New()
+	cfg := parse.Parse(s, "vlan 1\n", parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	ValueCheck(cfg, d)
+	assert.False(t, d.HasErrors(), d.String())
+	ImportCheck(cfg, d)
+	assert.Contains(t, d.String(), `missing required "hostname {{ h:word }}"`)
+
+	bad := parse.Parse(s, "vlan 9999\n", parse.Reject, diag.New())
+	vd := diag.New()
+	ValueCheck(bad, vd)
+	assert.True(t, vd.HasErrors())
+}

@@ -15,14 +15,18 @@ import (
 
 // ImportCheck validates node values, cardinality, duplicate keys, toggle exclusions, and required nodes within each level.
 func ImportCheck(cfg *schema.Config, d *diag.Diagnostics) {
+	ValueCheck(cfg, d)
+	checkCardinality(cfg.Root, cfg.Schema.Roots, d)
+}
+
+// ValueCheck validates node values and list arguments only, so a fragment can pass without every required node.
+func ValueCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	v := valueChecker{
 		reg:      cfg.Schema.Registry,
 		argNames: map[*schema.Def][]string{},
 		d:        d,
 	}
 	schema.Walk(cfg, v.checkValues)
-
-	checkCardinality(cfg.Root, cfg.Schema.Roots, d)
 }
 
 // valueChecker validates node values against their registered types.
