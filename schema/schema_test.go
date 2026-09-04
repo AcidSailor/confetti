@@ -1027,3 +1027,11 @@ func TestExclusiveArgsPreferUniqueOverKey(t *testing.T) {
 	n.Unique("id")
 	assert.Equal(t, []string{"id"}, n.ExclusiveArgs())
 }
+
+func TestExclusiveLabelPrefersNamespaceOverKind(t *testing.T) {
+	n := New().Node("ip access-list {{ name:word }}").Kind("ip-acl")
+	assert.Equal(t, "ip-acl", n.ExclusiveLabel())
+	n.Tag("acl").Namespace("acl")
+	assert.Equal(t, "acl", n.ExclusiveLabel())
+	assert.Empty(t, New().Node("shutdown").ExclusiveLabel())
+}

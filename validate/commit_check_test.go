@@ -519,7 +519,7 @@ func TestCommitCheckNamespaceCollisionIsError(t *testing.T) {
 	assert.Contains(
 		t,
 		d.String(),
-		`mac access-list L: name "L" in namespace "acl" is already held by "ip access-list L" (line 1)`,
+		`mac access-list L: name "L" under label "acl" is already held by "ip access-list L" (line 1)`,
 	)
 	assert.Equal(t, 2, d.Items[0].Line, "points at the later holder")
 }
@@ -547,7 +547,7 @@ func TestCommitCheckNamespaceCollisionWithBaselineIsError(t *testing.T) {
 	assert.Contains(
 		t,
 		d.String(),
-		`name "L" in namespace "acl" is already held by baseline "ip access-list L"`,
+		`name "L" under label "acl" is already held by baseline "ip access-list L"`,
 	)
 }
 
@@ -566,4 +566,37 @@ func TestCommitCheckNamespaceListExclusiveArgIsError(t *testing.T) {
 		d.String(),
 		`Namespace "prio" cannot make List arg "ids" exclusive`,
 	)
+}
+
+func TestCommitCheckUniqueCollisionUnderKindIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("slot {{ id:word }} owner {{ own:word }}").Card(schema.ZeroToN).
+		Kind("slot").Key("id", "own").Unique("id")
+	d := checkText(t, s, "slot 1 owner a\nslot 1 owner b\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`slot 1 owner b: name "1" under label "slot" is already held by "slot 1 owner a" (line 1)`,
+	)
+}
+
+func TestCommitCheckKeyedKindCollisionAcrossDefsIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("vrf {{ name:word }}").Card(schema.ZeroToN).Kind("vrf").Key("name")
+	s.Node("vrf context {{ name:word }}").Card(schema.ZeroToN).Kind("vrf").
+		Key("name")
+	d := checkText(t, s, "vrf RED\nvrf context RED\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `name "RED" under label "vrf"`)
+}
+
+func TestCommitCheckKeylessKindHoldsNoName(t *testing.T) {
+	s := schema.New()
+	r := s.Node("router bgp {{ as:word }}").Card(schema.ZeroToOne)
+	r.Child("default-originate").Card(schema.ZeroToOne).Kind("do")
+	r.Child("default-originate always").Card(schema.ZeroToOne).Kind("do")
+	d := checkText(t, s,
+		"router bgp 65000\n  default-originate\n  default-originate always\n")
+	assert.False(t, d.HasErrors(), d.String())
 }

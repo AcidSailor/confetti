@@ -272,7 +272,7 @@ The explanations record constraints that tests do not show.
   | --- | --- |
   | `CommitCheck` record, `Ref`, `Requires` | `Labels()`: Kind and Tags |
   | Reference ordering (`appendDefines`) | `Labels()`: Kind and Tags |
-  | Exclusive resources (`resourceFor`) | `Namespace`, else `Kind` |
+  | Exclusive resources (`resourceFor`, `CommitCheck` collisions) | `ExclusiveLabel()`: `Namespace`, else `Kind` |
 
   Definitions with distinct Kinds that share one device-side name space
   declare the same `Namespace(label)`. `ValidateRelations` rejects a
@@ -280,8 +280,10 @@ The explanations record constraints that tests do not show.
   with a single keyed member, members that disagree on exclusive arg count,
   a `List` arg among the exclusive args, and a keyed carrier of the label
   that does not declare the namespace. `CommitCheck` rejects a second object
-  that holds a name already held in the namespace, including by the
-  baseline. Re-entering the same object is not a collision.
+  that holds a name already held under the same `ExclusiveLabel()`,
+  including by the baseline, so a keyed `Kind` is exclusive at commit time
+  exactly as ordering assumes. Re-entering the same object is not a
+  collision, and keyless Kind slots hold no name.
 - **Sibling exclusions order removals before additions.** `Diff` does not check
   intermediate states, but the emitted operations must remain valid for the
   device. Each conflicting sibling is removed before its excluder is installed

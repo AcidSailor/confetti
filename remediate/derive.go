@@ -397,12 +397,9 @@ func resolveListArg(
 	return items, true
 }
 
-// resourceFor keys the resource by Namespace, then Kind, and by the definition itself when both are empty.
+// resourceFor keys the resource by ExclusiveLabel or by the definition itself when the label is empty.
 func resourceFor(def *schema.Def, key string) resource {
-	r := resource{label: def.NamespaceLabel, key: key}
-	if r.label == "" {
-		r.label = def.KindName
-	}
+	r := resource{label: def.ExclusiveLabel(), key: key}
 	if r.label == "" {
 		r.def = def
 	}

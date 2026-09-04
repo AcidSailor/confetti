@@ -608,6 +608,14 @@ func (n *Def) ExclusiveArgs() []string {
 	return n.KeyArgs
 }
 
+// ExclusiveLabel returns the label that scopes this definition's exclusive resource: Namespace when set, else Kind.
+func (n *Def) ExclusiveLabel() string {
+	if n.NamespaceLabel != "" {
+		return n.NamespaceLabel
+	}
+	return n.KindName
+}
+
 // Namespace scopes the exclusive resource by label instead of Kind so definitions with distinct Kinds release a shared name before claiming it.
 func (n *Def) Namespace(label string) *Def {
 	if label == "" {

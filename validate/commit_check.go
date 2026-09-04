@@ -10,8 +10,8 @@ import (
 // target identifies a labeled key value.
 type target struct{ label, arg, val string }
 
-// holder identifies one exclusive name inside a Namespace.
-type holder struct{ namespace, key string }
+// holder identifies one exclusive name under a Namespace or Kind.
+type holder struct{ label, key string }
 
 // relationChecker holds the relation indexes and diagnostic sink.
 type relationChecker struct {
@@ -19,7 +19,7 @@ type relationChecker struct {
 	index map[target]bool
 	// present records whether any instance carries each label.
 	present map[string]bool
-	// held maps each namespace name to its first holder so a second claim is a collision.
+	// held maps each exclusive name to its first holder so a second claim is a collision.
 	held map[holder]*schema.Node
 	// baseline marks holders that the device provides.
 	baseline map[*schema.Node]bool
@@ -57,7 +57,7 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 	}
 	schema.Walk(cfg, c.record)
 	schema.Walk(cfg, c.checkRelations)
-	schema.Walk(cfg, c.checkNamespace)
+	schema.Walk(cfg, c.checkExclusive)
 }
 
 // record indexes the labels and key values one node declares.
@@ -77,13 +77,13 @@ func (c relationChecker) record(n *schema.Node) {
 	}
 }
 
-// heldName returns the namespace name one node holds.
+// heldName returns the exclusive name one node holds under its ExclusiveLabel.
 func heldName(n *schema.Node) (holder, bool) {
 	def := n.Def
-	if def == nil || def.NamespaceLabel == "" || len(def.KeyArgs) == 0 {
+	if def == nil || len(def.KeyArgs) == 0 || def.ExclusiveLabel() == "" {
 		return holder{}, false
 	}
-	return holder{def.NamespaceLabel, fieldKey(n, def.ExclusiveArgs())}, true
+	return holder{def.ExclusiveLabel(), fieldKey(n, def.ExclusiveArgs())}, true
 }
 
 // fieldKey joins the values of args into one comparable key.
@@ -95,8 +95,8 @@ func fieldKey(n *schema.Node, args []string) string {
 	return strings.Join(parts, "\x00")
 }
 
-// checkNamespace reports a node whose namespace name another object already holds.
-func (c relationChecker) checkNamespace(n *schema.Node) {
+// checkExclusive reports a node whose exclusive name another object already holds.
+func (c relationChecker) checkExclusive(n *schema.Node) {
 	h, ok := heldName(n)
 	if !ok {
 		return
@@ -110,13 +110,13 @@ func (c relationChecker) checkNamespace(n *schema.Node) {
 	name := strings.ReplaceAll(h.key, "\x00", ",")
 	if c.baseline[first] {
 		c.d.AddAt(n.Line, diag.Error,
-			"%s: name %q in namespace %q is already held by baseline %q",
-			n.Path(), name, h.namespace, first.Text)
+			"%s: name %q under label %q is already held by baseline %q",
+			n.Path(), name, h.label, first.Text)
 		return
 	}
 	c.d.AddAt(n.Line, diag.Error,
-		"%s: name %q in namespace %q is already held by %q (line %d)",
-		n.Path(), name, h.namespace, first.Text, first.Line)
+		"%s: name %q under label %q is already held by %q (line %d)",
+		n.Path(), name, h.label, first.Text, first.Line)
 }
 
 // checkRelations validates every relation one node declares against the index.
