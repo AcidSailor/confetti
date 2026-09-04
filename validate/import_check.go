@@ -84,8 +84,8 @@ type cardinalityChecker struct {
 }
 
 // check validates child cardinality at one level and then recurses.
-func (c cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
-	d := c.d
+func (k cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
+	d := k.d
 	children := parent.Children
 	if len(children) == 0 && len(allowed) == 0 {
 		return
@@ -97,10 +97,10 @@ func (c cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
 	// Map each canonical toggle member to the first present group member.
 	toggleSeen := map[*schema.Def]*schema.Node{}
 
-	for _, cc := range children {
-		def := cc.Def
+	for _, c := range children {
+		def := c.Def
 		if def == nil {
-			c.check(cc, nil)
+			k.check(c, nil)
 			continue
 		}
 		count[def]++
@@ -108,13 +108,13 @@ func (c cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
 			canon := def.ToggleCanonical()
 			// The duplicate check below handles two nodes with the same definition.
 			if first, seen := toggleSeen[canon]; !seen {
-				toggleSeen[canon] = cc
+				toggleSeen[canon] = c
 			} else if first.Def != def {
 				d.AddAt(
-					cc.Line,
+					c.Line,
 					diag.Error,
 					"%s: mutually exclusive with %q (line %d)",
-					cc.Path(),
+					c.Path(),
 					first.Text,
 					first.Line,
 				)
@@ -123,13 +123,13 @@ func (c cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
 		switch {
 		case len(def.KeyArgs) > 0:
 			// Reuse the shared pairing identity so duplicates match what remediate and merge pair.
-			id := ident.Of(cc)
+			id := ident.Of(c)
 			if seenKey[id] {
 				d.AddAt(
-					cc.Line,
+					c.Line,
 					diag.Error,
 					"%s: duplicate key %q",
-					cc.Path(),
+					c.Path(),
 					id.Key,
 				)
 			}
@@ -137,10 +137,10 @@ func (c cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
 		case ident.SingleOccupancy(def):
 			if count[def] > 1 {
 				d.AddAt(
-					cc.Line,
+					c.Line,
 					diag.Error,
 					"%s: duplicate (only one allowed)",
-					cc.Path(),
+					c.Path(),
 				)
 			}
 			// Same-definition duplicates were reported above.
@@ -148,23 +148,23 @@ func (c cardinalityChecker) check(parent *schema.Node, allowed []*schema.Def) {
 				first, ok := kindSeen[def.KindName]
 				switch {
 				case !ok:
-					kindSeen[def.KindName] = cc
+					kindSeen[def.KindName] = c
 				case first.Def != def:
 					d.AddAt(
-						cc.Line,
+						c.Line,
 						diag.Error,
 						"%s: duplicate spelling of slot %q (line %d)",
-						cc.Path(),
+						c.Path(),
 						first.Text,
 						first.Line,
 					)
 				}
 			}
 		}
-		c.check(cc, def.Children)
+		k.check(c, def.Children)
 	}
 
-	if !c.requireAll {
+	if !k.requireAll {
 		return
 	}
 	for _, sn := range allowed {

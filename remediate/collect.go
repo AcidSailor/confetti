@@ -40,12 +40,14 @@ type op struct {
 
 // differ carries one Diff invocation's shared state through collect, derive, and schedule.
 type differ struct {
-	running, intended, baseline *schema.Config
-	order                       map[*schema.Def]int
-	cycle                       Cycle
-	d                           *diag.Diagnostics
-	ops                         []op
-	g                           *graph.Graph
+	running, intended *schema.Config
+	// provided holds the resources a baseline declares as device-provided.
+	provided map[resource]bool
+	order    map[*schema.Def]int
+	cycle    Cycle
+	d        *diag.Diagnostics
+	ops      []op
+	g        *graph.Graph
 	// why stores the first reason for each edge for Break cycle warnings.
 	why map[[2]int]string
 }
@@ -374,5 +376,10 @@ func opViews(ops []op) []graph.Op {
 
 // opPath renders kept sections and the operation line before materialization assigns parents.
 func opPath(o op) string {
-	return strings.Join(append(secTexts(o.secs), o.node.Text), " / ")
+	return opPathAt(o.secs, o.node)
+}
+
+// opPathAt renders kept sections and one chosen line in the shared path format.
+func opPathAt(secs []*schema.Node, n *schema.Node) string {
+	return strings.Join(append(secTexts(secs), n.Text), " / ")
 }

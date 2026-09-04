@@ -385,17 +385,12 @@ func TestWithBaselineNeverEntersPlanOrCompare(t *testing.T) {
 		"+ interface Ethernet1/1\n+   switchport access vlan 1\n", view)
 }
 
-func TestWithBaselineAppliesImportTextInBothOrders(t *testing.T) {
-	drop, err := transform.DropLines(`^!`)
-	require.NoError(t, err)
-	text, rule := confetti.WithBaseline(
-		"! built-ins\nvlan 1\n",
-	), confetti.WithImportText(
-		drop,
-	)
+// assertBaselineOrderIndependent resolves baselineReferrer with the two options applied in either order.
+func assertBaselineOrderIndependent(t *testing.T, base, other confetti.Option) {
+	t.Helper()
 	for name, opts := range map[string][]confetti.Option{
-		"baseline first": {text, rule},
-		"rule first":     {rule, text},
+		"baseline first": {base, other},
+		"other first":    {other, base},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := confetti.New(remediateSchema(), opts...)
@@ -404,6 +399,14 @@ func TestWithBaselineAppliesImportTextInBothOrders(t *testing.T) {
 			assert.False(t, e.CommitCheck(cfg).HasErrors())
 		})
 	}
+}
+
+func TestWithBaselineAppliesImportTextInBothOrders(t *testing.T) {
+	drop, err := transform.DropLines(`^!`)
+	require.NoError(t, err)
+	assertBaselineOrderIndependent(t,
+		confetti.WithBaseline("! built-ins\nvlan 1\n"),
+		confetti.WithImportText(drop))
 }
 
 func TestWithBaselineRejectsUnknownLinesEvenUnderDrop(t *testing.T) {
@@ -539,19 +542,9 @@ func (r renumberVlan) Apply(cfg *schema.Config) {
 }
 
 func TestWithBaselineAppliesImportTreeInBothOrders(t *testing.T) {
-	rename := confetti.WithImportTree(renumberVlan{from: "4094", to: "1"})
-	base := confetti.WithBaseline("vlan 4094\n")
-	for name, opts := range map[string][]confetti.Option{
-		"baseline first": {base, rename},
-		"tree first":     {rename, base},
-	} {
-		t.Run(name, func(t *testing.T) {
-			e := confetti.New(remediateSchema(), opts...)
-			cfg, d := e.Import(baselineReferrer)
-			require.False(t, d.HasErrors(), d.String())
-			assert.False(t, e.CommitCheck(cfg).HasErrors())
-		})
-	}
+	assertBaselineOrderIndependent(t,
+		confetti.WithBaseline("vlan 4094\n"),
+		confetti.WithImportTree(renumberVlan{from: "4094", to: "1"}))
 }
 
 func TestWithBaselineNeverMerges(t *testing.T) {

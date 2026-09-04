@@ -25,7 +25,7 @@ type Engine struct {
 	exportTree   []transform.TreeTransform
 	commitChecks []Validator
 	// baselineText is construction-only; New consumes it.
-	baselineText []string
+	baselineText string
 	// baseline holds device-provided objects; it adds relation targets, blocks their negation, and never renders, merges, or enters a plan.
 	baseline *schema.Config
 }
@@ -78,7 +78,10 @@ func WithCommitChecks(fns ...Validator) Option {
 
 // WithBaseline appends configuration text for objects the device provides but never prints, such as default VRFs or built-in classes.
 func WithBaseline(text string) Option {
-	return func(e *Engine) { e.baselineText = append(e.baselineText, text) }
+	// Terminate every fragment so appending cannot merge two lines.
+	return func(e *Engine) {
+		e.baselineText += strings.TrimRight(text, "\n") + "\n"
+	}
 }
 
 // New constructs an Engine for the given schema and panics when the baseline reports any diagnostic.
@@ -90,10 +93,10 @@ func New(s *schema.Schema, opts ...Option) *Engine {
 	// An always-present baseline keeps every consumer free of a nil case.
 	e.baseline = schema.NewConfig(s)
 	// Parse after every option so import transforms apply regardless of option order.
-	if len(e.baselineText) > 0 {
+	if e.baselineText != "" {
 		d := diag.New()
 		e.baseline = e.importWith(
-			baselineSource(e.baselineText),
+			e.baselineText,
 			parse.Reject,
 			validate.FragmentCheck,
 			d,
@@ -104,16 +107,6 @@ func New(s *schema.Schema, opts ...Option) *Engine {
 		}
 	}
 	return e
-}
-
-// baselineSource terminates every fragment so joining cannot merge two lines or leave a blank one.
-func baselineSource(parts []string) string {
-	var b strings.Builder
-	for _, p := range parts {
-		b.WriteString(strings.TrimRight(p, "\n"))
-		b.WriteString("\n")
-	}
-	return b.String()
 }
 
 // Import transforms, parses, folds, and validates configuration text.
@@ -173,8 +166,11 @@ func (e *Engine) CommitCheck(cfg *schema.Config) *diag.Diagnostics {
 
 func (e *Engine) commitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	validate.CommitCheck(cfg, e.baseline, d)
+	if len(e.commitChecks) == 0 {
+		return
+	}
 	base := e.baseline
-	// A tree from another schema cannot use this baseline; CommitCheck reports the mismatch.
+	// A tree from another schema cannot use this baseline; CommitCheck already reported the mismatch.
 	if base.Schema != cfg.Schema {
 		base = schema.NewConfig(cfg.Schema)
 	}

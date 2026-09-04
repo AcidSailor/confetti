@@ -63,9 +63,13 @@ func Diff(
 		return &Result{Tree: out}, d
 	}
 	dv := &differ{
-		running: running, intended: intended, baseline: o.Baseline,
+		running: running, intended: intended,
 		order: buildOrderIndex(intended.Schema),
 		cycle: o.Cycle, d: d,
+	}
+	// Index the baseline once; both the negation guard and Requires survivors read it.
+	if o.Baseline != nil {
+		dv.provided = labelResources(o.Baseline)
 	}
 	dv.collect(running.Root, intended.Root, nil, nil)
 	dv.checkBaselineRemovals()

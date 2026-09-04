@@ -153,8 +153,20 @@ The explanations record constraints that tests do not show.
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
   `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
   platform-independent.
+- **Whole-tree validators belong to `Engine`.** `OrderHook` and `MergeFunc`
+  are schema behavior. Validators are Engine composition, so Engines that
+  share a schema can use different validator sets. `WithCommitChecks` appends
+  validators after the built-in `CommitCheck`, in registration order. They run
+  for `CommitCheck`, `Remediate` (intended), and `Rollback` (running). `Render`,
+  `Compare`, and `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
+  merged after it returns, so it cannot drop what earlier checks recorded. It
+  must not modify the tree: `Remediate` validates the caller's `intended`
+  before `Diff`, so a mutation would silently change the remediation. A nil
+  validator panics at registration.
 - **Baseline objects are relation targets and removal guards.**
-  `WithBaseline` declares objects the device provides but never prints. The
+  `WithBaseline` declares objects the device provides but never prints. A
+  baseline is platform data, but the parsed baseline depends on engine-level
+  import transforms and `schema` cannot parse, so the Engine owns it. The
   engine imports the text once in `New`, after every option, so import text
   and tree transforms apply in any option order. It uses `parse.Reject`
   regardless of `WithUnknown` and panics on any diagnostic, Warning included,
@@ -183,16 +195,6 @@ The explanations record constraints that tests do not show.
   configuration must share one `*schema.Schema`. `Diff` reports a mismatch
   and emits nothing; `CommitCheck` reports it, drops the baseline, and still
   checks the tree the caller asked about.
-- **Whole-tree validators belong to `Engine`.** `OrderHook` and `MergeFunc`
-  are schema behavior. Validators are Engine composition, so Engines that
-  share a schema can use different validator sets. `WithCommitChecks` appends
-  validators after the built-in `CommitCheck`, in registration order. They run
-  for `CommitCheck`, `Remediate` (intended), and `Rollback` (running). `Render`,
-  `Compare`, and `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
-  merged after it returns, so it cannot drop what earlier checks recorded. It
-  must not modify the tree: `Remediate` validates the caller's `intended`
-  before `Diff`, so a mutation would silently change the remediation. A nil
-  validator panics at registration.
 - **Toggle pairs are declared, never text-detected.** The `"no "`-prefix
   heuristic has no fallback. A test verifies that an undeclared pair emits
   separate remove and add operations.

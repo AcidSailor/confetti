@@ -62,12 +62,12 @@ func (n *Node) CloneValue() *Node {
 	return c
 }
 
-// CloneTree deep-copies a subtree, including source position and operation, into an unparented node.
-func (n *Node) CloneTree() *Node {
+// cloneTree deep-copies a subtree, including source position and operation, into an unparented node.
+func (n *Node) cloneTree() *Node {
 	c := n.CloneValue()
 	c.RealIndent, c.Line, c.Op = n.RealIndent, n.Line, n.Op
 	for _, ch := range n.Children {
-		c.AddChild(ch.CloneTree())
+		c.AddChild(ch.cloneTree())
 	}
 	return c
 }
@@ -155,7 +155,7 @@ func NewConfig(s *Schema) *Config {
 func CloneConfig(c *Config) *Config {
 	out := NewConfig(c.Schema)
 	for _, ch := range c.Root.Children {
-		out.Root.AddChild(ch.CloneTree())
+		out.Root.AddChild(ch.cloneTree())
 	}
 	return out
 }

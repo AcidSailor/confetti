@@ -146,6 +146,18 @@ func removedSubtree(o op) *schema.Node {
 	return o.flipRun
 }
 
+// negatedSubtree is the emitted-line counterpart of removedSubtree: the subtree an operation negates, or nil when it emits no negation.
+func negatedSubtree(o op) *schema.Node {
+	switch o.action {
+	case graph.Remove:
+		return o.src
+	case graph.Replace:
+		return o.runSrc
+	}
+	// A toggle flip, a list delta, and an idempotent reissue change a value without negating it.
+	return nil
+}
+
 // deriveSlotCleanupEdges orders extra stale spellings before the operation that reissues their Kind-paired slot.
 func (dv *differ) deriveSlotCleanupEdges() {
 	for i, rm := range dv.ops {
@@ -224,35 +236,18 @@ func definedIdents(n *schema.Node) []resource {
 	return out
 }
 
-// negatedSubtree returns the subtree an operation negates in the emitted plan, or nil when it emits no negation line.
-func negatedSubtree(o op) *schema.Node {
-	switch o.action {
-	case graph.Remove:
-		return o.src
-	case graph.Replace:
-		return o.runSrc
-	}
-	// A toggle flip, a list delta, and an idempotent reissue change a value without negating it.
-	return nil
-}
-
 // negatedPath renders the emitted negation line with its kept sections.
 func negatedPath(o op) string {
-	n := o.node
 	if o.pre != nil {
-		n = o.pre
+		return opPathAt(o.secs, o.pre)
 	}
-	return strings.Join(append(secTexts(o.secs), n.Text), " / ")
+	return opPathAt(o.secs, o.node)
 }
 
 // checkBaselineRemovals reports each operation whose plan negates an object the baseline declares as device-provided.
 func (dv *differ) checkBaselineRemovals() {
-	if dv.baseline == nil {
+	if len(dv.provided) == 0 {
 		return
-	}
-	provided := map[resource]bool{}
-	for _, r := range definedIdents(dv.baseline.Root) {
-		provided[r] = true
 	}
 	for _, o := range dv.ops {
 		rm := negatedSubtree(o)
@@ -260,10 +255,13 @@ func (dv *differ) checkBaselineRemovals() {
 			continue
 		}
 		// Report every distinct baseline object the operation negates, once each.
-		seen := map[resource]bool{}
+		var seen map[resource]bool
 		for _, r := range definedIdents(rm) {
-			if !provided[r] || seen[r] {
+			if !dv.provided[r] || seen[r] {
 				continue
+			}
+			if seen == nil {
+				seen = map[resource]bool{}
 			}
 			seen[r] = true
 			dv.d.Add(
@@ -491,25 +489,16 @@ func appendRequirements(out []requirement, x *schema.Node) []requirement {
 // labelResources returns every label instance in a configuration, keyed by definition and key value.
 func labelResources(c *schema.Config) map[resource]bool {
 	set := map[resource]bool{}
-	schema.Walk(c, func(n *schema.Node) {
-		def := n.Def
-		if def == nil {
-			return
-		}
-		// Definitions sharing a label do not preserve each other's presence.
-		for _, label := range def.Labels() {
-			set[resource{
-				label: label, def: def, key: ident.KeyValue(n),
-			}] = true
-		}
-	})
+	for _, r := range definedIdents(c.Root) {
+		set[r] = true
+	}
 	return set
 }
 
-// survivingLabels returns labels provided by the same definition and key in both configurations or by the baseline.
-// The baseline branch is label-only on purpose: a device-provided object is permanent, so every label it carries survives.
+// survivingLabels returns labels provided by the same definition and key in both configurations or by any provided resource.
 func survivingLabels(
-	running, intended, baseline *schema.Config,
+	running, intended *schema.Config,
+	provided map[resource]bool,
 ) map[string]bool {
 	run, want := labelResources(running), labelResources(intended)
 	out := map[string]bool{}
@@ -518,10 +507,9 @@ func survivingLabels(
 			out[r.label] = true
 		}
 	}
-	if baseline != nil {
-		for r := range labelResources(baseline) {
-			out[r.label] = true
-		}
+	// Label-only on purpose: a device-provided object is permanent, so every label it carries survives.
+	for r := range provided {
+		out[r.label] = true
 	}
 	return out
 }
@@ -529,7 +517,7 @@ func survivingLabels(
 // deriveRequireEdges orders Requires users after prerequisite adds and before prerequisite removals when no instance survives.
 func (dv *differ) deriveRequireEdges() {
 	ops, d := dv.ops, dv.d
-	survivors := survivingLabels(dv.running, dv.intended, dv.baseline)
+	survivors := survivingLabels(dv.running, dv.intended, dv.provided)
 
 	// The order index already contains every reachable definition.
 	declared := map[string]bool{}
