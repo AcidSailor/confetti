@@ -501,3 +501,69 @@ func TestCommitCheckNamespaceArityMismatchIsError(t *testing.T) {
 		`Namespace "acl" members disagree on exclusive arg count`,
 	)
 }
+
+// aclNamespaceSchema returns two Kinds that share one device-side name space.
+func aclNamespaceSchema() *schema.Schema {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name").Namespace("acl")
+	return s
+}
+
+func TestCommitCheckNamespaceCollisionIsError(t *testing.T) {
+	d := checkText(t, aclNamespaceSchema(),
+		"ip access-list L\nmac access-list L\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`mac access-list L: name "L" in namespace "acl" is already held by "ip access-list L" (line 1)`,
+	)
+	assert.Equal(t, 2, d.Items[0].Line, "points at the later holder")
+}
+
+func TestCommitCheckNamespaceDistinctNamesCoexist(t *testing.T) {
+	d := checkText(t, aclNamespaceSchema(),
+		"ip access-list L\nmac access-list M\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckNamespaceSameObjectReenteredIsNotCollision(t *testing.T) {
+	d := checkText(t, aclNamespaceSchema(),
+		"ip access-list L\nip access-list L\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckNamespaceCollisionWithBaselineIsError(t *testing.T) {
+	d := diag.New()
+	s := aclNamespaceSchema()
+	baseline := parse.Parse(s, "ip access-list L\n", parse.Reject, d)
+	cfg := parse.Parse(s, "mac access-list L\n", parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, baseline, d)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`name "L" in namespace "acl" is already held by baseline "ip access-list L"`,
+	)
+}
+
+func TestCommitCheckNamespaceListExclusiveArgIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip prio {{ ids:word }} value {{ v:word }}").Card(schema.ZeroToN).
+		Kind("ip-prio").Tag("prio").Key("v").Unique("ids").
+		List("ids", "uint").Namespace("prio")
+	s.Node("mac prio {{ ids:word }} value {{ v:word }}").Card(schema.ZeroToN).
+		Kind("mac-prio").Tag("prio").Key("v").Unique("ids").
+		List("ids", "uint").Namespace("prio")
+	d := checkText(t, s, "ip prio 1 value a\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`Namespace "prio" cannot make List arg "ids" exclusive`,
+	)
+}

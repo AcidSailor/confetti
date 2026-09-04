@@ -278,7 +278,10 @@ The explanations record constraints that tests do not show.
   declare the same `Namespace(label)`. `ValidateRelations` rejects a
   namespace that the definition does not carry, one without a `Key`, one
   with a single keyed member, members that disagree on exclusive arg count,
-  and a keyed carrier of the label that does not declare the namespace.
+  a `List` arg among the exclusive args, and a keyed carrier of the label
+  that does not declare the namespace. `CommitCheck` rejects a second object
+  that holds a name already held in the namespace, including by the
+  baseline. Re-entering the same object is not a collision.
 - **Sibling exclusions order removals before additions.** `Diff` does not check
   intermediate states, but the emitted operations must remain valid for the
   device. Each conflicting sibling is removed before its excluder is installed

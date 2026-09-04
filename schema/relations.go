@@ -1,6 +1,10 @@
 package schema
 
-import "github.com/acidsailor/confetti/diag"
+import (
+	"slices"
+
+	"github.com/acidsailor/confetti/diag"
+)
 
 // Walk visits every definition reachable from the schema roots exactly once.
 func (s *Schema) Walk(fn func(*Def)) {
@@ -34,7 +38,7 @@ func (r Relation) IsExclusion() bool {
 	return r.Scope == ScopeSiblings && r.Want == Absent
 }
 
-// namespaceIndex records which labels scope exclusive resources and the arg count of the first declaring member.
+// namespaceIndex records which labels scope exclusive resources and the exclusive arg count of the first declaring member.
 type namespaceIndex struct {
 	members map[string]int
 	arity   map[string]int
@@ -102,6 +106,12 @@ func (n *Def) checkNamespace(ns namespaceIndex, d *diag.Diagnostics) {
 			d.Add(diag.Error,
 				"%s: Namespace %q members disagree on exclusive arg count",
 				n.Template, label)
+		case n.ListSpec.Arg != "" &&
+			slices.Contains(n.ExclusiveArgs(), n.ListSpec.Arg):
+			// The commit check compares whole names, not list overlap.
+			d.Add(diag.Error,
+				"%s: Namespace %q cannot make List arg %q exclusive",
+				n.Template, label, n.ListSpec.Arg)
 		}
 	}
 	if len(n.KeyArgs) == 0 {

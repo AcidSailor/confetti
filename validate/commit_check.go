@@ -1,6 +1,8 @@
 package validate
 
 import (
+	"strings"
+
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/schema"
 )
@@ -8,13 +10,20 @@ import (
 // target identifies a labeled key value.
 type target struct{ label, arg, val string }
 
+// holder identifies one exclusive name inside a Namespace.
+type holder struct{ namespace, key string }
+
 // relationChecker holds the relation indexes and diagnostic sink.
 type relationChecker struct {
 	// index holds every declared key value so tree-scope relations resolve against it.
 	index map[target]bool
 	// present records whether any instance carries each label.
 	present map[string]bool
-	d       *diag.Diagnostics
+	// held maps each namespace name to its first holder so a second claim is a collision.
+	held map[holder]*schema.Node
+	// baseline marks holders that the device provides.
+	baseline map[*schema.Node]bool
+	d        *diag.Diagnostics
 }
 
 // CommitCheck validates relations (references, prerequisites, exclusions) against the assembled tree; a nil baseline provides no targets.
@@ -32,17 +41,23 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 		cfg.Schema.ValidateRelations(d)
 	}
 	c := relationChecker{
-		index:   map[target]bool{},
-		present: map[string]bool{},
-		d:       d,
+		index:    map[target]bool{},
+		present:  map[string]bool{},
+		held:     map[holder]*schema.Node{},
+		baseline: map[*schema.Node]bool{},
+		d:        d,
 	}
 
 	// Baseline nodes are relation targets only; their own relations are never checked.
 	if baseline != nil {
-		schema.Walk(baseline, c.record)
+		schema.Walk(baseline, func(n *schema.Node) {
+			c.baseline[n] = true
+			c.record(n)
+		})
 	}
 	schema.Walk(cfg, c.record)
 	schema.Walk(cfg, c.checkRelations)
+	schema.Walk(cfg, c.checkNamespace)
 }
 
 // record indexes the labels and key values one node declares.
@@ -57,6 +72,51 @@ func (c relationChecker) record(n *schema.Node) {
 			c.index[target{label, arg, n.Fields[arg]}] = true
 		}
 	}
+	if h, ok := heldName(n); ok && c.held[h] == nil {
+		c.held[h] = n
+	}
+}
+
+// heldName returns the namespace name one node holds.
+func heldName(n *schema.Node) (holder, bool) {
+	def := n.Def
+	if def == nil || def.NamespaceLabel == "" || len(def.KeyArgs) == 0 {
+		return holder{}, false
+	}
+	return holder{def.NamespaceLabel, fieldKey(n, def.ExclusiveArgs())}, true
+}
+
+// fieldKey joins the values of args into one comparable key.
+func fieldKey(n *schema.Node, args []string) string {
+	parts := make([]string, len(args))
+	for i, a := range args {
+		parts[i] = n.Fields[a]
+	}
+	return strings.Join(parts, "\x00")
+}
+
+// checkNamespace reports a node whose namespace name another object already holds.
+func (c relationChecker) checkNamespace(n *schema.Node) {
+	h, ok := heldName(n)
+	if !ok {
+		return
+	}
+	first := c.held[h]
+	// Re-entering the same object is idempotent, not a collision.
+	if first == n || first.Def == n.Def &&
+		fieldKey(first, n.Def.KeyArgs) == fieldKey(n, n.Def.KeyArgs) {
+		return
+	}
+	name := strings.ReplaceAll(h.key, "\x00", ",")
+	if c.baseline[first] {
+		c.d.AddAt(n.Line, diag.Error,
+			"%s: name %q in namespace %q is already held by baseline %q",
+			n.Path(), name, h.namespace, first.Text)
+		return
+	}
+	c.d.AddAt(n.Line, diag.Error,
+		"%s: name %q in namespace %q is already held by %q (line %d)",
+		n.Path(), name, h.namespace, first.Text, first.Line)
 }
 
 // checkRelations validates every relation one node declares against the index.
