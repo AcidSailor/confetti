@@ -40,7 +40,7 @@ func TestDiffAddLeafAndSection(t *testing.T) {
 	assert.Equal(t, "interface Ethernet1/1\n  description A\n", out)
 }
 
-func TestDiffModifyIdempotent(t *testing.T) { // E2
+func TestDiffModifyIdempotent(t *testing.T) {
 	out, res := remediation(t,
 		"interface Ethernet1/1\n  description A\n",
 		"interface Ethernet1/1\n  description B\n")
@@ -54,14 +54,14 @@ func TestDiffModifyIdempotent(t *testing.T) { // E2
 	assert.True(t, sawModify)
 }
 
-func TestDiffRemoveLeaf(t *testing.T) { // E3
+func TestDiffRemoveLeaf(t *testing.T) {
 	out, _ := remediation(t,
 		"interface Ethernet1/1\n  description Customer A\n",
 		"interface Ethernet1/1\n  switchport access vlan 10\n  no shutdown\n")
 	assert.Contains(t, out, "no description Customer A")
 }
 
-func TestDiffToggleForward(t *testing.T) { // E1 forward
+func TestDiffToggleForward(t *testing.T) {
 	out, _ := remediation(t,
 		"interface Ethernet1/1\n  shutdown\n",
 		"interface Ethernet1/1\n  no shutdown\n")
@@ -70,7 +70,7 @@ func TestDiffToggleForward(t *testing.T) { // E1 forward
 
 func TestDiffToggleReverse(
 	t *testing.T,
-) { // Exercise the reverse E1 direction.
+) {
 	out, _ := remediation(t,
 		"interface Ethernet1/1\n  no shutdown\n",
 		"interface Ethernet1/1\n  shutdown\n")
@@ -78,31 +78,31 @@ func TestDiffToggleReverse(
 	assert.NotContains(t, out, "no no shutdown")
 }
 
-func TestDiffKeyChangeIsRemoveAdd(t *testing.T) { // E4
+func TestDiffKeyChangeIsRemoveAdd(t *testing.T) {
 	out, _ := remediation(t, "vlan 10\n", "vlan 20\n")
 	assert.Equal(t, "vlan 20\nno vlan 10\n", out)
 }
 
-func TestDiffKeptKeyedBodyChange(t *testing.T) { // E5
+func TestDiffKeptKeyedBodyChange(t *testing.T) {
 	out, _ := remediation(t,
 		"vlan 10\n  name FOO\n",
 		"vlan 10\n  name BAR\n")
 	assert.Equal(t, "vlan 10\n  name BAR\n", out)
 }
 
-func TestDiffWholeSectionRemove(t *testing.T) { // E7a
+func TestDiffWholeSectionRemove(t *testing.T) {
 	out, _ := remediation(t, "interface Ethernet1/1\n  shutdown\n", "")
 	assert.Equal(t, "no interface Ethernet1/1\n", out)
 }
 
-func TestDiffKeptSectionAllChildrenRemoved(t *testing.T) { // E7b
+func TestDiffKeptSectionAllChildrenRemoved(t *testing.T) {
 	out, _ := remediation(t,
 		"interface Ethernet1/1\n  description A\n  shutdown\n",
 		"interface Ethernet1/1\n  description A\n")
 	assert.Equal(t, "interface Ethernet1/1\n  no shutdown\n", out)
 }
 
-func TestDiffAddOrderingDefinitionFirst(t *testing.T) { // E9
+func TestDiffAddOrderingDefinitionFirst(t *testing.T) {
 	out, _ := remediation(t,
 		"",
 		"vlan 50\ninterface Ethernet1/1\n  switchport access vlan 50\n")
@@ -112,7 +112,7 @@ func TestDiffAddOrderingDefinitionFirst(t *testing.T) { // E9
 
 func TestDiffRemoveOrderingReferrerFirst(
 	t *testing.T,
-) { // Guard the E10 ordering case.
+) {
 	out, _ := remediation(t,
 		"vlan 50\ninterface Ethernet1/1\n  switchport access vlan 50\n",
 		"")
@@ -120,7 +120,7 @@ func TestDiffRemoveOrderingReferrerFirst(
 	assert.Equal(t, want, out)
 }
 
-func TestDiffDoesNotMutateInputs(t *testing.T) { // aliasing guard
+func TestDiffDoesNotMutateInputs(t *testing.T) {
 	s := testSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  description A\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  description B\n")
@@ -137,14 +137,12 @@ func TestDiffDoesNotMutateInputs(t *testing.T) { // aliasing guard
 	)
 }
 
-func TestDiffFullLineValueIsAddRemoveNotModify(t *testing.T) { // E6
+func TestDiffFullLineValueIsAddRemoveNotModify(t *testing.T) {
 	out, res := remediation(
 		t,
 		"interface Ethernet1/1\n  ip address 10.0.0.1 255.255.255.0 secondary\n",
 		"interface Ethernet1/1\n  ip address 10.0.0.2 255.255.255.0 secondary\n",
 	)
-	// a ZeroToN full-line value change is a different line: add new + remove old,
-	// never an in-place Modify.
 	assert.Equal(t,
 		"interface Ethernet1/1\n"+
 			"  ip address 10.0.0.2 255.255.255.0 secondary\n"+
@@ -171,7 +169,6 @@ func TestDiffFullLineValueIsAddRemoveNotModify(t *testing.T) { // E6
 }
 
 func TestDiffOpTagsAddRemoveSection(t *testing.T) {
-	// Check operation tags and rendered text for add, remove, and section nodes.
 	_, res := remediation(t,
 		"interface Ethernet1/1\n  shutdown\n",
 		"interface Ethernet1/1\n  description NEW\nvlan 99\n")
@@ -182,18 +179,16 @@ func TestDiffOpTagsAddRemoveSection(t *testing.T) {
 	assert.Equal(t, schema.OpRemove, ops["no shutdown"])
 }
 
-func TestDiffUnmatchedNodeDefensive(t *testing.T) { // E11
+func TestDiffUnmatchedNodeDefensive(t *testing.T) {
 	s := testSchema()
 
-	// running-only unmatched (def==nil) node => OpRemove "no <text>" + a Warning.
-	// Import never produces def==nil nodes, so the tree is hand-built.
 	running := schema.NewConfig(s)
 	running.Root.AddChild(schema.NewNode("flux-capacitor on"))
 	res, d := Diff(running, schema.NewConfig(s), Options{Cycle: Break})
 	assert.Equal(t, "no flux-capacitor on\n", render.Render(res.Tree))
 	assert.Contains(t, d.String(), "negating unmatched line")
 
-	// intended-only unmatched node => OpAdd verbatim, no warning.
+	// An unmatched intended node is added verbatim without a warning.
 	intended := schema.NewConfig(s)
 	intended.Root.AddChild(schema.NewNode("flux-capacitor on"))
 	res2, d2 := Diff(schema.NewConfig(s), intended, Options{Cycle: Break})
@@ -208,10 +203,6 @@ func opsByText(res *Result) map[string]schema.Op {
 }
 
 func TestDiffSymmetry(t *testing.T) {
-	// Pins the direction-agnostic property Diff(a,b) / Diff(b,a) that
-	// Engine.Rollback relies on, at the algorithm level rather than through the
-	// facade. E1 already has explicit forward and reverse tests above; E9
-	// reversed is E10.
 	cases := []struct {
 		name       string
 		a, b       string
@@ -264,9 +255,6 @@ func TestDiffSymmetry(t *testing.T) {
 }
 
 func TestDiffSymmetryOrdering(t *testing.T) {
-	// Retarget both ways: the ref-derived edges must reorder each direction so
-	// the referrer never points at a vlan that isn't installed yet, and the
-	// stale vlan is only negated once nothing still refers to it.
 	s := testSchema()
 	a := mustParse(t, s,
 		"vlan 10\ninterface Ethernet1/1\n  switchport access vlan 10\n")
@@ -290,7 +278,7 @@ func TestDiffSymmetryOrdering(t *testing.T) {
 	)
 }
 
-// headerFieldSchema: a keyed SECTION whose header carries a non-key field.
+// headerFieldSchema defines a keyed section with a mutable header field.
 func headerFieldSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -333,7 +321,6 @@ func TestDiffSectionHeaderFieldChangeWithChildChange(t *testing.T) {
 }
 
 func TestDiffSectionHeaderUnchangedNoModify(t *testing.T) {
-	// An unchanged header must not produce a modification.
 	s := headerFieldSchema()
 	running := mustParse(t, s, "vlan 10 name FOO\n  shutdown\n")
 	intended := mustParse(t, s, "vlan 10 name FOO\n")
@@ -346,15 +333,12 @@ func TestDiffSectionHeaderUnchangedNoModify(t *testing.T) {
 }
 
 func TestDiffDuplicateRunningIdentWarns(t *testing.T) {
-	// Two running lines with one ident: pairing sees only the first, the
-	// second is untouchable by Diff (it pairs with nothing and is not
-	// removed). That stays un-remediated by design, but never silent.
 	s := testSchema()
 	running := mustParse(t, s, "vlan 10\nvlan 10\n")
 	intended := mustParse(t, s, "vlan 10\n")
 	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
-	assert.True(t, res.Empty()) // surfaced, not remediated
+	assert.True(t, res.Empty()) // Report duplicates without commands.
 	assert.Contains(t, d.String(), "duplicate")
 	assert.Contains(t, d.String(), "vlan 10")
 }
@@ -476,7 +460,7 @@ func TestDiffKeyedLeafReplacePair(t *testing.T) {
 	intd := mustParse(t, s, "ip route 10.0.0.0/8 via 2.2.2.2\n")
 	res, d := Diff(run, intd, Options{Cycle: Break})
 	require.False(t, d.HasErrors())
-	// negate-first: never two values for one key on-device
+	// Negate first to avoid two values for one key.
 	assert.Equal(t,
 		"no ip route 10.0.0.0/8 via 1.1.1.1\nip route 10.0.0.0/8 via 2.2.2.2\n",
 		render.Render(res.Tree))
@@ -495,8 +479,6 @@ func TestDiffKeyedLeafUnchangedIsNoop(t *testing.T) {
 }
 
 func TestDiffKeyedLeafSymmetry(t *testing.T) {
-	// rollback = Diff(intended, running): Modify reverses to the old value,
-	// the replace pair reverses to negate-new + add-old.
 	run := "ip route 10.0.0.0/8 via 1.1.1.1\n"
 	intd := "ip route 10.0.0.0/8 via 2.2.2.2\n"
 
@@ -673,10 +655,6 @@ func TestToggleFlipFreesOldExclusiveResourceBeforeClaim(t *testing.T) {
 }
 
 func TestDiffUndeclaredTogglePairEmitsBoth(t *testing.T) {
-	// Without a Toggles declaration the flip is two independent changes:
-	// remove "shutdown" (negates to "no shutdown") + add "no shutdown".
-	// The old text heuristic would have deduped this; declared pairs are
-	// the only toggle knowledge now.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -702,7 +680,7 @@ func duplexSchema() *schema.Schema {
 }
 
 func TestDiffToggleGroupThreeWayFlip(t *testing.T) {
-	// full -> half is a flip within the group: one forward line, no negate.
+	// A toggle flip emits only the new spelling.
 	s := duplexSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  duplex full\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  duplex half\n")
@@ -718,8 +696,6 @@ func TestDiffToggleGroupThreeWayFlip(t *testing.T) {
 }
 
 func TestDiffToggleGroupThreeWayReverse(t *testing.T) {
-	// The mirror direction (half -> full): flip detection must be symmetric
-	// across ANY ordered pair of group members, not just the declared order.
 	s := duplexSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  duplex half\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  duplex full\n")
@@ -741,8 +717,6 @@ func TestDiffToggleGroupIllegalDoubleRunning(t *testing.T) {
 	out := render.Render(res.Tree)
 	assert.Contains(t, out, "duplex half")
 	assert.NotContains(t, out, "no duplex")
-	// The second superseded member is dropped from the artifact by design,
-	// but never silently: the warning names it and the paired first member.
 	assert.Contains(t, d.String(), "multiple members of toggle group")
 	assert.Contains(t, d.String(), `"duplex full"`) // the second, unpaired one
 	assert.Contains(t, d.String(), `"duplex auto"`) // what the log pairs
@@ -753,8 +727,6 @@ func TestDiffToggleGroupIllegalDoubleRunning(t *testing.T) {
 }
 
 func TestDiffCustomNegationWord(t *testing.T) {
-	// Schema-wide negation word (hier_config precedent): removals render as
-	// "<word> <line>", and a line already starting with "<word> " strips it.
 	s := schema.New().Negation("undo")
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -770,11 +742,10 @@ func TestDiffCustomNegationWord(t *testing.T) {
 	out := render.Render(res.Tree)
 	assert.Contains(t, out, "undo description X") // prepend form
 	assert.Contains(t, out, "\n  logging\n")      // strip form
-	assert.NotContains(t, out, "no ")             // the old hardcoded word
+	assert.NotContains(t, out, "no ")
 }
 
-// protectedSchema: a protected ZeroToOne section with a child, an unprotected
-// sibling leaf, and a protected toggle pair.
+// protectedSchema defines protected section and toggle cases.
 func protectedSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -804,8 +775,6 @@ func TestDiffProtectedSectionRefusesBothPolicies(t *testing.T) {
 }
 
 func TestDiffProtectedIdentityChangeRefuses(t *testing.T) {
-	// A ZeroToOne slot value change is remove-old + add-new; the remove half
-	// trips the rail, so an ASN migration always fails to auto-generate.
 	s := protectedSchema()
 	running := mustParse(t, s, "router bgp 65000\n")
 	intended := mustParse(t, s, "router bgp 65001\n")
@@ -815,8 +784,6 @@ func TestDiffProtectedIdentityChangeRefuses(t *testing.T) {
 }
 
 func TestDiffProtectedToggleFlipIsNotDeletion(t *testing.T) {
-	// Toggling a protected line to its declared partner is a value change:
-	// the dedup drops the remove before the protection check ever sees it.
 	s := protectedSchema()
 	running := mustParse(t, s, "shutdown\n")
 	intended := mustParse(t, s, "no shutdown\n")
@@ -826,8 +793,6 @@ func TestDiffProtectedToggleFlipIsNotDeletion(t *testing.T) {
 }
 
 func TestDiffProtectedReplacePairRefuses(t *testing.T) {
-	// A keyed non-idempotent value change is a replace pair (negate + add);
-	// the negate half is a deletion, so a protected def refuses the whole op.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("neighbor {{ peer:ipv4 }} remote-as {{ ras:asn }}").
@@ -846,8 +811,6 @@ func TestDiffProtectedReplacePairRefuses(t *testing.T) {
 }
 
 func TestDiffProtectedDescendantInRemovedSectionRefuses(t *testing.T) {
-	// Removing an unprotected section deletes its whole subtree; a protected
-	// descendant inside it must trip the rail even though the header is plain.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -916,22 +879,18 @@ func TestDiffProtectedDescendantInToggleFlipRefuses(t *testing.T) {
 }
 
 func TestDiffProtectedRollbackDirectionRefuses(t *testing.T) {
-	// Diff is direction-agnostic; a rollback that deletes protected refuses too.
+	// Protection also applies when Diff arguments are reversed for rollback.
 	s := protectedSchema()
 	running := mustParse(t, s, "logging on\n")
 	intended := mustParse(t, s, "router bgp 65000\nlogging on\n")
-	// Forward adds the protected section (fine)…
 	_, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
-	// …its rollback (reversed args) deletes it: refused.
 	_, rd := Diff(intended, running, Options{Cycle: Abort})
 	assert.True(t, rd.HasErrors())
 	assert.Contains(t, rd.String(), "refusing to delete protected")
 }
 
-// emptyOnRemoveSchema: a mode-like ZeroToOne section declared EmptyOnRemove
-// (a "vlan database"-style mode) with keyed children and a cross-section
-// referrer.
+// emptyOnRemoveSchema defines an EmptyOnRemove section with keyed children and a referrer.
 func emptyOnRemoveSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -945,7 +904,7 @@ func emptyOnRemoveSchema() *schema.Schema {
 	return s
 }
 
-func TestDiffEmptyOnRemoveSectionNegatesChildren(t *testing.T) { // E7c
+func TestDiffEmptyOnRemoveSectionNegatesChildren(t *testing.T) {
 	s := emptyOnRemoveSchema()
 	running := mustParse(t, s, "vlan database\n  vlan 10\n  vlan 20\n")
 	intended := mustParse(t, s, "")
@@ -968,9 +927,6 @@ func TestDiffEmptyOnRemoveEmptySectionIsNoop(t *testing.T) {
 }
 
 func TestDiffEmptyOnRemoveProtectedChildPartial(t *testing.T) {
-	// The Protected rail is per child in an expansion: the protected subtree
-	// refuses with an Error, its siblings still negate. (Header negation is
-	// all-or-nothing only because one line deletes everything at once.)
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	vdb := s.Node("vlan database").Card(schema.ZeroToOne).ClearOnRemove()
@@ -1016,8 +972,6 @@ func TestDiffEmptyOnRemoveProtectedDescendantRefuses(t *testing.T) {
 }
 
 func TestDiffEmptyOnRemoveNestedSectionHeaderNegated(t *testing.T) {
-	// A child section WITHOUT EmptyOnRemove inside an expanded one keeps the
-	// ordinary one-line header negation.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	vdb := s.Node("vlan database").Card(schema.ZeroToOne).ClearOnRemove()
@@ -1050,8 +1004,6 @@ func TestDiffEmptyOnRemoveChangesPerChild(t *testing.T) {
 }
 
 func TestDiffEmptyOnRemoveRefOrderingAcrossSections(t *testing.T) {
-	// A referrer in another section still negates before the expanded child
-	// that defines the target: each child op carries its own refs.
 	s := emptyOnRemoveSchema()
 	running := mustParse(
 		t,
@@ -1091,9 +1043,6 @@ func TestDiffEmptyOnRemoveReplacePairRefuses(t *testing.T) {
 }
 
 func TestDiffEmptyOnRemoveChildlessDefErrors(t *testing.T) {
-	// EmptyOnRemove on a def with no child grammar can never converge: the
-	// removal would silently no-op forever. No schema build step exists, so
-	// it reports at Diff time (the Requires derivation-Error precedent).
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("feature lldp").Card(schema.ZeroToOne).ClearOnRemove()

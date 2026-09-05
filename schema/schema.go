@@ -136,7 +136,7 @@ func (l ListStrategy) Keywords() listval.Keywords {
 	}
 }
 
-// Schema is a grammar of the config tree.
+// Schema defines a configuration grammar and its value types.
 type Schema struct {
 	Registry   *value.Registry
 	Roots      []*Def
@@ -305,7 +305,7 @@ func (n *Def) Card(c Cardinality) *Def {
 	return n
 }
 
-// Kind sets the name used for Ref resolution and pairs keyed siblings by Kind and key or unkeyed single-occupancy siblings by Kind unless they toggle or use EmptyOnRemove.
+// Kind sets the identity label used for node pairing and relations; see the package documentation.
 func (n *Def) Kind(k string) *Def { n.KindName = k; return n }
 
 // Key sets the arg names that form the identity key for this node.
@@ -340,10 +340,10 @@ func (n *Def) Key(args ...string) *Def {
 	return n
 }
 
-// Idempotent marks this node as idempotent (re-applying has no effect).
+// MarkIdempotent declares that reapplying this command has no effect.
 func (n *Def) MarkIdempotent() *Def { n.Idempotent = true; return n }
 
-// Protect marks a definition as undeletable and is mutually exclusive with ClearOnRemove.
+// Protect forbids deletion and is mutually exclusive with ClearOnRemove.
 func (n *Def) Protect() *Def {
 	if n.EmptyOnRemove {
 		panic(
@@ -419,7 +419,7 @@ func (n *Def) setMerge(s MergeStrategy) {
 	n.Merge = s
 }
 
-// EmptyOnRemove retains an always-present section header and removes each child; it excludes explicit negation, blocks, lists, and Protected.
+// ClearOnRemove retains the section header and removes its children; it excludes negation strategies, blocks, lists, and Protect.
 func (n *Def) ClearOnRemove() *Def {
 	if n.Protected {
 		panic(
@@ -535,7 +535,7 @@ func (n *Def) Ref(fromArg, target string) *Def {
 	return n
 }
 
-// Requires requires an instance with label while this node exists.
+// Requires declares that an instance with label must exist while this node exists.
 func (n *Def) Requires(label string) *Def {
 	if label == "" {
 		panic("schema: Requires label must be non-empty: " + n.Template)
@@ -593,10 +593,10 @@ func (n *Def) HasLabel(name string) bool {
 		(n.KindName == name || slices.Contains(n.TagNames, name))
 }
 
-// Unique restricts exclusive resource identity to the named captures so remediation frees the resource before moving it; each arg must have a type that cannot match empty, and the definition still needs a Key to hold the name.
+// Unique uses the named non-empty captures as the exclusive resource name; the definition must also have a Key.
 func (n *Def) Unique(args ...string) *Def {
 	for _, arg := range args {
-		// An exclusive name that can be empty would bucket every instance together.
+		// Empty names would place every instance in one bucket.
 		n.mustNonEmptyArg("Unique", arg)
 	}
 	n.UniqueArgs = args
@@ -620,7 +620,7 @@ func (n *Def) ExclusiveLabel() string {
 	return n.KindName
 }
 
-// Namespace scopes the exclusive resource by label instead of Kind and makes the name space device-wide unless ScopedBy narrows it, so definitions with distinct Kinds release a shared name before claiming it.
+// Namespace groups this definition's exclusive resources with other keyed definitions that carry label.
 func (n *Def) Namespace(label string) *Def {
 	if label == "" {
 		panic("schema: Namespace label must be non-empty: " + n.Template)
@@ -634,7 +634,7 @@ func (n *Def) Namespace(label string) *Def {
 
 const scopeExtentTwice = "schema: ScopedBy and ScopedByDevice are mutually exclusive: "
 
-// ScopedBy gives each instance of anchor its own exclusive name space, so the same name under two anchors is two objects.
+// ScopedBy gives each anchor instance its own exclusive name space.
 func (n *Def) ScopedBy(anchor *Def) *Def {
 	if anchor == nil {
 		panic("schema: ScopedBy anchor must be non-nil: " + n.Template)
@@ -643,7 +643,7 @@ func (n *Def) ScopedBy(anchor *Def) *Def {
 		panic("schema: ScopedBy anchor may not be the definition itself: " +
 			n.Template)
 	}
-	// Guard both setters so either call order reports the conflict.
+	// The conflict must hold in both builder call orders.
 	if n.DeviceScoped {
 		panic(scopeExtentTwice + n.Template)
 	}
@@ -654,7 +654,7 @@ func (n *Def) ScopedBy(anchor *Def) *Def {
 	return n
 }
 
-// ScopedByDevice makes the exclusive name space cover the whole configuration, so a name moves between owners rather than repeating.
+// ScopedByDevice makes the exclusive name space device-wide.
 func (n *Def) ScopedByDevice() *Def {
 	if n.ScopeAnchor != nil {
 		panic(scopeExtentTwice + n.Template)
@@ -663,7 +663,7 @@ func (n *Def) ScopedByDevice() *Def {
 	return n
 }
 
-// ScopeExtent returns the ancestor whose instance opens the exclusive name space and whether that space is device-wide; both zero means the extent is undeclared.
+// ScopeExtent returns the anchor or device-wide setting; zero values mean undeclared.
 func (n *Def) ScopeExtent() (anchor *Def, device bool) {
 	switch {
 	case n.ScopeAnchor != nil:
@@ -819,7 +819,7 @@ func (n *Def) ListContinues(base *Def) *Def {
 	return n
 }
 
-// Members folds each list item into a canonical keyed instance of Kind and excludes keys, delta forms, continuations, blocks, and RespellAs.
+// Members folds list items into keyed instances of kind; see the package documentation for incompatible declarations.
 func (n *Def) Members(kind string) *Def {
 	if kind == "" {
 		panic("schema: Members kind must be non-empty: " + n.Template)

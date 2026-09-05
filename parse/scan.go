@@ -64,7 +64,7 @@ func (sc *scanner) line(raw string) step {
 	if txt == "" {
 		return step{kind: stepBlank, lineNo: sc.lineNo}
 	}
-	// Climb out of any sections we are no longer inside.
+	// Pop sections at or below this indentation level.
 	for len(sc.stack) > 1 && indent <= sc.stack[len(sc.stack)-1].indent {
 		sc.stack = sc.stack[:len(sc.stack)-1]
 	}

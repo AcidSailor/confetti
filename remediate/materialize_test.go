@@ -13,7 +13,7 @@ import (
 
 func TestMaterializeSharedAndReopenedSections(t *testing.T) {
 	s := testSchema()
-	// parse once so section nodes carry real defs (render needs them)
+	// Parse section definitions for canonical rendering.
 	cfg := mustParse(
 		t,
 		s,
@@ -27,8 +27,6 @@ func TestMaterializeSharedAndReopenedSections(t *testing.T) {
 		n.Op = schema.OpAdd
 		return n
 	}
-	// op nodes are attached directly (not cloned), so each materialize call
-	// needs its own freshly built ops.
 	mkOps := func() []op {
 		return []op{
 			{
@@ -53,14 +51,11 @@ func TestMaterializeSharedAndReopenedSections(t *testing.T) {
 	}
 	out := schema.NewConfig(s)
 	materialize([]int{0, 1, 2}, mkOps(), out)
-	// Ethernet1/1 is entered, left for Ethernet1/2, then re-entered:
-	// three section headers total, the first reused for nothing.
 	assert.Equal(t,
 		"interface Ethernet1/1\n  description one\n"+
 			"interface Ethernet1/2\n  description two\n"+
 			"interface Ethernet1/1\n  description three\n",
 		render.Render(out))
-	// consecutive same-section ops share one header
 	out2 := schema.NewConfig(s)
 	materialize([]int{0, 2, 1}, mkOps(), out2)
 	assert.Equal(t,

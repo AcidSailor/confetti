@@ -131,7 +131,6 @@ func TestKindSlotUnchangedSpellingIsNoOp(t *testing.T) {
 }
 
 func TestSplitSlotErrorFiresWithoutKind(t *testing.T) {
-	// The ambiguous pair is an Error but remains available for inspection.
 	out, d := rawDiff(t, kindSlotSchema(),
 		"router bgp 65000\n  local-as 65001\n",
 		"router bgp 65000\n  local-as 65002\n")

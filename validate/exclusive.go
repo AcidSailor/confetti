@@ -8,19 +8,18 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// holder identifies one exclusive name: the space it lives in and the name itself.
+// holder identifies an exclusive name within its scope.
 type holder struct {
 	scope ident.Scope
-	// key is the exclusive arg values joined, with any List arg left blank.
-	key string
+	key   string
 }
 
-// claim is one node's hold on an exclusive name.
+// claim associates an exclusive name with its node and structural owner.
 type claim struct {
 	ident.Name
 	node   *schema.Node
 	holder holder
-	// owner is the structural parent, not holder.scope.Owner: a wider space still has narrower objects in it.
+	// owner remains structural even when the claim has a wider scope.
 	owner string
 }
 
@@ -29,7 +28,7 @@ func (c relationChecker) claimOf(
 	n *schema.Node,
 	fromBaseline bool,
 ) (claim, bool) {
-	// Rejecting a valid configuration is worse than missing a collision.
+	// PerOwner avoids false collisions for undeclared extents.
 	name, ok, err := ident.ExclusiveName(n, ident.PerOwner)
 	if err != nil {
 		c.warnUnresolvable(n, fromBaseline, err)
@@ -46,7 +45,7 @@ func (c relationChecker) claimOf(
 	}, true
 }
 
-// warnUnresolvable reports a List the checker could not resolve, naming the baseline when the object came from there.
+// warnUnresolvable reports a List claim that could not be resolved.
 func (c relationChecker) warnUnresolvable(
 	n *schema.Node,
 	fromBaseline bool,
@@ -54,7 +53,7 @@ func (c relationChecker) warnUnresolvable(
 ) {
 	raw := n.Fields[n.Def.ListSpec.Arg]
 	if fromBaseline {
-		// Baseline positions are not the caller's lines, so the report carries none.
+		// Baseline positions are not source lines in the caller's configuration.
 		c.d.Add(
 			diag.Warning,
 			"baseline %s: unresolvable list %q: exclusive-name checking for this object skipped (%v)",
@@ -74,10 +73,9 @@ func (c relationChecker) warnUnresolvable(
 	)
 }
 
-// sameObject reports whether two claims restate one object rather than two claimants.
+// sameObject reports whether two claims describe one object.
 func sameObject(a, b claim) bool {
-	// A restatement sits at the same position; a wider space does not merge two positions.
-	// Unique narrows the name, so the full key still separates two objects sharing one.
+	// Structural owner and full key distinguish objects within a wider or narrowed name space.
 	return a.node == b.node ||
 		a.node.Def == b.node.Def && a.owner == b.owner &&
 			ident.KeyValue(a.node) == ident.KeyValue(b.node)
@@ -99,11 +97,9 @@ func (c relationChecker) checkExclusive(n *schema.Node) {
 		return
 	}
 	for _, first := range c.held[cl.holder] {
-		// Claims recorded after this node are not yet holders.
 		if first.node == n {
 			return
 		}
-		// One list can overlap several disjoint holders, and each is its own fix.
 		if !sameObject(first, cl) && conflicts(first, cl) {
 			c.reportCollision(cl, first)
 		}

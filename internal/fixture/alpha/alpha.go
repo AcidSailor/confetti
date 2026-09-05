@@ -8,12 +8,11 @@ import (
 	"github.com/acidsailor/confetti/value"
 )
 
-// Schema builds the alpha fixture with interface, VLAN, VRF, route-map, BGP, and three reference checks.
+// Schema builds the alpha fixture; see docs/fixtures.md for grammar limits.
 func Schema() *schema.Schema {
 	s := schema.New()
 	registerTypes(s)
 
-	// Define VLAN targets for switchport access references.
 	vlan := s.Node("vlan {{ id:vlan }}").
 		Card(schema.ZeroToN).Kind("vlan").Key("id")
 	vlan.Child("name {{ text:word }}").Card(schema.ZeroToOne).MarkIdempotent()
@@ -21,11 +20,10 @@ func Schema() *schema.Schema {
 	s.Node("vlan {{ ids:word }}").Card(schema.ZeroToN).
 		List("ids", "vlan").Members("vlan")
 
-	// Define VRF targets for interface membership references.
 	s.Node("vrf context {{ name:word }}").
 		Card(schema.ZeroToN).Kind("vrf-context").Key("name")
 
-	// Give the literal BGP feature a Kind so router BGP can require and order it.
+	// Only the literal BGP feature satisfies the router BGP prerequisite.
 	s.Node("feature bgp").Card(schema.ZeroToOne).Kind("feature-bgp")
 	s.Node("feature {{ name:word }}").Card(schema.ZeroToN)
 
@@ -34,7 +32,6 @@ func Schema() *schema.Schema {
 		Card(schema.ZeroToN).
 		Kind("route-map").
 		Key("name", "action", "seq")
-	// Permit repeated match lines and one value for each set slot.
 	rmap.Child("match tag {{ tag:uint }}").Card(schema.ZeroToN)
 	rmap.Child("match ip address {{ acl:word }}").Card(schema.ZeroToN)
 	rmap.Child("set local-preference {{ pref:uint }}").
@@ -42,7 +39,7 @@ func Schema() *schema.Schema {
 	rmap.Child("set metric {{ metric:uint }}").
 		Card(schema.ZeroToOne).MarkIdempotent()
 
-	// Preserve multiline banner bodies exactly; the fixture excludes single-line banners.
+	// The fixture supports multiline banners only.
 	s.Node("banner motd {{ delim:word }}").
 		Card(schema.ZeroToOne).MarkIdempotent().
 		BlockDelim("delim").
@@ -81,7 +78,6 @@ func Schema() *schema.Schema {
 		ListContinues(trunk)
 	phys.Adopt(iface.Children...)
 
-	// router bgp <asn>
 	bgp := s.Node("router bgp {{ asn:asn }}").
 		Card(schema.ZeroToOne).Protect().Requires("feature-bgp")
 	bgp.Child("neighbor {{ peer:ipv4 }} remote-as {{ ras:asn }}").
@@ -144,7 +140,7 @@ func registerTypes(s *schema.Schema) {
 		{Name: "ethport", Pattern: `Ethernet\d+(?:/\d+)+`},
 	} {
 		if err := s.Registry.Register(t); err != nil {
-			panic(err) // Reject invalid fixture types during construction.
+			panic(err)
 		}
 	}
 }

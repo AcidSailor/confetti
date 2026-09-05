@@ -8,23 +8,21 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Name is the exclusive name one node claims in one name space.
+// Name identifies an exclusive resource claim.
 type Name struct {
-	// Scope is the name space the name lives in.
 	Scope Scope
 	// Key buckets the name; a List arg is left blank so overlapping spellings share one bucket.
 	Key string
-	// Display is Key with the List arg canonicalized, for diagnostics.
+	// Display is the diagnostic form of Key with any List arg canonicalized.
 	Display string
-	// Members holds the resolved List elements; set only when IsList.
+	// Members holds resolved List elements when IsList is true.
 	Members listval.Members
-	// IsList reports whether a List arg forms part of the name.
-	IsList bool
+	IsList  bool
 }
 
 // ExclusiveName returns the exclusive name a node claims, false when it claims none, or an error when a List arg does not resolve.
 func ExclusiveName(n *schema.Node, dflt Extent) (Name, bool, error) {
-	// A name is held by the key, so a keyless or unmatched node holds nothing.
+	// Keyless and unmatched nodes hold no exclusive resource.
 	if n == nil || n.Def == nil || len(n.Def.KeyArgs) == 0 {
 		return Name{}, false, nil
 	}
@@ -34,7 +32,7 @@ func ExclusiveName(n *schema.Node, dflt Extent) (Name, bool, error) {
 	if def.ListSpec.Arg != "" {
 		listIdx = slices.Index(args, def.ListSpec.Arg)
 	}
-	// Leave the list blank in the bucket key so overlapping spellings meet.
+	// Omitting the List arg places overlapping spellings in one bucket.
 	parts := make([]string, len(args))
 	for i, a := range args {
 		if i != listIdx {

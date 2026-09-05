@@ -33,8 +33,6 @@ func TestRemediateAlphaEndToEnd(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 
-	// vlan 20 created before the interface that references it (E9);
-	// vlan 10 negated after the interface stanza that referenced it (E10).
 	assert.Equal(t,
 		"vlan 20\n"+
 			"interface Ethernet1/1\n"+
@@ -44,7 +42,7 @@ func TestRemediateAlphaEndToEnd(t *testing.T) {
 		out)
 }
 
-func TestRemediateAlphaAddressFamilyExit(t *testing.T) { // E8
+func TestRemediateAlphaAddressFamilyExit(t *testing.T) {
 	e := Engine()
 	running, _ := e.Import("feature bgp\nrouter bgp 65001\n")
 	intended, _ := e.Import(
@@ -57,7 +55,7 @@ func TestRemediateAlphaAddressFamilyExit(t *testing.T) { // E8
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Contains(t, out, "exit-address-family")
-	// route-map defined before the bgp stanza that references it
+	// Define the route-map before its BGP referrer.
 	assert.Less(
 		t,
 		indexOf(out, "route-map RM permit 10"),
@@ -78,7 +76,7 @@ func TestRemediateAlphaIdempotent(t *testing.T) {
 
 func TestRemediateAlphaRemovedAddressFamilyNoExit(
 	t *testing.T,
-) { // E8 (removal side)
+) {
 	e := Engine()
 	running, dr := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
@@ -92,29 +90,27 @@ func TestRemediateAlphaRemovedAddressFamilyNoExit(
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 
-	// the AF is negated as a single header line, with NO exit token
 	assert.Contains(t, out, "no address-family ipv4 unicast")
 	assert.NotContains(t, out, "exit-address-family")
 }
 
-func TestRemediateAlphaSafilessAddressFamilyExit(t *testing.T) { // E8 SAFI-less
+func TestRemediateAlphaSafilessAddressFamilyExit(t *testing.T) {
 	e := Engine()
 	running, _ := e.Import("feature bgp\nrouter bgp 65001\n")
 	intended, di := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
-			"  address-family ipv4\n" + // SAFI-less Adopt'd form
+			"  address-family ipv4\n" + // Shared grammar without a SAFI.
 			"    neighbor 10.0.0.1 activate\n")
 	require.False(t, di.HasErrors(), di.String())
 
 	res, d := e.Remediate(running, intended)
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
-	// the added SAFI-less AF still fires its section-exit token
 	assert.Contains(t, out, "address-family ipv4\n")
 	assert.Contains(t, out, "exit-address-family")
 }
 
-func TestRemediateAlphaRemovedSafilessAddressFamilyNoExit(t *testing.T) { // E8
+func TestRemediateAlphaRemovedSafilessAddressFamilyNoExit(t *testing.T) {
 	e := Engine()
 	running, dr := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
@@ -126,14 +122,11 @@ func TestRemediateAlphaRemovedSafilessAddressFamilyNoExit(t *testing.T) { // E8
 	res, d := e.Remediate(running, intended)
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
-	// removed AF is negated as a single header line, with NO exit token
 	assert.Contains(t, out, "no address-family ipv4")
 	assert.NotContains(t, out, "exit-address-family")
 }
 
 func TestRemediateAlphaFeatureBeforeRouterBGP(t *testing.T) {
-	// Requires("feature-bgp") lowers to graph edges: the feature add precedes
-	// router bgp on create; teardown negates router bgp before the feature.
 	e := Engine()
 	empty, _ := e.Import("")
 	full, d := e.Import("feature bgp\nrouter bgp 65001\n")
@@ -165,7 +158,7 @@ func TestBannerRemediateAndRollback(t *testing.T) {
 	assert.Equal(t, "banner motd ^\nold\n^\n", render.Render(back.Tree))
 }
 
-func TestRemediateAlphaPhysicalPortReset(t *testing.T) { // E7 physical
+func TestRemediateAlphaPhysicalPortReset(t *testing.T) {
 	e := Engine()
 	running, d := e.Import("interface Ethernet1/1\n  description X\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -179,7 +172,7 @@ func TestRemediateAlphaPhysicalPortReset(t *testing.T) { // E7 physical
 
 func TestRemediateAlphaLogicalInterfaceStillNegates(
 	t *testing.T,
-) { // E7 logical
+) {
 	e := Engine()
 	running, _ := e.Import("interface Vlan10\n  description X\n")
 	intended, _ := e.Import("")
@@ -252,8 +245,6 @@ func TestRemediateAlphaVlanSpellingNoChurn(t *testing.T) {
 }
 
 func TestRemediateAlphaVlanMembershipAddRemove(t *testing.T) {
-	// Membership-declared vlans diff as ordinary canonical instances:
-	// per-instance adds and header negations, not list deltas.
 	e := Engine()
 	running, _ := e.Import("vlan 7,20\n")
 	intended, _ := e.Import("vlan 7,9-10\n")
@@ -279,7 +270,7 @@ func TestRemediateAlphaMalformedMembershipDegrades(t *testing.T) {
 }
 
 func TestRemediateAlphaTrunkKeywordSpellingNoChurn(t *testing.T) {
-	// "all" and the explicit full range are the same set: not drift.
+	// All and the explicit full range represent the same set.
 	e := Engine()
 	running, dr := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan all\n")
@@ -330,9 +321,6 @@ func TestRollbackAlphaInvertsRemediate(t *testing.T) {
 
 	res, d := e.Rollback(running, intended)
 	require.False(t, d.HasErrors(), d.String())
-	// The exact inverse of TestRemediateAlphaEndToEnd, with E9/E10 ordering
-	// holding in this direction too: vlan 10 defined before the interface that
-	// references it, vlan 20 negated after (trailing removes group).
 	assert.Equal(t,
 		"vlan 10\n"+
 			"interface Ethernet1/1\n"+
@@ -351,7 +339,6 @@ func TestRollbackAlphaTrunkVlanDeltaInverts(t *testing.T) {
 
 	res, d := e.Rollback(running, intended)
 	require.False(t, d.HasErrors(), d.String())
-	// The exact mirror of the remediation delta: Diff is direction-agnostic.
 	assert.Equal(t,
 		"interface Ethernet1/5\n"+
 			"  switchport trunk allowed vlan remove 25\n"+
@@ -366,16 +353,12 @@ func TestRollbackAlphaVlanMembershipInverts(t *testing.T) {
 
 	res, d := e.Rollback(running, intended)
 	require.False(t, d.HasErrors(), d.String())
-	// Removals emit in descending order (creates ascend, removes descend).
 	assert.Equal(t,
 		"vlan 20\nno vlan 10\nno vlan 9\n",
 		render.Render(res.Tree))
 }
 
-func TestRollbackReAddsResetInterface(t *testing.T) { // E7 rollback direction
-	// The rollback of a reset (physical port removal, "default interface")
-	// converges the other way: intended (empty) -> running (has the
-	// interface + description), so it must re-ADD the whole section.
+func TestRollbackReAddsResetInterface(t *testing.T) {
 	e := Engine()
 	running, dr := e.Import("interface Ethernet1/1\n  description X\n")
 	require.False(t, dr.HasErrors(), dr.String())
@@ -390,8 +373,6 @@ func TestRollbackReAddsResetInterface(t *testing.T) { // E7 rollback direction
 }
 
 func TestAlphaEthernetBindsPhysicalDef(t *testing.T) {
-	// Both interface templates match "interface Ethernet1/1" at equal literal
-	// specificity; declaration order (physical first) is the tie-break. Pin it.
 	e := Engine()
 	cfg, d := e.Import(
 		"interface Ethernet1/1\ninterface Vlan10\ninterface Ethernet1\n",
@@ -401,8 +382,5 @@ func TestAlphaEthernetBindsPhysicalDef(t *testing.T) {
 	require.Len(t, kids, 3)
 	assert.Equal(t, schema.NegDefault, kids[0].Def.Negate.Kind)
 	assert.Equal(t, schema.NegNoPrefix, kids[1].Def.Negate.Kind)
-	// A bare "Ethernet1" (no /slot) is not a real port name: the ethport
-	// pattern requires at least one "/N" suffix, so it falls through to the
-	// generic catch-all def instead of binding the physical (default-reset) one.
 	assert.Equal(t, schema.NegNoPrefix, kids[2].Def.Negate.Kind)
 }

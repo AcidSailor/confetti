@@ -1,7 +1,6 @@
 version: 2
 
-# Library-only releases: a tag publishes a GitHub Release with
-# changelog, no binaries.
+# Releases contain a changelog and no binaries.
 builds:
   - skip: true
 

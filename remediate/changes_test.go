@@ -73,8 +73,6 @@ func TestChangesPairSourceNodes(t *testing.T) {
 }
 
 func TestChangesOrderMatchesArtifact(t *testing.T) {
-	// E10 teardown: the scheduled artifact negates the referrer section before
-	// the definition. The log must be in that same emission order.
 	s := testSchema()
 	running := mustParse(t, s,
 		"vlan 50\ninterface Ethernet1/1\n  switchport access vlan 50\n")
@@ -96,7 +94,6 @@ func TestChangesSectionAddIsOneChange(t *testing.T) {
 	c := res.Changes[0]
 	assert.Equal(t, graph.Add, c.Action)
 	assert.Same(t, findNode(t, intended, "interface Ethernet1/1"), c.Intended)
-	// the added subtree stays reachable through the intended-side node
 	kids := c.Intended.Children
 	require.Len(t, kids, 1)
 	assert.Equal(t, "description A", kids[0].Text)
@@ -120,8 +117,6 @@ func TestChangesReplaceIsOneEntry(t *testing.T) {
 }
 
 func TestChangesToggleFlipCarriesBothSides(t *testing.T) {
-	// The artifact emits only the forward line (dropToggles), but the log
-	// Pair the flip with its running node so compare can show both states.
 	s := testSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n")
@@ -132,11 +127,9 @@ func TestChangesToggleFlipCarriesBothSides(t *testing.T) {
 	assert.Equal(t, graph.Add, c.Action)
 	assert.Same(t, findNode(t, intended, "no shutdown"), c.Intended)
 	assert.Same(t, findNode(t, running, "shutdown"), c.Running)
-	// artifact unchanged: one forward line, no negation
 	assert.Equal(t,
 		"interface Ethernet1/1\n  no shutdown\n", render.Render(res.Tree))
 
-	// Pair the reverse direction symmetrically.
 	running2 := mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n")
 	intended2 := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
 	res2, d2 := Diff(running2, intended2, Options{Cycle: Break})

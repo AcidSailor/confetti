@@ -94,8 +94,6 @@ func TestCompress(t *testing.T) {
 }
 
 func TestCompressZeroPaddedRoundTrip(t *testing.T) {
-	// Zero-padded spellings never fold into ranges ("007-9" would re-expand
-	// to 7,8,9) and dedupe against their canonical twin by value.
 	out := Compress([]string{"007", "008", "9"}, "")
 	assert.Equal(t, "007,008,9", out)
 	back, err := Expand(out, "")
@@ -150,15 +148,15 @@ func TestResolveKeywords(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"2", "4"}, plain)
 
-	// Undeclared keywords stay ordinary (mis)items.
+	// Undeclared keywords are literal list items.
 	_, err = Resolve("none", "", Keywords{})
-	require.NoError(t, err) // "none" is just a lexical item without keywords
+	require.NoError(t, err)
 }
 
 func TestResolveExceptMalformed(t *testing.T) {
 	_, err := Resolve("except 9-5", "", kwTrunk)
 	assert.Error(t, err)
-	// A bare except word with no list is not the keyword form: one item.
+	// A bare Except word is one literal item.
 	items, err := Resolve("except", "", kwTrunk)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"except"}, items)

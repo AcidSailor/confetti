@@ -207,8 +207,6 @@ func TestAlphaVlanMembershipFoldRoundTrip(t *testing.T) {
 		"  name PAYMENTS\n"
 	assert.Equal(t, want, out)
 
-	// Canonicalization is idempotent: re-importing the canonical form is a
-	// fixed point.
 	cfg2, d2 := e.Import(out)
 	require.False(t, d2.HasErrors(), d2.String())
 	out2, _ := e.Render(cfg2)
@@ -216,8 +214,6 @@ func TestAlphaVlanMembershipFoldRoundTrip(t *testing.T) {
 }
 
 func TestAlphaMembershipVlanSatisfiesRef(t *testing.T) {
-	// A vlan declared only through the membership spelling is a real
-	// canonical instance: refs resolve against it.
 	e := Engine(confetti.WithUnknown(parse.Drop))
 	cfg, d := e.Import("vlan 5-10\n" +
 		"interface Ethernet1/1\n  switchport access vlan 7\n")
@@ -243,8 +239,6 @@ func TestAlphaTrunkVlanBadItemRejected(t *testing.T) {
 }
 
 func TestAlphaTrunkContinuationEndToEnd(t *testing.T) {
-	// The add-form is accepted as config input and folds into the base slot;
-	// the folded spelling is not drift against the pre-joined one.
 	e := Engine()
 	cfg, d := e.Import("interface Ethernet1/5\n" +
 		"  switchport trunk allowed vlan 10\n" +

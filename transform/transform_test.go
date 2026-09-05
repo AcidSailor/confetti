@@ -9,9 +9,7 @@ import (
 )
 
 func TestDropLines(t *testing.T) {
-	// Matching lines are BLANKED, not removed: the parser skips blanks, so
-	// the tree is identical, but line numbering stays aligned with the
-	// original text (diagnostics carry source lines).
+	// Blanking preserves source line numbers.
 	r, err := DropLines(`^!`)
 	require.NoError(t, err)
 	in := "!comment\ninterface Ethernet1/1\n! another\n  shutdown\n"

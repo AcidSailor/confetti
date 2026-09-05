@@ -2,46 +2,46 @@ version: "3"
 
 tasks:
   lint:
-    desc: Run formatters + linters with autofix (mutates files)
+    desc: Format and lint with automatic fixes
     cmds:
       - golangci-lint fmt
       - golangci-lint run --fix
 
   ci:
-    desc: Read-only fmt + lint verification for CI (fail-fast)
+    desc: Check formatting and lint without changing files
     cmds:
       - golangci-lint fmt --diff
       - golangci-lint run
 
   test:
-    desc: Run tests
+    desc: Run tests with the race detector
     cmds:
       - go test -race ./...
 
   check:
-    desc: Local composite — lint (mutating) + tests
+    desc: Apply lint fixes, then run tests
     cmds:
       - task: lint
       - task: test
 
   build:
-    desc: Compile check — library and example CLI
+    desc: Compile all packages
     cmds:
       - go build ./...
 
   release:
-    desc: Tagged release via GoReleaser — GitHub Release + changelog (CI)
+    desc: Publish a tagged GitHub release and changelog with GoReleaser
     cmds:
       - goreleaser release --clean
 
   release-plan:
-    desc: Preview the next release version from conventional commits (svu; read-only)
+    desc: Preview the next version from conventional commits
     silent: true
     cmds:
       - svu next --v0
 
   release-tag:
-    desc: Cut & push the next svu tag — fires the GoReleaser `release` job in CI
+    desc: Create and push the next version tag to trigger the release workflow
     cmds:
       - |
         set -euo pipefail
@@ -53,6 +53,6 @@ tasks:
         echo "pushed $next → CI will build the release"
 
   update:
-    desc: Pull latest go-scaffolds v1 template tooling (3-way merge; source untouched; no prompts)
+    desc: Update from the go-scaffolds v1 template with default answers
     cmds:
       - uvx copier update --defaults --vcs-ref v1

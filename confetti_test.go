@@ -30,7 +30,6 @@ func TestE2ECanonicalRoundTrip(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	out, _ := e.Render(cfg)
 	assert.Equal(t, cleanConfig, out)
-	// canonicalization is idempotent
 	cfg2, _ := e.Import(out)
 	out2, _ := e.Render(cfg2)
 	assert.Equal(t, cleanConfig, out2)
@@ -59,11 +58,11 @@ func TestE2EBrownfieldDropVsReject(t *testing.T) {
 
 	lenient := alpha.Engine(confetti.WithUnknown(parse.Drop))
 	cfg, d := lenient.Import(in)
-	assert.False(t, d.HasErrors()) // warnings only
-	assert.NotEmpty(t, d.Items)    // unsupported-command warning present
+	assert.False(t, d.HasErrors())
+	assert.NotEmpty(t, d.Items)
 	out, _ := lenient.Render(cfg)
-	assert.NotContains(t, out, "flux-capacitor") // dropped from tree
-	assert.Contains(t, out, "no shutdown")       // known command survives
+	assert.NotContains(t, out, "flux-capacitor")
+	assert.Contains(t, out, "no shutdown")
 
 	strict := alpha.Engine()
 	_, ds := strict.Import(in)
@@ -80,14 +79,13 @@ func remediateSchema() *schema.Schema {
 	return s
 }
 
-func TestEngineRemediateCommitChecksIntended(t *testing.T) { // E12
+func TestEngineRemediateCommitChecksIntended(t *testing.T) {
 	e := confetti.New(
 		remediateSchema(),
 		confetti.WithUnknown(parse.Reject),
 	)
 	running, d1 := e.Import("")
 	require.False(t, d1.HasErrors())
-	// intended references a vlan that is never defined
 	intended, d2 := e.Import(
 		"interface Ethernet1/1\n  switchport access vlan 99\n",
 	)
@@ -103,7 +101,6 @@ func TestEngineRemediateCommitChecksIntended(t *testing.T) { // E12
 		"remediating onto a dangling-ref goal must error",
 	)
 	assert.Contains(t, d.String(), `vlan "99" does not exist`)
-	// the Result is still returned for inspection
 	require.NotNil(t, res)
 	assert.NotEqual(t, "", render.Render(res.Tree))
 }
@@ -120,7 +117,7 @@ func TestEngineRemediateClean(t *testing.T) {
 	assert.Equal(t, "vlan 20\n", render.Render(res.Tree))
 }
 
-// engineOpsByText indexes facade results by operation text.
+// engineOpsByText indexes engine results by operation text.
 func engineOpsByText(res *remediate.Result) map[string]schema.Op {
 	ops := map[string]schema.Op{}
 	schema.Walk(res.Tree, func(n *schema.Node) { ops[n.Text] = n.Op })
@@ -139,15 +136,12 @@ func TestRollbackOpsMirrorRemediate(t *testing.T) {
 	fops := engineOpsByText(fwd)
 	bops := engineOpsByText(back)
 
-	// forward Add <-> rollback Remove, and vice versa
 	assert.Equal(t, schema.OpAdd, fops["vlan 20"])
 	assert.Equal(t, schema.OpRemove, bops["no vlan 20"])
 	assert.Equal(t, schema.OpRemove, fops["no vlan 10"])
 	assert.Equal(t, schema.OpAdd, bops["vlan 10"])
-	// idempotent slot: Modify both ways, new value vs old value
 	assert.Equal(t, schema.OpModify, fops["switchport access vlan 20"])
 	assert.Equal(t, schema.OpModify, bops["switchport access vlan 10"])
-	// toggle dedup is direction-blind: exactly one forward line each way
 	assert.Equal(t, schema.OpAdd, fops["no shutdown"])
 	assert.Equal(t, schema.OpAdd, bops["shutdown"])
 }
@@ -172,7 +166,6 @@ func TestRollbackCommitChecksRunningGoal(t *testing.T) {
 		"rolling back onto a dangling-ref goal must error",
 	)
 	assert.Contains(t, d.String(), `vlan "99" does not exist`)
-	// the Result is still returned for inspection
 	require.NotNil(t, res)
 	assert.NotEqual(t, "", render.Render(res.Tree))
 }
@@ -189,18 +182,16 @@ func TestRollbackNoChange(t *testing.T) {
 
 func TestRollbackIsCanonicalNotByteExact(t *testing.T) {
 	e := alpha.Engine(confetti.WithUnknown(parse.Drop))
-	// lenient import drops the unknown line from the running tree, so rollback
-	// restores the canonical parse of running, never its original bytes
 	running, d1 := e.Import(
 		"interface Ethernet1/1\n  flux-capacitor enable\n  no shutdown\n",
 	)
-	assert.False(t, d1.HasErrors()) // warnings only
+	assert.False(t, d1.HasErrors())
 	intended, _ := e.Import("interface Ethernet1/1\n")
 
 	res, d := e.Rollback(running, intended)
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
-	assert.Contains(t, out, "no shutdown") // canonical content restored
+	assert.Contains(t, out, "no shutdown")
 	assert.NotContains(
 		t,
 		out,
@@ -209,8 +200,6 @@ func TestRollbackIsCanonicalNotByteExact(t *testing.T) {
 }
 
 func TestCompareSkipsCommitCheck(t *testing.T) {
-	// Read-only view: no commit-check on either side (gofmt-vs-vet split).
-	// The same pair makes Remediate error on the dangling ref.
 	e := alpha.Engine()
 	running, _ := e.Import("")
 	intended, d0 := e.Import(
@@ -253,7 +242,7 @@ func TestCommitCheckPerItemListRef(t *testing.T) {
 	assert.Contains(t, cc.String(), `vlan "99" does not exist`)
 	assert.NotContains(t, cc.String(), `"10"`)
 
-	// Keyword spellings name no items ("all"), except names its exceptions.
+	// All names no explicit items; Except names its exceptions.
 	cfg2, _ := e.Import("interface Ethernet1/1\n  allowed vlan all\n")
 	assert.False(t, e.CommitCheck(cfg2).HasErrors())
 	cfg3, _ := e.Import("interface Ethernet1/1\n  allowed vlan except 42\n")
@@ -303,7 +292,6 @@ func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
 	_, bd := e.Rollback(bad, good)
 	assert.Contains(t, bd.String(), "name USERS is reserved")
 
-	// Compare does not run commit checks.
 	_, cd := e.Compare(good, bad)
 	assert.NotContains(t, cd.String(), "name USERS is reserved")
 }
@@ -347,7 +335,6 @@ func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
 			d.Add(diag.Error, "%s", msg)
 		}
 	}
-	// Two options prove that a later WithCommitChecks appends instead of replacing.
 	e := confetti.New(alpha.Schema(),
 		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(mark("first"), mark("second")),
@@ -390,8 +377,6 @@ func TestRemediatePerItemRefOrdersDelta(t *testing.T) {
 	e := confetti.New(refListSchema(),
 		confetti.WithUnknown(parse.Reject))
 
-	// Add side: the delta referencing vlan 30 must wait for its creation,
-	// against declaration rank.
 	running, _ := e.Import(
 		"interface Ethernet1/1\n  allowed vlan 10\nvlan 10\n",
 	)
@@ -403,7 +388,7 @@ func TestRemediatePerItemRefOrdersDelta(t *testing.T) {
 		"vlan 30\ninterface Ethernet1/1\n  allowed vlan add 30\n",
 		render.Render(res.Tree))
 
-	// Remove side: the delta must release vlan 30 before its definition goes.
+	// The delta must release VLAN 30 before its definition is removed.
 	res2, d2 := e.Remediate(intended, running)
 	require.False(t, d2.HasErrors(), d2.String())
 	assert.Equal(t,

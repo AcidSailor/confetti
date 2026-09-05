@@ -7,7 +7,7 @@
 *.dylib
 *.test
 
-# Coverage / profiling
+# Coverage and profiles
 *.out
 coverage.*
 *.coverprofile
@@ -17,11 +17,11 @@ profile.cov
 go.work
 go.work.sum
 
-# Local env / secrets
+# Local environment and secrets
 .env
 .env.*
 
-# Editor / OS
+# Editor and OS files
 .idea/
 .vscode/
 .DS_Store
@@ -34,5 +34,5 @@ go.work.sum
 !/.claude/skills/
 /.worktrees/
 
-# Reference material (vendored lib dumps) — not part of the deliverable
+# Local reference material
 references/

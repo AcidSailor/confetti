@@ -112,7 +112,6 @@ func TestMergeConflictRefused(t *testing.T) {
 		"interface eth1\n  description uplink\n",
 		"interface eth1\n  description downlink\n")
 	assert.True(t, d.HasErrors())
-	// earlier value stays
 	assert.Contains(t, got, "description uplink")
 	assert.Contains(t, d.String(), "part 2")
 	assert.Contains(t, d.String(), "part 1")
@@ -192,7 +191,6 @@ func TestMergeZeroToOneSlotConflict(t *testing.T) {
 	out, d2 := merge.Merge(s, declared, a, b)
 	assert.False(t, d2.HasErrors())
 	rendered := render.Render(out)
-	// last part's header wins; children from both parts merge under it
 	assert.Contains(t, rendered, "router bgp 65001")
 	assert.NotContains(t, rendered, "router bgp 65000")
 	assert.Contains(t, rendered, "neighbor 10.0.0.1 remote-as 65001")
@@ -214,7 +212,7 @@ func TestMergeRefusedSectionKeepsFirstStanzaWhole(t *testing.T) {
 	out, d := merge.Merge(s, refuse, a, b)
 	assert.True(t, d.HasErrors())
 	rendered := render.Render(out)
-	assert.Contains(t, rendered, "router bgp 65000") // first header stays
+	assert.Contains(t, rendered, "router bgp 65000")
 	assert.NotContains(t, rendered, "router bgp 65001")
 	assert.Contains(t, rendered, "neighbor 10.0.0.1 remote-as 65001")
 	assert.NotContains(t, rendered, "neighbor 10.0.0.2 remote-as 65002")
@@ -282,8 +280,8 @@ func TestMergeToggleConflictRefused(t *testing.T) {
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "part 2 conflicts with part 1")
 	rendered := render.Render(out)
-	assert.Contains(t, rendered, "shutdown")       // first value stays
-	assert.NotContains(t, rendered, "no shutdown") // later part rejected
+	assert.Contains(t, rendered, "shutdown")
+	assert.NotContains(t, rendered, "no shutdown")
 }
 
 func TestMergeToggleConflictDeclaredLastWins(t *testing.T) {
@@ -295,12 +293,10 @@ func TestMergeToggleConflictDeclaredLastWins(t *testing.T) {
 	assert.Contains(t, d.String(), "part 2 overrides part 1")
 	rendered := render.Render(out)
 	assert.Contains(t, rendered, "no shutdown")
-	assert.Equal(t, 1, strings.Count(rendered, "shutdown")) // only the winner
+	assert.Equal(t, 1, strings.Count(rendered, "shutdown"))
 }
 
 func TestMergeToggleGroupThreeWayConflict(t *testing.T) {
-	// All members of an N-way group share one slot identity: two parts
-	// naming different members of a 3-way group collide like a pair does.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -316,7 +312,6 @@ func TestMergeToggleGroupThreeWayConflict(t *testing.T) {
 }
 
 func TestMergeToggleSameValueDedups(t *testing.T) {
-	// Deduplicate the same toggle member without a conflict or diagnostic.
 	s := toggleSchema()
 	a := parsePart(t, s, "interface Ethernet1/1\n  shutdown\n")
 	b := parsePart(t, s, "interface Ethernet1/1\n  shutdown\n")
@@ -340,7 +335,7 @@ func TestMergeListUnion(t *testing.T) {
 }
 
 func TestMergeListUnionIdentical(t *testing.T) {
-	// Identical raw text short-circuits as today's dedup, before union.
+	// Identical text bypasses list union.
 	got, d := mergeText(t, testSchema(), refuse,
 		"interface eth1\n  switchport trunk allowed vlan 10,20\n",
 		"interface eth1\n  switchport trunk allowed vlan 10,20\n")
@@ -351,7 +346,7 @@ func TestMergeListUnionIdentical(t *testing.T) {
 }
 
 func TestMergeListOtherArgDiffersConflicts(t *testing.T) {
-	// Non-list fields differ: the established conflict path, not a union.
+	// Different non-list fields require conflict resolution.
 	_, d := mergeText(t, testSchema(), refuse,
 		"interface eth1\n  span session 1 vlans 10\n",
 		"interface eth1\n  span session 2 vlans 20\n")
@@ -360,7 +355,7 @@ func TestMergeListOtherArgDiffersConflicts(t *testing.T) {
 }
 
 func TestMergeListMalformedFallsBackToConflict(t *testing.T) {
-	// A raw value that does not Expand cannot union; lenient keeps last-wins.
+	// A malformed list cannot union; Declared keeps the later value.
 	got, d := mergeText(t, testSchema(), declared,
 		"interface eth1\n  switchport trunk allowed vlan 30-20\n",
 		"interface eth1\n  switchport trunk allowed vlan 10\n")

@@ -14,4 +14,14 @@
 // WithCommitChecks registers whole-tree validators after the built-in check
 // for CommitCheck, Remediate, and Rollback. A validator reports diagnostics
 // and must not modify the tree.
+//
+// WithBaseline declares device-provided objects absent from printed
+// configuration. They satisfy relations, reserve exclusive names, and cannot
+// be negated. New applies all import transforms and panics on any baseline
+// diagnostic, including warnings. Each validator receives a non-nil baseline
+// copy. Baseline nodes never render, merge, or enter a remediation plan.
+//
+// Remediate and Rollback both take running, intended. Rollback restores
+// canonical parsed running content, so it cannot recover original formatting
+// or commands dropped during import.
 package confetti

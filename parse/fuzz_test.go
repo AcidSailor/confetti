@@ -9,10 +9,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// FuzzParse asserts the indent-stack walk never panics for arbitrary input
-// (any indentation, unknown commands, truncation) under both policies, and
-// always returns a non-nil config. Run the seed corpus via `go test`; explore
-// with `go test -run x -fuzz FuzzParse ./parse/`.
+// FuzzParse checks that arbitrary input never panics and always returns a config.
 func FuzzParse(f *testing.F) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -47,7 +44,6 @@ func FuzzParse(f *testing.F) {
 			if cfg == nil {
 				t.Fatalf("Parse returned nil config for %q", in)
 			}
-			// Every node has a panic-free Path and normalized text.
 			schema.Walk(cfg, func(n *schema.Node) {
 				_ = n.Path()
 				if got := normalize(n.Text); got != n.Text {
@@ -58,7 +54,6 @@ func FuzzParse(f *testing.F) {
 					)
 				}
 			})
-			// Render is panic-free and deterministic.
 			first := render.Render(cfg)
 			if second := render.Render(cfg); first != second {
 				t.Fatalf("Render not deterministic for %q", in)

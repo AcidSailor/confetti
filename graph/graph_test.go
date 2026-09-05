@@ -30,7 +30,7 @@ func TestGraphEdges(t *testing.T) {
 	assert.False(t, g.HasEdge(2, 0))
 	assert.Equal(t, [][2]int{{0, 1}, {2, 1}}, g.Edges())
 
-	g.AddEdge(2, 1) // duplicate: idempotent, not a second edge
+	g.AddEdge(2, 1)
 	assert.Equal(t, [][2]int{{0, 1}, {2, 1}}, g.Edges())
 }
 

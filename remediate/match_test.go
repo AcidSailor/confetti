@@ -13,9 +13,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// testSchema is the shared fixture for the remediate suite: vlan (keyed, with a
-// child), interface with idempotent + full-line + toggle children, and the
-// vlan cross-ref.
+// testSchema defines the shared remediation fixture.
 func testSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -41,7 +39,7 @@ func testSchema() *schema.Schema {
 			"switchport trunk allowed vlan remove {{ vlans }}")
 	iface.Child("monitor vlan {{ vlans:word }}").
 		Card(schema.ZeroToOne).
-		List("vlans", "uint") // no delta forms: whole-line modify fallback
+		List("vlans", "uint") // No delta forms; modify the whole line.
 	iface.Child("core vlans {{ vlans:word }}").
 		Card(schema.ZeroToOne).
 		Protect().
@@ -93,13 +91,11 @@ func TestCategoryOf(t *testing.T) {
 func TestIdentPairsAndDistinguishes(t *testing.T) {
 	s := testSchema()
 	a := mustParse(t, s, "vlan 10\nvlan 20\n")
-	// same keyed def, same key => equal ident
 	assert.Equal(
 		t,
 		ident.Of(a.Root.Children[0]),
 		ident.Of(mustParse(t, s, "vlan 10\n").Root.Children[0]),
 	)
-	// same keyed def, different key => different ident
 	assert.NotEqual(
 		t,
 		ident.Of(a.Root.Children[0]),
@@ -111,7 +107,6 @@ func TestIdentIdempotentIgnoresValue(t *testing.T) {
 	s := testSchema()
 	x := mustParse(t, s, "interface Ethernet1/1\n  description A\n").Root.Children[0].Children[0]
 	y := mustParse(t, s, "interface Ethernet1/1\n  description B\n").Root.Children[0].Children[0]
-	// idempotent slot: same def, value excluded => identical ident => pairs => Modify
 	assert.Equal(t, ident.Of(x), ident.Of(y))
 }
 

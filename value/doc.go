@@ -3,7 +3,7 @@
 // The built-in types are word, rest, and uint. Word is the default for untyped
 // captures. Schemas must register platform-specific types.
 //
-// Register embeds a pattern in a larger expression, so it rejects anchors and
-// capturing groups: an anchored pattern compiles but then matches nothing, and
-// the schema layer addresses captures by name. Use the (?:...) form for groups.
+// Schema templates embed type patterns in larger expressions. Register rejects
+// anchors, which restrict where embedded patterns can match, and capturing
+// groups, which interfere with named schema captures. Use (?:...) for groups.
 package value

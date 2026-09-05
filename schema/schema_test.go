@@ -82,8 +82,7 @@ func TestNodeRenderRoundTrip(t *testing.T) {
 func TestLazyNonTerminalCapture(t *testing.T) {
 	reg := value.NewRegistry()
 	require.NoError(t, reg.Register(value.Type{Name: "phrase", Pattern: `.+`}))
-	// `a` is non-terminal (a trailing " mid {{ b }}" follows) so it must be
-	// lazy; `b` is terminal and may stay greedy.
+	// Only the non-terminal capture is lazy.
 	s, err := compileSpec("pre {{ a:phrase }} mid {{ b:phrase }}", reg)
 	require.NoError(t, err)
 	f, ok := s.Match("pre x mid y mid z")
@@ -95,8 +94,7 @@ func TestLazyNonTerminalCapture(t *testing.T) {
 
 func TestLazifyKeepsEscapedLiteralRequired(t *testing.T) {
 	reg := value.NewRegistry()
-	// A custom type whose pattern ends in an escaped literal '+'. lazify must
-	// not append '?' to it (which would make the '+' optional).
+	// An escaped trailing plus remains required.
 	require.NoError(
 		t,
 		reg.Register(value.Type{Name: "plusword", Pattern: `\S+\+`}),
@@ -339,7 +337,6 @@ func TestListDeclaration(t *testing.T) {
 	}, n.ListSpec)
 	// A set-valued slot is idempotent by nature; List declares it once.
 	assert.True(t, n.Idempotent)
-	// Zero value on ordinary nodes.
 	assert.Equal(t, ListStrategy{}, s.Node("plain").ListSpec)
 }
 
@@ -398,7 +395,6 @@ func TestMembersDeclaration(t *testing.T) {
 	s := New()
 	n := s.Node("vlan {{ ids:word }}").List("ids", "uint").Members("vlan")
 	assert.Equal(t, "vlan", n.MembersKind)
-	// Zero value on ordinary and plain-list nodes.
 	assert.Equal(t, "", s.Node("plain").MembersKind)
 	assert.Equal(t, "",
 		s.Node("g {{ v:word }}").List("v", "uint").MembersKind)
@@ -458,7 +454,6 @@ func TestListSepAndKeywordsDeclaration(t *testing.T) {
 	assert.Equal(t, "all", ls.AllWord)
 	assert.Equal(t, "except", ls.ExceptWord)
 	assert.Equal(t, "1-8", ls.Domain)
-	// The adapter mirrors the fields one-to-one.
 	kw := ls.Keywords()
 	assert.Equal(t, "none", kw.None)
 	assert.Equal(t, "1-8", kw.Domain)
@@ -662,8 +657,7 @@ func TestEmptyOnRemovePanics(t *testing.T) {
 }
 
 func TestEmptyOnRemoveProtectedPanics(t *testing.T) {
-	// "Never delete this" contradicts "here is how to delete this"; the
-	// expansion would silently bypass the header's Protected rail.
+	// Protected conflicts with EmptyOnRemove because expansion bypasses header protection.
 	assert.Panics(t, func() {
 		New().Node("vlan database").Protect().ClearOnRemove()
 	})
@@ -678,14 +672,14 @@ func TestRespellAsRails(t *testing.T) {
 		n := s.Node("acl {{ id:uint }} {{ act:word }}").Card(ZeroToN)
 		return s, n
 	}
-	// header must reference a capture arg
+	// The header must reference a captured argument.
 	_, n := mk()
 	assert.Panics(t, func() { n.RespellAs("ip acl standard") })
 	_, n = mk()
 	assert.Panics(t, func() { n.RespellAs("ip acl {{ id }} {{ typo }}") })
 	_, n = mk()
 	assert.Panics(t, func() { n.RespellAs("ip acl {{ id }}", "{{ typo }}") })
-	// double declaration
+	// Reject a second declaration.
 	_, n = mk()
 	n.RespellAs("ip acl {{ id }}", "{{ act }}")
 	assert.Panics(t, func() { n.RespellAs("ip acl {{ id }}") })
@@ -698,7 +692,7 @@ func TestRespellAsRails(t *testing.T) {
 	withKid := s.Node("y {{ v:word }}").Card(ZeroToN)
 	withKid.Child("z")
 	assert.Panics(t, func() { withKid.RespellAs("q {{ v }}") })
-	// mutually exclusive with Members / ListDelta / ListContinues / blocks
+	// Reject Members, ListDelta, ListContinues, and blocks.
 	s, _ = mk()
 	lst := s.Node("m {{ ids:word }}").Card(ZeroToN).List("ids", "uint")
 	lst.RespellAs("m2 {{ ids }}")
@@ -712,7 +706,7 @@ func TestRespellAsRails(t *testing.T) {
 	_, n = mk()
 	n.RespellAs("ip acl {{ id }}")
 	assert.Panics(t, func() { n.BlockUntil("end") })
-	// reverse orders
+	// Check the reverse builder call orders.
 	s, _ = mk()
 	mem := s.Node("mm {{ ids:word }}").Card(ZeroToN).
 		List("ids", "uint").Members("k")
@@ -729,7 +723,7 @@ func mkNode(t *testing.T) *Def {
 
 func TestNegateAsUnknownArgPanics(t *testing.T) {
 	s := New()
-	// A typo'd placeholder would interpolate as "" and emit corrupt CLI.
+	// Unknown placeholders would render as empty text and corrupt the command.
 	assert.Panics(t, func() {
 		s.Node("router bgp {{ asn:uint }}").NegateAs("no router bgp {{ as }}")
 	})
@@ -795,7 +789,7 @@ func TestLabelsCombineKindAndTags(t *testing.T) {
 }
 
 func TestToggleMemberRejectsKeyAndCard(t *testing.T) {
-	// The Toggles rails (non-keyed ZeroToOne) must hold AFTER grouping too.
+	// Toggle members must remain non-keyed ZeroToOne nodes after grouping.
 	s := New()
 	a := s.Node("shutdown").Card(ZeroToOne)
 	b := s.Node("no shutdown").Card(ZeroToOne).Toggles(a)
@@ -808,7 +802,7 @@ func TestBlockUntilEmptyPanics(t *testing.T) {
 }
 
 func TestMatchChildRecomputesAfterNewChild(t *testing.T) {
-	// The specificity-order memo must not go stale when the child slice grows.
+	// Adding a child must invalidate the cached match order.
 	s := New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}")
@@ -873,7 +867,7 @@ func TestListContinuesSelfUnion(t *testing.T) {
 	m.ListDelta("vlan add {{ v }}", "vlan remove {{ v }}")
 	assert.Same(t, m, m.ListContinuation)
 
-	// A TRUE (two-def) continuation still excludes ListDelta, either order.
+	// A separate continuation excludes ListDelta in both builder call orders.
 	s3 := New()
 	b := s3.Node("vlan {{ v:word }}").Card(ZeroToOne).List("v", "uint")
 	c := s3.Node("vlan add {{ v:word }}").Card(ZeroToN).List("v", "uint").
@@ -1030,7 +1024,6 @@ func TestExclusiveArgsPreferUniqueOverKey(t *testing.T) {
 	assert.Equal(t, []string{"id"}, n.ExclusiveArgs())
 }
 
-// An exclusive name that can be empty would bucket every instance together.
 func TestUniqueEmptyMatchingTypePanics(t *testing.T) {
 	s := New()
 	require.NoError(t, s.Registry.Register(value.Type{
@@ -1054,7 +1047,6 @@ func TestExclusiveArgsClonesSoCallersCannotWriteBack(t *testing.T) {
 	assert.Equal(t, []string{"id"}, n.UniqueArgs)
 }
 
-// The blamed member must not depend on which one the author declared first.
 func TestNamespaceArityDisagreementReportedOncePerLabel(t *testing.T) {
 	build := func(oddFirst bool) *diag.Diagnostics {
 		s := New()
@@ -1086,7 +1078,6 @@ func TestNamespaceArityDisagreementReportedOncePerLabel(t *testing.T) {
 	}
 }
 
-// A member that fails an earlier check must not fix the arity for the rest.
 func TestNamespaceMisdeclaredMemberDoesNotSeedArity(t *testing.T) {
 	s := New()
 	s.Node("bogus {{ a:word }} {{ b:word }}").Card(ZeroToN).
@@ -1102,7 +1093,6 @@ func TestNamespaceMisdeclaredMemberDoesNotSeedArity(t *testing.T) {
 	assert.NotContains(t, d.String(), "disagree on exclusive arg count")
 }
 
-// Members that disagree on the extent silently occupy different name spaces.
 func TestSpaceExtentDisagreementIsError(t *testing.T) {
 	build := func(scopedFirst bool) *diag.Diagnostics {
 		s := New()
@@ -1136,7 +1126,6 @@ func TestSpaceExtentDisagreementIsError(t *testing.T) {
 	}
 }
 
-// A List arg blanks its own position in the name, so members must agree on it.
 func TestSpaceListDisagreementIsError(t *testing.T) {
 	build := func(listFirst bool) *diag.Diagnostics {
 		s := New()
@@ -1169,7 +1158,6 @@ func TestSpaceListDisagreementIsError(t *testing.T) {
 	}
 }
 
-// Definitions that never declared a shared space must not be held to one shape.
 func TestUndeclaredKindSpaceIsNotHeldToOneShape(t *testing.T) {
 	s := New()
 	s.Node("slot {{ a:word }}").Card(ZeroToN).Kind("slot").Key("a")
@@ -1180,7 +1168,6 @@ func TestUndeclaredKindSpaceIsNotHeldToOneShape(t *testing.T) {
 	assert.NotContains(t, d.String(), "members disagree")
 }
 
-// A recursive grammar must terminate and must not invent a missing anchor.
 func TestScopeAnchorCheckHandlesRecursiveGrammar(t *testing.T) {
 	s := New()
 	box := s.Node("box {{ b:word }}").Card(ZeroToN).Kind("box").Key("b")
@@ -1230,7 +1217,6 @@ func TestScopedByDeviceSetsExtent(t *testing.T) {
 	assert.True(t, device)
 }
 
-// Two extents on one definition are an authoring error in either call order.
 func TestScopedByAndScopedByDevicePanicInBothCallOrders(t *testing.T) {
 	build := func() (*Def, *Def) {
 		s := New()
@@ -1243,7 +1229,6 @@ func TestScopedByAndScopedByDevicePanicInBothCallOrders(t *testing.T) {
 	assert.Panics(t, func() { claim.ScopedByDevice().ScopedBy(box) })
 }
 
-// Setting one extent twice hides the discarded declaration.
 func TestScopeDeclarationsRejectBeingSetTwice(t *testing.T) {
 	s := New()
 	a := s.Node("box {{ b:word }}").Key("b")
@@ -1256,7 +1241,6 @@ func TestScopeDeclarationsRejectBeingSetTwice(t *testing.T) {
 	assert.Panics(t, func() { n.Namespace("other") })
 }
 
-// Namespace fixes a device-wide extent; ScopedBy narrows the same space.
 func TestNamespaceImpliesDeviceExtentUnlessScopedBy(t *testing.T) {
 	s := New()
 	box := s.Node("box {{ b:word }}").Key("b")

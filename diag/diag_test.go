@@ -44,7 +44,7 @@ func TestMerge(t *testing.T) {
 	assert.Equal(t, Diagnostic{Severity: Error, Message: "second"}, items[1])
 	assert.Equal(t, Diagnostic{Severity: Warning, Message: "third"}, items[2])
 	assert.True(t, a.HasErrors())
-	// merge must not mutate the source
+	// Merge must preserve the source diagnostics.
 	assert.Len(t, b.Items, 2)
 }
 
@@ -53,8 +53,6 @@ func TestMergePreservesPercentLiteral(t *testing.T) {
 	b := New()
 	b.Add(Error, "100%% done") // stored verbatim as "100% done"
 	a.Merge(b)
-	// Merge copies messages without applying Sprintf again.
-	// (which would mangle the lone percent into "%!d(MISSING)").
 	assert.Equal(t, "100% done", a.Items[0].Message)
 }
 

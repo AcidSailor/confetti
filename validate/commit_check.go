@@ -14,11 +14,11 @@ type relationChecker struct {
 	index map[target]bool
 	// present records whether any instance carries each label.
 	present map[string]bool
-	// held lists every claim on each exclusive name in walk order, baseline first.
+	// held preserves claim order with baseline claims first.
 	held map[holder][]claim
 	// claims records the claim each node made so checking never resolves a list twice.
 	claims map[*schema.Node]claim
-	// baseline marks every node the device provides so a collision names the right source.
+	// baseline distinguishes device-provided claims in diagnostics.
 	baseline map[*schema.Node]bool
 	d        *diag.Diagnostics
 }
@@ -33,7 +33,7 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 		// Drop the unusable baseline but still check the tree the caller asked about.
 		baseline = nil
 	}
-	// A baseline with no tree supplies nothing; say so instead of blaming the configuration.
+	// Report an invalid baseline separately from the configuration.
 	if baseline != nil && baseline.Root == nil {
 		d.Add(diag.Error, "validate: baseline has no parsed nodes")
 		baseline = nil
@@ -66,7 +66,6 @@ func (c relationChecker) recordBaseline(n *schema.Node) {
 	c.record(n, true)
 }
 
-// recordConfig indexes what one node of the caller's configuration declares.
 func (c relationChecker) recordConfig(n *schema.Node) { c.record(n, false) }
 
 // record indexes the labels, key values, and exclusive name one node declares.

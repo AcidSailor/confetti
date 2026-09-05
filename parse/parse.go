@@ -22,7 +22,7 @@ type blockCapture struct {
 	body []string
 }
 
-// Parse builds a schema.Config from already-text-transformed config text.
+// Parse builds a schema.Config from text after any import text transforms.
 func Parse(
 	s *schema.Schema,
 	text string,

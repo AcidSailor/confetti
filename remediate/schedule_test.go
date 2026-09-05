@@ -128,7 +128,7 @@ func TestScheduleCycleBreakTieBreaksOnToKey(t *testing.T) {
 		}
 		assert.Equal(t, first, order)
 	}
-	// with a->b dropped, b frees first, then c, then a
+	// Dropping a-to-b permits the order b, c, a.
 	assert.Equal(t, []int{1, 2, 0}, first)
 }
 

@@ -14,8 +14,6 @@ func TestDiffListDeltaMixed(t *testing.T) {
 	out, res := remediation(t,
 		"interface eth1\n  switchport trunk allowed vlan 10,20,30-40\n",
 		"interface eth1\n  switchport trunk allowed vlan 10,25,30-40\n")
-	// Remove-before-add (the replace-pair pre slot), one line each,
-	// compressed subsets.
 	assert.Equal(t,
 		"interface eth1\n"+
 			"  switchport trunk allowed vlan remove 20\n"+
@@ -61,7 +59,6 @@ func TestDiffListNoDeltaFormsFallsBackToModify(t *testing.T) {
 	out, _ := remediation(t,
 		"interface eth1\n  monitor vlan 10,20\n",
 		"interface eth1\n  monitor vlan 10,30\n")
-	// No ListDelta declared: today's whole-line idempotent modify.
 	assert.Equal(t, "interface eth1\n  monitor vlan 10,30\n", out)
 }
 

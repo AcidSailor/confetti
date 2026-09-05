@@ -17,8 +17,6 @@
 // without producing operations, and an operation whose plan negates a
 // baseline object reports an Error. A value change is not a negation.
 //
-// Diff assumes a schema that has passed ValidateRelations, which only
-// CommitCheck runs. Exclusive-name ordering consumes Namespace, ScopedBy, and
-// ScopedByDevice; a schema whose declarations ValidateRelations would reject
-// still derives edges here, degrading toward the wider device-wide extent.
+// Diff expects a schema that has passed ValidateRelations through CommitCheck.
+// Invalid exclusive-scope declarations fall back to device-wide ordering.
 package remediate

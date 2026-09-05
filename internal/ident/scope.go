@@ -8,11 +8,11 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Extent is how far an exclusive name reaches when the schema does not declare it.
+// Extent supplies the default scope for an exclusive name.
 type Extent int
 
 const (
-	// The zero value names no extent; the two callers must choose on purpose.
+	// The zero value is invalid.
 	_ Extent = iota
 	// PerOwner gives each enclosing object its own name space.
 	PerOwner
@@ -20,13 +20,12 @@ const (
 	Device
 )
 
-// Scope identifies the name space one exclusive name lives in.
+// Scope identifies an exclusive resource name space.
 type Scope struct {
-	// Label is the Namespace or Kind, or empty when the definition itself names the space.
+	// Label is the Namespace or Kind; an empty Label uses Def.
 	Label string
-	// Def names the space when Label is empty.
-	Def *schema.Def
-	// Owner is the object that opens the space, or empty when the space is device-wide.
+	Def   *schema.Def
+	// Owner is empty for device-wide scope.
 	Owner string
 }
 
@@ -42,12 +41,11 @@ func (s Scope) String() string {
 	}
 }
 
-// ScopeOf returns the name space a node's exclusive name lives in, resolving an undeclared extent with dflt; see the package docs for why the two callers pass opposite defaults.
+// ScopeOf resolves n's exclusive scope, using dflt when its schema declares no extent.
 func ScopeOf(n *schema.Node, dflt Extent) Scope {
 	if dflt != PerOwner && dflt != Device {
 		panic("ident: ScopeOf needs an explicit Extent")
 	}
-	// An unmatched node has no definition, so it lives in no name space.
 	if n == nil || n.Def == nil {
 		return Scope{}
 	}
@@ -59,7 +57,7 @@ func ScopeOf(n *schema.Node, dflt Extent) Scope {
 	anchor, device := def.ScopeExtent()
 	switch {
 	case anchor != nil:
-		// Outside every anchor the node falls back to the device-wide space.
+		// A node outside its declared anchor uses device scope.
 		s.Owner = pathKey(anchorOf(n, anchor))
 	case device:
 		s.Owner = ""
@@ -69,7 +67,7 @@ func ScopeOf(n *schema.Node, dflt Extent) Scope {
 	return s
 }
 
-// OwnerKey identifies the object enclosing n, independent of any declared scope, so two positions never read as one object.
+// OwnerKey identifies the object enclosing n without applying its declared scope.
 func OwnerKey(n *schema.Node) string {
 	if n == nil {
 		return ""

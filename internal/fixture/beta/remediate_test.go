@@ -60,7 +60,7 @@ func TestBridgeTeardownOrdersRefsFirst(t *testing.T) {
 	res, d := e.Remediate(run, intd)
 	require.False(t, d.HasErrors())
 	out, _ := e.Render(res.Tree)
-	// referrers negate before the definitions they point to
+	// Remove referrers before their targets.
 	assertBefore(t, out, "no bridge-group 1", "no bridge 1")
 	assertBefore(t, out, "no vlan 10 bridge 1", "no bridge 1")
 	assertBefore(t, out, "no switchport access vlan 10", "no bridge 1")

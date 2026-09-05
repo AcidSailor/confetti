@@ -12,9 +12,7 @@ import (
 	"github.com/acidsailor/confetti/value"
 )
 
-// memberSchema declares the classic dual-form vlan shape: a canonical keyed section plus a
-// membership range line. The canonical definition is declared first so the
-// specificity tie on "vlan " breaks toward it for single-id lines.
+// memberSchema defines canonical VLAN sections before equal-specificity membership lines.
 func memberSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -56,9 +54,6 @@ func TestFoldMembersSynthesizesBareInstances(t *testing.T) {
 }
 
 func TestFoldMembersDedupsAgainstSectionAfterLine(t *testing.T) {
-	// A real-world emission order: the compressed line first, the
-	// property-bearing section after it. The section must win the slot; the
-	// membership item folds away.
 	in := "vlan 1,7-9,411\n" +
 		"vlan 411\n" +
 		"  name PAYMENTS\n"
@@ -81,8 +76,6 @@ func TestFoldMembersDedupsAgainstSectionBeforeLine(t *testing.T) {
 }
 
 func TestFoldMembersOverlappingLines(t *testing.T) {
-	// The second line's overlap dedups against the first line's synthesis;
-	// an all-duplicate line vanishes without residue.
 	in := "vlan 1-3\nvlan 2,4\nvlan 1,3\n"
 	cfg := foldConfig(t, memberSchema(), in)
 	assert.Equal(t, []string{"vlan 1", "vlan 2", "vlan 3", "vlan 4"},
@@ -90,8 +83,6 @@ func TestFoldMembersOverlappingLines(t *testing.T) {
 }
 
 func TestFoldMembersNestedLevel(t *testing.T) {
-	// Membership works at any level: siblings inside a section (the submode
-	// "vlan database" shape).
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	db := s.Node("vlan database").Card(schema.ZeroToOne)
@@ -110,7 +101,6 @@ func TestFoldMembersNestedLevel(t *testing.T) {
 }
 
 func TestFoldMembersExpandFailureLeavesLine(t *testing.T) {
-	// Keep the malformed list for ImportCheck.
 	d := diag.New()
 	cfg := Parse(memberSchema(), "vlan 9-5\n", Reject, d)
 	Fold(cfg, d)
@@ -122,7 +112,7 @@ func TestFoldMembersNoCanonicalSiblingErrors(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("vlan {{ ids:word }}").Card(schema.ZeroToN).
-		List("ids", "vlan").Members("vlan") // no "vlan" Kind def anywhere
+		List("ids", "vlan").Members("vlan")
 	d := diag.New()
 	cfg := Parse(s, "vlan 1-3\n", Reject, d)
 	Fold(cfg, d)
@@ -132,7 +122,6 @@ func TestFoldMembersNoCanonicalSiblingErrors(t *testing.T) {
 }
 
 func TestFoldMembersUnsynthesizableItemErrors(t *testing.T) {
-	// Reject the complete fold when one item cannot match the canonical template.
 	d := diag.New()
 	cfg := Parse(memberSchema(), "vlan 5,abc\n", Reject, d)
 	Fold(cfg, d)
@@ -142,7 +131,6 @@ func TestFoldMembersUnsynthesizableItemErrors(t *testing.T) {
 }
 
 func TestFoldMembersCompetingSiblingDefErrors(t *testing.T) {
-	// Report an Error when an earlier equal-specificity sibling matches the rendered canonical text.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	require.NoError(t, s.Registry.Register(
@@ -161,8 +149,7 @@ func TestFoldMembersCompetingSiblingDefErrors(t *testing.T) {
 	assert.Equal(t, []string{"vlan 7-8"}, topTexts(cfg))
 }
 
-// contSchema declares a trunk-style slot with keyword spellings plus an
-// add-form continuation line.
+// contSchema declares a trunk-style slot with keyword spellings plus an add-form continuation line.
 func contSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -203,14 +190,12 @@ func TestFoldContinuationCreatesBase(t *testing.T) {
 		"interface Ethernet1/1\n  allowed vlan add 20\n")
 	kids := ifaceKids(t, cfg)
 	assert.Equal(t, []string{"allowed vlan 20"}, kids)
-	// The synthesized base binds the base def (MatchChild rail).
 	base := cfg.Root.Children[0].Children[0]
 	require.NotNil(t, base.Def)
 	assert.Equal(t, "allowed vlan {{ vlans:rest }}", base.Def.Template)
 }
 
 func TestFoldContinuationKeywordBases(t *testing.T) {
-	// none + add = the added items; all + add = still all (canonical keyword).
 	cfg := foldConfig(t, contSchema(),
 		"interface Ethernet1/1\n"+
 			"  allowed vlan none\n"+
@@ -284,7 +269,6 @@ func TestFoldContinuationRejectsAmbiguousBase(t *testing.T) {
 }
 
 func TestFoldContinuationUnionReparseRail(t *testing.T) {
-	// Require union output to match the intended definition when a more-literal sibling also matches.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -307,8 +291,6 @@ func TestFoldContinuationUnionReparseRail(t *testing.T) {
 }
 
 func TestFoldSynthesizedNodesInheritLine(t *testing.T) {
-	// A fold-synthesized node has no source line of its own; it inherits the
-	// folded line's number, 1-to-N (the RealIndent rule).
 	cfg := foldConfig(t, memberSchema(), "vlan 40\nvlan 1,7-9\n")
 	for _, n := range cfg.Root.Children[1:] {
 		assert.Equal(t, 2, n.Line, n.Text)
@@ -317,23 +299,17 @@ func TestFoldSynthesizedNodesInheritLine(t *testing.T) {
 }
 
 func TestFoldContinuationUnionDropsLine(t *testing.T) {
-	// The union is N-to-1: the slot's value comes from several source lines,
-	// so the slot degrades to positionless instead of pointing an editor at
-	// a line that does not contain the reported value.
 	cfg := foldConfig(t, contSchema(),
 		"interface Ethernet1/1\n  allowed vlan 10\n  allowed vlan add 20\n")
 	slot := cfg.Root.Children[0].Children[0]
 	assert.Equal(t, "allowed vlan 10,20", slot.Text)
 	assert.Equal(t, 0, slot.Line)
-	// An untouched base slot (no continuation folded) keeps its line.
 	cfg2 := foldConfig(t, contSchema(),
 		"interface Ethernet1/1\n  allowed vlan 10\n")
 	assert.Equal(t, 2, cfg2.Root.Children[0].Children[0].Line)
 }
 
-// compositeSchema mirrors the composite-key submode shape: canonical instances
-// keyed (id, bridge) with a state property, plus a range membership line
-// carrying bridge and state to exercise composite keys with an additional property.
+// compositeSchema defines VLAN membership with a composite key and state field.
 func compositeSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -379,7 +355,6 @@ func TestFoldMembersCompositeKeyCarriesProperties(t *testing.T) {
 }
 
 func TestFoldMembersCompositeDedupsAgreeingInstance(t *testing.T) {
-	// Deduplicate an agreeing explicit instance even when it has additional fields.
 	cfg := foldConfig(t, compositeSchema(),
 		"vlan database\n"+
 			"  vlan 3 bridge 1 name servers state enable\n"+
@@ -392,7 +367,6 @@ func TestFoldMembersCompositeDedupsAgreeingInstance(t *testing.T) {
 }
 
 func TestFoldMembersCompositeConflictSplicesForImportCheck(t *testing.T) {
-	// Keep conflicting states as duplicate keys for ImportCheck.
 	d := diag.New()
 	cfg := Parse(compositeSchema(),
 		"vlan database\n"+
@@ -410,7 +384,6 @@ func TestFoldMembersCompositeConflictSplicesForImportCheck(t *testing.T) {
 }
 
 func TestFoldMembersBridgeScopesIdentity(t *testing.T) {
-	// The same VLAN ID under another bridge is a different identity.
 	cfg := foldConfig(t, compositeSchema(),
 		"vlan database\n"+
 			"  vlan 3 bridge 2 state enable\n"+
@@ -423,8 +396,7 @@ func TestFoldMembersBridgeScopesIdentity(t *testing.T) {
 	}, kidTexts(cfg.Root.Children[0]))
 }
 
-// respellSchema declares the numbered-ACL shape: the one-line entry respells
-// into a submode section + child line.
+// respellSchema converts numbered ACL entries into sections and children.
 func respellSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -447,8 +419,6 @@ func TestFoldRespellRewritesToSubmode(t *testing.T) {
 }
 
 func TestFoldRespellMergesSameInstance(t *testing.T) {
-	// Two one-line entries for one ACL build ONE section with both children,
-	// in source order; an entry duplicating an existing child dedups.
 	cfg := foldConfig(t, respellSchema(),
 		"access-list 10 permit 10.0.0.0 0.0.0.255\n"+
 			"access-list 10 deny 10.0.1.0 0.0.0.255\n"+
@@ -461,8 +431,6 @@ func TestFoldRespellMergesSameInstance(t *testing.T) {
 }
 
 func TestFoldRespellMergesIntoExplicitSection(t *testing.T) {
-	// A one-line entry merges into an explicitly-written submode section
-	// with the same header, regardless of order.
 	cfg := foldConfig(t, respellSchema(),
 		"ip access-list standard 10\n  deny 10.0.1.0 0.0.0.255\n"+
 			"access-list 10 permit 10.0.0.0 0.0.0.255\n")
@@ -484,8 +452,6 @@ func TestFoldRespellDistinctIdsStaySeparate(t *testing.T) {
 }
 
 func TestFoldRespellUnbindableHeaderErrors(t *testing.T) {
-	// A header that binds no canonical def refuses the fold; the line stays
-	// (degraded, not silent).
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("access-list {{ id:uint }} {{ action:word }} {{ net:rest }}").
@@ -505,7 +471,7 @@ func TestFoldRespellUnbindableChildErrors(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("ip access-list standard {{ id:uint }}").
-		Card(schema.ZeroToN) // no children declared
+		Card(schema.ZeroToN)
 	s.Node("access-list {{ id:uint }} {{ action:word }} {{ net:rest }}").
 		Card(schema.ZeroToN).
 		RespellAs("ip access-list standard {{ id }}", "{{ action }} {{ net }}")
@@ -520,7 +486,6 @@ func TestFoldRespellUnbindableChildErrors(t *testing.T) {
 }
 
 func TestFoldMembersListArgSharesKeyName(t *testing.T) {
-	// Treat a membership list argument with the canonical key name as the supplied key, not an existing field.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
@@ -531,7 +496,6 @@ func TestFoldMembersListArgSharesKeyName(t *testing.T) {
 }
 
 func TestFoldRespellChainedRefusesLoudly(t *testing.T) {
-	// Reject chained RespellAs definitions because folding does not run a second pass.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	acl := s.Node("canon {{ id:uint }}").Card(schema.ZeroToN)
@@ -549,7 +513,6 @@ func TestFoldRespellChainedRefusesLoudly(t *testing.T) {
 }
 
 func TestFoldContinuationMalformedBaseWarnsAndLeavesLine(t *testing.T) {
-	// Warn on the continuation; ImportCheck reports the malformed base separately.
 	d := diag.New()
 	cfg := Parse(contSchema(),
 		"interface Ethernet1/1\n"+
@@ -582,9 +545,6 @@ func contKeywordSchema() *schema.Schema {
 }
 
 func TestFoldContinuationEmptyUnionNoNoneKeywordErrors(t *testing.T) {
-	// Base "except <whole domain>" resolves to the empty set; the continuation
-	// adds nothing. The union is empty and the base declares no none keyword,
-	// so the result has no spelling: Error, both lines kept.
 	d := diag.New()
 	cfg := Parse(contKeywordSchema(),
 		"interface Ethernet1/1\n"+
@@ -600,9 +560,6 @@ func TestFoldContinuationEmptyUnionNoNoneKeywordErrors(t *testing.T) {
 }
 
 func TestFoldContinuationSynthesizeZeroItemsErrors(t *testing.T) {
-	// No base slot at the level and the continuation resolves to zero items:
-	// there is nothing to synthesize a base from (the base declares no none
-	// keyword). Error, line kept.
 	d := diag.New()
 	cfg := Parse(contKeywordSchema(),
 		"interface Ethernet1/1\n  allowed vlan add none\n",
@@ -614,9 +571,6 @@ func TestFoldContinuationSynthesizeZeroItemsErrors(t *testing.T) {
 }
 
 func TestFoldContinuationSynthesizeReparseRail(t *testing.T) {
-	// synthesizeBase enforces the same MatchChild identity rail as the union
-	// path: a competing more-literal sibling def winning the rendered base
-	// text means divergent pairing downstream. Error, no splice.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -637,7 +591,6 @@ func TestFoldContinuationSynthesizeReparseRail(t *testing.T) {
 }
 
 func TestFoldTrunkSelfUnion(t *testing.T) {
-	// ListContinues(self) keeps the first instance as the slot and unions later siblings into it.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -659,7 +612,6 @@ func TestFoldTrunkSelfUnion(t *testing.T) {
 }
 
 func TestFoldMembersSkipsDefWithTwoUncoveredKeyComponents(t *testing.T) {
-	// Skip a same-Kind definition with two uncovered key fields and select the later one-key definition.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	vdb := s.Node("vlan database").Card(schema.ZeroToOne)
@@ -677,7 +629,6 @@ func TestFoldMembersSkipsDefWithTwoUncoveredKeyComponents(t *testing.T) {
 }
 
 func TestFoldStepsOverUnmatchedNodes(t *testing.T) {
-	// Preserve unmatched nodes at every level while folding matched siblings.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
@@ -719,8 +670,6 @@ func TestFoldStepsOverUnmatchedNodes(t *testing.T) {
 }
 
 func TestFoldRespellPreservesSourceOrderInExplicitSection(t *testing.T) {
-	// One-line entry BEFORE the explicit section: the respelled child must
-	// keep its source position (ACL evaluation order), not append last.
 	cfg := foldConfig(t, respellSchema(),
 		"access-list 10 deny 10.0.1.0 0.0.0.255\n"+
 			"ip access-list standard 10\n"+

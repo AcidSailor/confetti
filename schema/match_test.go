@@ -75,7 +75,7 @@ func TestLazify(t *testing.T) {
 		{`\S+\+`, `\S+\+`},    // escaped '+': required literal, untouched
 		{`\S+\\+`, `\S+\\+?`}, // even backslash run: still a quantifier
 		{`a{1,3}`, `a{1,3}`},  // trailing '}' is ambiguous: untouched
-		{`ab?`, `ab?`},        // already-greedy '?': untouched
+		{`ab?`, `ab?`},        // optional quantifier: unchanged
 		{``, ``},
 	}
 	for _, tt := range tests {
@@ -83,8 +83,7 @@ func TestLazify(t *testing.T) {
 	}
 }
 
-// Regression: a "}}" appearing in literal text before a "{{" must not be
-// mistaken for the capture's closing delimiter.
+// A literal "}}" before a capture is not its closing delimiter.
 func TestLiteralBracesBeforeCapture(t *testing.T) {
 	s := mustSpec(t, "a}}b {{ x }}")
 	f, ok := s.Match("a}}b VALUE")

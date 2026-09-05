@@ -23,7 +23,7 @@ func changesFrom(seq []int, ops []op) []Change {
 			c.Running = o.src
 		} else {
 			c.Intended = o.src
-			c.Running = o.runSrc // Set the running node for Modify or Replace.
+			c.Running = o.runSrc
 			if o.flipRun != nil {
 				c.Running = o.flipRun // Use the superseded running toggle partner.
 			}

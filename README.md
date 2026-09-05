@@ -1,20 +1,19 @@
 # confetti
 
 confetti is a schema-aware, offline engine for network-device CLI
-configurations: parse, validate (Juniper-style commit check), canonicalize,
-remediate, roll back, diff, and merge. It processes text without device
-connections. The core contains no vendor-specific logic.
+configurations. It parses, validates, canonicalizes, remediates, rolls back,
+compares, and merges text without connecting to devices. Its built-in
+pipelines produce deterministic output.
 
-- **Offline and deterministic.** Everything runs on text you already have;
-  the same inputs always produce the same artifact.
-- **Grammar as data.** A platform is a `schema.Schema` you author in Go:
-  line templates with typed captures, sections, cross-references, negation
-  and reset forms, raw blocks (banners), toggle pairs, list-valued args,
-  dual-form spellings, protected nodes.
-- **Safety constraints.** Remediation artifacts are dependency-ordered
-  (definitions before referrers on add, referrers first on remove),
-  and protected nodes cannot be deleted. Rejected deletions and aborted
-  ordering cycles produce no artifact.
+Platform schemas are Go declarations: line templates, typed captures,
+sections, references, negation and reset forms, raw blocks, toggles, lists,
+alternate spellings, and deletion protection. The core has no vendor-specific
+logic or runtime dependencies.
+
+Remediation orders commands by dependency: definitions before references on
+addition, and references before definitions on removal. Protected deletions
+produce diagnostics and no affected operations. An aborted ordering cycle
+produces no artifact.
 
 ## Install
 
@@ -25,7 +24,7 @@ go get github.com/acidsailor/confetti
 ## Usage
 
 Build an `Engine` from a `schema.Schema` describing your platform's
-grammar, then drive it with text:
+grammar, then import configuration text:
 
 ```go
 e := confetti.New(mySchema)
@@ -52,7 +51,7 @@ merged, diags := e.Merge(merge.Options{}, base, overlay)
 diags = e.CommitCheck(merged)
 ```
 
-A schema is declared as data:
+Define the grammar with the schema builder:
 
 ```go
 s := schema.New()
@@ -69,10 +68,10 @@ to break a cycle.
 
 Use `WithBaseline` for objects the device provides but never prints, such as
 the default VRF or built-in class maps. The text imports with the same schema
-and transforms. Baseline objects resolve references and prerequisites, and
-they never render, merge, or appear in a remediation. A plan that would negate
-one reports an error. `New` panics if the baseline text does not import
-cleanly, because it is authored platform data:
+and transforms. Baseline objects resolve references and prerequisites and
+reserve exclusive names. They never render, merge, or appear in a remediation.
+A plan that would negate one reports an error. `New` panics on any baseline
+import diagnostic, including warnings:
 
 ```go
 e := confetti.New(mySchema, confetti.WithBaseline("vlan 1\nvrf context default\n"))

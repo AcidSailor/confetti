@@ -148,7 +148,7 @@ func removedSubtree(o op) *schema.Node {
 	return o.flipRun
 }
 
-// negatedSubtree is the emitted-line counterpart of removedSubtree: the subtree an operation negates, or nil when it emits no negation.
+// negatedSubtree returns the subtree an operation negates, or nil when it emits no negation.
 func negatedSubtree(o op) *schema.Node {
 	switch o.action {
 	case graph.Remove:
@@ -260,7 +260,6 @@ func (dv *differ) checkBaselineRemovals() {
 		if rm == nil {
 			continue
 		}
-		// Report every distinct baseline object the operation negates, once each.
 		var seen map[resource]bool
 		for _, r := range definedIdents(rm) {
 			if !dv.provided[r] || seen[r] {
@@ -316,8 +315,7 @@ func (dv *differ) deriveRefEdges() {
 				}
 			}
 		}
-		// A Remove op deletes o.src; every other action can retarget away from runSrc or a superseded toggle partner.
-		// Do not visit a Replace running subtree twice.
+		// Non-removals can retarget from runSrc or flipRun; do not visit Replace input twice.
 		rm := removedSubtree(o)
 		if rm == o.runSrc {
 			rm = nil
@@ -348,7 +346,7 @@ func appendHeld(
 	x *schema.Node,
 	d *diag.Diagnostics,
 ) []heldResource {
-	// A missing move edge emits a plan the device rejects; a needless one at worst closes a cycle.
+	// Device scope avoids missing required move edges when the extent is undeclared.
 	name, ok, err := ident.ExclusiveName(x, ident.Device)
 	if err != nil {
 		d.AddAt(
@@ -422,7 +420,6 @@ func (dv *differ) deriveMoveEdges() {
 			continue
 		}
 		for _, r := range resourcesHeld(src, dv.d) {
-			// Compare every release and claim in the bucket.
 			for _, old := range freed[r.resource] {
 				if old.op != i && old.conflicts(r) {
 					dv.addEdge(old.op, i, "exclusive resource %s", r)
@@ -448,7 +445,7 @@ func (a heldResource) String() string {
 	}
 	out := fmt.Sprintf("%s %q", name,
 		strings.ReplaceAll(a.display, "\x00", ","))
-	// Two anchor spaces share a label, so the owner is what tells them apart.
+	// The owner distinguishes anchor instances with the same label.
 	if a.owner != "" {
 		out += " under " + ident.OwnerPath(a.owner)
 	}
@@ -503,7 +500,7 @@ func survivingLabels(
 			out[r.label] = true
 		}
 	}
-	// Label-only on purpose: a device-provided object is permanent, so every label it carries survives.
+	// Device-provided objects preserve every label because they cannot be removed.
 	for r := range provided {
 		out[r.label] = true
 	}
@@ -538,7 +535,6 @@ func (dv *differ) deriveRequireEdges() {
 		}
 	}
 
-	// Index each removal once per label.
 	removeByLabel := map[string][]int{}
 	for j, o := range ops {
 		src := removedSubtree(o)
@@ -584,7 +580,7 @@ func (dv *differ) deriveRequireEdges() {
 					}
 					continue
 				}
-				// The goal neither keeps nor adds the prerequisite, so the emitted sequence cannot converge.
+				// The goal omits the prerequisite, so no command order can satisfy this requirement.
 				d.Add(
 					diag.Error,
 					"%s: requires a %q but the goal defines none",

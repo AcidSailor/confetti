@@ -30,8 +30,6 @@ func TestBlockSpansUnterminatedRunsToEOF(t *testing.T) {
 }
 
 func TestBlockSpansNestedLineIsNotAnOpener(t *testing.T) {
-	// A nested line matching a root block-opener template must not open a
-	// span: at interface level the banner def is not reachable.
 	spans := BlockSpans(
 		blockSchema(),
 		"interface eth1\n  banner motd ^\n  mtu 9000\ninterface eth2\n",
@@ -49,7 +47,6 @@ func TestBlockSpansNestedBlockDefMatchesAtItsLevel(t *testing.T) {
 		"interface eth1\n  banner login ^\nsecret\n^\ninterface eth2\n"+
 			"banner login ^\n",
 	)
-	// The nested def protects its span; the same text at root is unreachable.
 	assert.Equal(t, []bool{false, true, true, true, false, false, false}, spans)
 }
 
