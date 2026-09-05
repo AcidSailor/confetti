@@ -1,10 +1,8 @@
 # Fixture lineage and grammar assumptions
 
-The two schemas in `internal/fixture/` describe imaginary platforms. Each
-schema derives from part of a real vendor grammar. This document records that
-origin and identifies unverified behavior.
-Read it before you compare a fixture with a real device or treat fixture
-behavior as vendor-accurate.
+The schemas in `internal/fixture/` describe imaginary platforms derived from
+real vendor grammars. Verify their documented assumptions before treating
+fixture behavior as vendor-accurate.
 
 | Fixture | Lineage | Grounding |
 |---|---|---|
@@ -43,13 +41,13 @@ Vendor-grounded constructs and why they exist:
 - Reference configurations print neither `vlan 1` nor `vrf context default`,
   so `Baseline()` declares both.
 
-Unverified / docs-only (re-verify on a lab device if it ever matters):
+Unverified / docs-only:
 
 - `default interface <name>` reset form is documented but was not verified on
   a real image.
 - Default administrative state is not modeled because it depends on the
   platform and port.
-- `asn` deliberately 16-bit here (4-byte lives in beta).
+- `asn` is 16-bit here; beta uses 4-byte ASNs.
 - route-map inner `match`/`set` children were added without a cited vendor
   source (header + ref target were the grounded part).
 - The `feature bgp` → `router bgp` dependency is confetti-specific data, not
@@ -90,14 +88,12 @@ constructs have documentation support:
 
 Unverified assumptions:
 
-- Canonical indentation is probably one space because OcNOS derives from
-  ZebOS. confetti renders a two-space canonical form. Its round-trip contract
-  does not preserve original bytes.
+- Canonical indentation is unverified. OcNOS derives from ZebOS and may use
+  one space. confetti renders two spaces and does not preserve original bytes.
 - Default admin-state emission; emission order of `bridge` vs `vlan
   database` sections (schema declares `bridge` first to match
   definition-before-referrer ordering).
-- `max-paths` numeric range left as bare `uint` (doc ranges were
-  medium-confidence).
+- `max-paths` uses bare `uint`; its documented ranges are unverified.
 - Documentation reports that cmlsh cannot remove multiple configurations in
   one commit. An artifact with several `no` lines can require one removal per
   commit. Confetti does not model device commits.
@@ -105,7 +101,7 @@ Unverified assumptions:
   peer-groups, unnumbered BGP,
   VRRP, MPLS.
 - Global vlan-id uniqueness across bridges is device semantics the schema
-  does not currently declare (`Unique` scope exists for it).
+  does not declare (`Unique` scope exists for it).
 
 ## Cross-cutting
 

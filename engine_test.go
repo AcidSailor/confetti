@@ -67,8 +67,6 @@ func TestEngineImportTextTransformStripsComments(t *testing.T) {
 	assert.Equal(t, "interface Ethernet1/1\n  shutdown\n", out)
 }
 
-// fakeTreeTransform marks the engine's tree-transform seam as exercised by
-// renaming any node whose text equals its trigger.
 type fakeTreeTransform struct {
 	from, to string
 	ran      *bool
@@ -123,8 +121,7 @@ func (a addNodeTransform) Apply(cfg *schema.Config) {
 }
 
 func TestEngineExportTreeTransformRuns(t *testing.T) {
-	// The export tree-transform mutates the tree before render, and export
-	// text rules see the mutated text (tree -> render -> text ordering).
+	// Export tree transforms run before render and text transforms.
 	ran := false
 	tag, err := transform.PerLineSub(`link down`, "link down ! tagged")
 	require.NoError(t, err)
@@ -139,7 +136,7 @@ func TestEngineExportTreeTransformRuns(t *testing.T) {
 	out, rd := e.Render(cfg)
 	require.False(t, rd.HasErrors(), rd.String())
 	assert.True(t, ran, "export tree-transform should run during Render")
-	// The text rule matched the transform-added line, pinning the ordering.
+	// The text rule sees the transformed line.
 	assert.Contains(t, out, "  link down ! tagged")
 }
 
@@ -149,7 +146,7 @@ func TestEngineMerge(t *testing.T) {
 	b, _ := e.Import("interface Ethernet1/1\n  switchport access vlan 10\n")
 	merged, d := e.Merge(merge.Options{}, a, b)
 	require.False(t, d.HasErrors())
-	// jointly consistent: the merged artifact commit-checks green
+	// The merged artifact passes CommitCheck.
 	require.False(t, e.CommitCheck(merged).HasErrors())
 	out, _ := e.Render(merged)
 	assert.Equal(
@@ -233,11 +230,6 @@ func TestEngineExportTextTransformReachesRemediationArtifact(t *testing.T) {
 }
 
 func TestImportTextTransformNestedFalseOpenerStaysUnprotected(t *testing.T) {
-	// A nested line whose text matches a root block-opener template must not
-	// open a false protected span: before level-aware matching, the guard
-	// disabled text rules from such a line through to EOF (no terminator ever
-	// arrives), so later noise survived to the parser as misleading
-	// unknown-command diagnostics.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("banner motd {{ delim:word }}").
@@ -255,8 +247,6 @@ func TestImportTextTransformNestedFalseOpenerStaysUnprotected(t *testing.T) {
 	cfg, d := e.Import(
 		"interface Ethernet1/1\n  banner motd ^\n!noise\ninterface Ethernet1/2\n",
 	)
-	// DropLines kept firing past the pseudo-opener: the noise line was
-	// blanked, so no diagnostic names it.
 	assert.NotContains(t, d.String(), "!noise", d.String())
 	// The stray nested line itself is ordinary unknown-command territory.
 	assert.Contains(t, d.String(), `"banner motd ^"`)
@@ -275,9 +265,6 @@ func TestImportNoiseIndentCannotStrandBlockOpener(t *testing.T) {
 }
 
 func TestImportNoiseBeforeTabIndentedOpenerKeepsBody(t *testing.T) {
-	// Same shape with a tab-indented opener and a body that DropLines rules
-	// match ("!..." and "exit" are both noise patterns outside blocks): the
-	// body must arrive byte-exact with zero diagnostics.
 	e := alpha.Engine()
 	cfg, d := e.Import(
 		"!\n\tbanner motd ^\n!!! Authorized !!!\nexit\n^\nvlan 10\n",
@@ -293,8 +280,6 @@ func TestImportNoiseBeforeTabIndentedOpenerKeepsBody(t *testing.T) {
 }
 
 func TestImportDiagnosticLineSurvivesDropLines(t *testing.T) {
-	// The bundled DropLines transform blanks instead of removing, so a
-	// diagnostic after dropped comment lines carries the ORIGINAL file line.
 	e := alpha.Engine(confetti.WithUnknown(parse.Drop))
 	_, d := e.Import("!header\n!comment\nbogus command here\n")
 	require.False(t, d.HasErrors())
@@ -529,7 +514,7 @@ func TestCommitCheckReportsSchemaMismatchAndStillChecksTheTree(t *testing.T) {
 	assert.Contains(t, cd.String(), `vlan "9" does not exist`)
 }
 
-// renumberVlan proves a tree transform reaches the baseline by changing a key value, not only text.
+// renumberVlan changes a baseline key through a tree transform.
 type renumberVlan struct{ from, to string }
 
 func (r renumberVlan) Apply(cfg *schema.Config) {

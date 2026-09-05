@@ -299,8 +299,6 @@ func TestMergeToggleConflictDeclaredLastWins(t *testing.T) {
 }
 
 func TestMergeToggleGroupThreeWayConflict(t *testing.T) {
-	// All members of an N-way group share one slot identity: two parts
-	// naming different members of a 3-way group collide like a pair does.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -340,7 +338,7 @@ func TestMergeListUnion(t *testing.T) {
 }
 
 func TestMergeListUnionIdentical(t *testing.T) {
-	// Identical raw text short-circuits as today's dedup, before union.
+	// Identical text bypasses list union.
 	got, d := mergeText(t, testSchema(), refuse,
 		"interface eth1\n  switchport trunk allowed vlan 10,20\n",
 		"interface eth1\n  switchport trunk allowed vlan 10,20\n")

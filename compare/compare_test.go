@@ -49,8 +49,6 @@ func TestRenderSignsAndContext(t *testing.T) {
 }
 
 func TestRenderRegroupsSplitSections(t *testing.T) {
-	// Scheduled order interleaves two sections; the view reassembles each
-	// hunk by path on first appearance.
 	e11 := []string{"interface Ethernet1/1"}
 	e12 := []string{"interface Ethernet1/2"}
 	changes := []remediate.Change{
@@ -93,8 +91,6 @@ func TestRenderSharedAncestorPrefix(t *testing.T) {
 }
 
 func TestRenderRemovedSectionShowsSubtree(t *testing.T) {
-	// The artifact negates only the header; the view shows every
-	// disappearing line through the paired running-side node.
 	sec := schema.NewNode("interface Ethernet1/1")
 	sec.AddChild(schema.NewNode("description A"))
 	sec.AddChild(schema.NewNode("shutdown"))
@@ -144,10 +140,6 @@ func TestRenderToggleFlipShowsBothSubtrees(t *testing.T) {
 }
 
 func TestRenderRemovedSectionFromDiff(t *testing.T) {
-	// Closes the composition gap left by TestRenderRemovedSectionShowsSubtree
-	// (hand-built subtree): whole-section removal driven end-to-end through
-	// Diff, confirming Change.Running carries the full running subtree even
-	// though the artifact negates only the header.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -168,9 +160,6 @@ func TestRenderRemovedSectionFromDiff(t *testing.T) {
 }
 
 func TestRenderSectionHeaderModifyHeaderOnly(t *testing.T) {
-	// A paired section whose header carries a changed non-key field renders
-	// as a header-only -/+ pair; the changed child appears once, as its own
-	// Change, not repeated under both subtree signs.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	vlan := s.Node("vlan {{ id:vlan }} name {{ name:word }}").
@@ -231,8 +220,6 @@ func TestRenderNoSectionExitToken(t *testing.T) {
 }
 
 func TestRenderBlockBody(t *testing.T) {
-	// Body change on an idempotent block slot is a Modify: both blocks shown,
-	// bodies verbatim (never indented), terminator included.
 	s := schema.New()
 	s.Node("banner motd {{ delim:word }}").
 		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")

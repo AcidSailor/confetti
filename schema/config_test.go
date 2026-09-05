@@ -104,8 +104,6 @@ func TestOpStringAll(t *testing.T) {
 }
 
 func TestOpStringUnknownIsVisible(t *testing.T) {
-	// An out-of-range op must render as a visible debug form, not silently
-	// masquerade as "none".
 	assert.Equal(t, "Op(99)", Op(99).String())
 }
 

@@ -26,8 +26,7 @@ type Keywords struct {
 	Domain            string
 }
 
-// domains memoizes domain expansions, which are schema-static and re-read per folded line.
-// never evicted; schemas declare a fixed set of domains, so growth is bounded.
+// domains caches schema-static expansions; registered schemas bound its growth.
 var domains sync.Map
 
 // domain returns the expanded keyword domain. Callers must not modify the result.

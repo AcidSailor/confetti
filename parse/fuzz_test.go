@@ -9,10 +9,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// FuzzParse asserts the indent-stack walk never panics for arbitrary input
-// (any indentation, unknown commands, truncation) under both policies, and
-// always returns a non-nil config. Run the seed corpus via `go test`; explore
-// with `go test -run x -fuzz FuzzParse ./parse/`.
+// FuzzParse checks that arbitrary input never panics and always returns a config.
 func FuzzParse(f *testing.F) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)

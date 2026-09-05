@@ -141,8 +141,6 @@ func TestVlanRangeFoldsToInstances(t *testing.T) {
 }
 
 func TestVlanRangeSpellingIsNotDrift(t *testing.T) {
-	// Range spelling vs explicit per-vlan spelling of the same content:
-	// remediation must see zero drift.
 	e := Engine()
 	running, dr := e.Import(
 		"bridge 1 protocol rstp vlan-bridge\n" +
@@ -171,8 +169,6 @@ func TestVlanRangeStateConflictIsDupKey(t *testing.T) {
 }
 
 func TestTrunkAddLinesUnionOnImport(t *testing.T) {
-	// Successive add lines accumulate on-device; import folds them into one
-	// slot spelled as the canonical add-form line.
 	e := Engine()
 	cfg, d := e.Import(
 		"interface xe1\n" +
@@ -205,7 +201,6 @@ func TestTrunkRemediateEmitsDeltaForms(t *testing.T) {
 }
 
 func TestTrunkSpellingEquivalenceIsNotDrift(t *testing.T) {
-	// Multi-line and folded single-line spellings of the same set: no drift.
 	e := Engine()
 	running, _ := e.Import(
 		"interface xe1\n" +
@@ -249,8 +244,6 @@ func TestVrfDanglingRefs(t *testing.T) {
 }
 
 func TestTrunkWholeSlotRemovalUsesRemoveForm(t *testing.T) {
-	// Dropping the slot entirely must spell the vendor's remove form, not
-	// "no switchport trunk allowed vlan add ...".
 	e := Engine()
 	running, _ := e.Import(
 		"interface xe1\n  switchport trunk allowed vlan add 10,20\n")

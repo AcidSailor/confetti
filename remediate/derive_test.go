@@ -64,9 +64,6 @@ func TestRefEdgeOrdersReferrerBeforeDefinitionOnRemove(t *testing.T) {
 }
 
 func TestRefEdgeMatchesCompositeKeyTarget(t *testing.T) {
-	// The definition's key is composite (id, z); the ref names only grp.id.
-	// CommitCheck resolves this shape through its per-key-argument index; ordering
-	// must derive the edge from the same identity model.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
@@ -142,7 +139,6 @@ func TestRetargetReplaceEdges(t *testing.T) {
 		return -1
 	}
 	memberIdx := idx("member 5 tag 20")
-	// the paired leaf must actually classify as Replace, not degrade to Modify
 	var action graph.Action
 	for _, v := range g.Ops() {
 		if v.Index == memberIdx {
@@ -246,8 +242,6 @@ func TestUniqueScopeDerivesMoveOnPartialKeyMatch(t *testing.T) {
 		"slot 1 owner alpha\n",
 		"slot 1 owner beta\n")
 	require.False(t, d.HasErrors(), d.String())
-	// full keys differ (owner changed) so pairing makes add+remove; Unique(id)
-	// says id itself is exclusive => free it before re-claiming
 	assert.Equal(t, "no slot 1 owner alpha\nslot 1 owner beta\n", out)
 }
 
@@ -319,7 +313,6 @@ func TestUniqueListArgMultipleReleasesPrecedeOneClaim(t *testing.T) {
 }
 
 func TestUniqueListArgMoveEdgesDeterministic(t *testing.T) {
-	// TestOppositeMovesDeterministic covers scalar resources; this test covers lists.
 	var first string
 	for range 5 {
 		out, d := orderedDiff(t, prioListSchema(),
@@ -435,8 +428,7 @@ func TestOppositeMovesDeterministic(t *testing.T) {
 	}
 }
 
-// requireSchema declares the REQUIRER before the prerequisite kind, so rank
-// alone orders both directions wrong.
+// requireSchema declares the consumer before its prerequisite.
 func requireSchema() *schema.Schema {
 	s := schema.New()
 	s.Node("router {{ proto:word }}").Card(schema.ZeroToN).Requires("feature")
@@ -458,8 +450,6 @@ func TestRequiresOrdersDependentRemovalFirst(t *testing.T) {
 		"router bgp\nfeature bgp\n",
 		"")
 	require.False(t, d.HasErrors(), d.String())
-	// removes descend by rank => "no feature bgp" would come first; the
-	// requirer's removal must precede the last definer's removal
 	assert.Equal(t, "no router bgp\nno feature bgp\n", out)
 }
 
@@ -472,10 +462,7 @@ func TestRequiresSurvivorNeedsNoEdge(t *testing.T) {
 	assert.Equal(t, "router bgp\n", out)
 }
 
-// keylessRequireSchema targets a keyless Kind such as
-// a literal "feature bgp" has no capture to key on, but is a legitimate
-// existential prerequisite (regression: definesOf/survivingKinds used to
-// skip keyless kinds, so the requirer saw "goal defines none").
+// keylessRequireSchema defines an existential prerequisite without captures.
 func keylessRequireSchema() *schema.Schema {
 	s := schema.New()
 	s.Node("router {{ proto:word }}").Card(schema.ZeroToN).Requires("gate")
@@ -539,8 +526,6 @@ func TestCrossDefModifyIntroducesReferencedTag(t *testing.T) {
 }
 
 func TestRequiresPartialKeyOverlapIsNotSurvival(t *testing.T) {
-	// A composite-key definer is replaced (10,a)->(20,a): no whole instance
-	// survives, so the Requires edge must still fire despite the shared z=a.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("router {{ proto:word }}").Card(schema.ZeroToN).Requires("grp")
@@ -821,7 +806,6 @@ func TestBaselineRemovalIsError(t *testing.T) {
 		d.String(),
 		`no feature bgp: removes device-provided feature "bgp" declared by the baseline`,
 	)
-	// The result stays available for inspection.
 	assert.Equal(t, "no feature bgp\n", render.Render(res.Tree))
 }
 
@@ -935,7 +919,7 @@ func TestBaselineKeptInBothIsNotAnError(t *testing.T) {
 	assert.False(t, d.HasErrors(), d.String())
 }
 
-// aclNamespaceSchema returns two Kinds that share one device-side name space.
+// aclNamespaceSchema defines IP and MAC ACLs with optional shared exclusivity.
 func aclNamespaceSchema(namespace bool) *schema.Schema {
 	s := schema.New()
 	ip := s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
@@ -965,7 +949,7 @@ func TestNamespaceDistinctNamesKeepDeclarationOrder(t *testing.T) {
 	assert.Equal(t, "mac access-list M\nno ip access-list L\n", out)
 }
 
-// boxClaimSchema holds a claim under a box, optionally scoping the name space to one box.
+// boxClaimSchema defines claims with optional per-box scope.
 func boxClaimSchema(scoped bool) *schema.Schema {
 	s := schema.New()
 	box := s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Key("b")
@@ -977,7 +961,6 @@ func boxClaimSchema(scoped bool) *schema.Schema {
 	return s
 }
 
-// An undeclared extent keeps the conservative device-wide assumption in ordering.
 func TestUnscopedClaimFreesAcrossOwnersBeforeClaim(t *testing.T) {
 	out, d := orderedDiff(t, boxClaimSchema(false),
 		"box a\n  claim 1\n",
@@ -986,7 +969,6 @@ func TestUnscopedClaimFreesAcrossOwnersBeforeClaim(t *testing.T) {
 	assert.Equal(t, "no box a\nbox b\n  claim 1\n", out)
 }
 
-// ScopedBy says the two boxes hold different names, so no release must precede the claim.
 func TestScopedByDerivesNoMoveEdgeAcrossAnchors(t *testing.T) {
 	out, d := orderedDiff(t, boxClaimSchema(true),
 		"box a\n  claim 1\n",
@@ -996,7 +978,6 @@ func TestScopedByDerivesNoMoveEdgeAcrossAnchors(t *testing.T) {
 }
 
 func TestTagWithoutNamespaceDerivesNoMoveEdge(t *testing.T) {
-	// Tags classify; only Namespace opts a label into exclusivity.
 	out, d := orderedDiff(t, aclNamespaceSchema(false),
 		"ip access-list L\n",
 		"mac access-list L\n")

@@ -26,8 +26,6 @@ func TestCompareVlanStateFlip(t *testing.T) {
 }
 
 func TestCompareVlanRenameShowsPair(t *testing.T) {
-	// Cross-def (Kind,key) pairing: rename is one -/+ pair, never an add
-	// plus a vlan-deleting negate (see TestVlanRenameIsModifyNotDelete).
 	e := Engine()
 	run, d1 := e.Import(fmt.Sprintf(vlanTmpl, "state enable"))
 	require.False(t, d1.HasErrors())

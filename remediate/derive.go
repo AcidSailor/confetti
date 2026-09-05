@@ -316,8 +316,7 @@ func (dv *differ) deriveRefEdges() {
 				}
 			}
 		}
-		// A Remove op deletes o.src; every other action can retarget away from runSrc or a superseded toggle partner.
-		// Do not visit a Replace running subtree twice.
+		// Non-removals can retarget from runSrc or flipRun; do not visit Replace input twice.
 		rm := removedSubtree(o)
 		if rm == o.runSrc {
 			rm = nil
@@ -348,7 +347,7 @@ func appendHeld(
 	x *schema.Node,
 	d *diag.Diagnostics,
 ) []heldResource {
-	// A missing move edge emits a plan the device rejects; a needless one at worst closes a cycle.
+	// Device scope avoids missing required move edges when the extent is undeclared.
 	name, ok, err := ident.ExclusiveName(x, ident.Device)
 	if err != nil {
 		d.AddAt(
@@ -503,7 +502,7 @@ func survivingLabels(
 			out[r.label] = true
 		}
 	}
-	// Label-only on purpose: a device-provided object is permanent, so every label it carries survives.
+	// Device-provided objects preserve every label because they cannot be removed.
 	for r := range provided {
 		out[r.label] = true
 	}

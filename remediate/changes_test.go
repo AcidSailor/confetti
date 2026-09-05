@@ -73,8 +73,6 @@ func TestChangesPairSourceNodes(t *testing.T) {
 }
 
 func TestChangesOrderMatchesArtifact(t *testing.T) {
-	// E10 teardown: the scheduled artifact negates the referrer section before
-	// the definition. The log must be in that same emission order.
 	s := testSchema()
 	running := mustParse(t, s,
 		"vlan 50\ninterface Ethernet1/1\n  switchport access vlan 50\n")
@@ -120,8 +118,6 @@ func TestChangesReplaceIsOneEntry(t *testing.T) {
 }
 
 func TestChangesToggleFlipCarriesBothSides(t *testing.T) {
-	// The artifact emits only the forward line (dropToggles), but the log
-	// Pair the flip with its running node so compare can show both states.
 	s := testSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n")

@@ -28,8 +28,6 @@ func TestCollectActionsAndSections(t *testing.T) {
 		"vlan 10\ninterface Ethernet1/1\n  description A\n  shutdown\n",
 		"interface Ethernet1/1\n  description B\n  ip address 10.0.0.1 255.255.255.0 secondary\n",
 	)
-	// vlan 10 removed (root), shutdown removed (in kept iface),
-	// description modified, secondary ip added.
 	byText := map[string]op{}
 	for _, o := range ops {
 		byText[o.node.Text] = o

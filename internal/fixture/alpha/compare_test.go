@@ -8,8 +8,6 @@ import (
 )
 
 func TestCompareAlphaEndToEnd(t *testing.T) {
-	// Same pair as TestRemediateAlphaEndToEnd; the view regroups the
-	// scheduled log by path, so both root-level changes share one hunk.
 	e := Engine()
 	running, _ := e.Import("vlan 10\n" +
 		"interface Ethernet1/1\n  switchport access vlan 10\n  shutdown\n")
@@ -37,8 +35,6 @@ func TestCompareAlphaTrunkVlanModifyPair(t *testing.T) {
 
 	view, d := e.Compare(running, intended)
 	require.False(t, d.HasErrors(), d.String())
-	// The change log stays a state view (whole old/new lines) while the
-	// remediation artifact is incremental.
 	assert.Contains(t, view, "-   switchport trunk allowed vlan 10,20,30-40\n")
 	assert.Contains(t, view, "+   switchport trunk allowed vlan 10,25,30-40\n")
 }

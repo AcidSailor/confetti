@@ -103,7 +103,6 @@ func TestEngineRemediateCommitChecksIntended(t *testing.T) { // E12
 		"remediating onto a dangling-ref goal must error",
 	)
 	assert.Contains(t, d.String(), `vlan "99" does not exist`)
-	// the Result is still returned for inspection
 	require.NotNil(t, res)
 	assert.NotEqual(t, "", render.Render(res.Tree))
 }
@@ -172,7 +171,6 @@ func TestRollbackCommitChecksRunningGoal(t *testing.T) {
 		"rolling back onto a dangling-ref goal must error",
 	)
 	assert.Contains(t, d.String(), `vlan "99" does not exist`)
-	// the Result is still returned for inspection
 	require.NotNil(t, res)
 	assert.NotEqual(t, "", render.Render(res.Tree))
 }
@@ -189,8 +187,6 @@ func TestRollbackNoChange(t *testing.T) {
 
 func TestRollbackIsCanonicalNotByteExact(t *testing.T) {
 	e := alpha.Engine(confetti.WithUnknown(parse.Drop))
-	// lenient import drops the unknown line from the running tree, so rollback
-	// restores the canonical parse of running, never its original bytes
 	running, d1 := e.Import(
 		"interface Ethernet1/1\n  flux-capacitor enable\n  no shutdown\n",
 	)
@@ -209,8 +205,6 @@ func TestRollbackIsCanonicalNotByteExact(t *testing.T) {
 }
 
 func TestCompareSkipsCommitCheck(t *testing.T) {
-	// Read-only view: no commit-check on either side (gofmt-vs-vet split).
-	// The same pair makes Remediate error on the dangling ref.
 	e := alpha.Engine()
 	running, _ := e.Import("")
 	intended, d0 := e.Import(
@@ -347,7 +341,7 @@ func TestCommitChecksRunInRegistrationOrderAfterBuiltIn(t *testing.T) {
 			d.Add(diag.Error, "%s", msg)
 		}
 	}
-	// Two options prove that a later WithCommitChecks appends instead of replacing.
+	// Multiple WithCommitChecks options append validators.
 	e := confetti.New(alpha.Schema(),
 		confetti.WithUnknown(parse.Reject),
 		confetti.WithCommitChecks(mark("first"), mark("second")),
@@ -390,8 +384,6 @@ func TestRemediatePerItemRefOrdersDelta(t *testing.T) {
 	e := confetti.New(refListSchema(),
 		confetti.WithUnknown(parse.Reject))
 
-	// Add side: the delta referencing vlan 30 must wait for its creation,
-	// against declaration rank.
 	running, _ := e.Import(
 		"interface Ethernet1/1\n  allowed vlan 10\nvlan 10\n",
 	)

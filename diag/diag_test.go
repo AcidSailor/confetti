@@ -53,8 +53,6 @@ func TestMergePreservesPercentLiteral(t *testing.T) {
 	b := New()
 	b.Add(Error, "100%% done") // stored verbatim as "100% done"
 	a.Merge(b)
-	// Merge copies messages without applying Sprintf again.
-	// (which would mangle the lone percent into "%!d(MISSING)").
 	assert.Equal(t, "100% done", a.Items[0].Message)
 }
 

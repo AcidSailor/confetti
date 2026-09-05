@@ -72,9 +72,6 @@ func TestNegateTemplateInterpolates(t *testing.T) {
 }
 
 func TestInterpolateCloseBraceBeforeOpen(t *testing.T) {
-	// A literal "}}" occurring before the first "{{" must be treated as literal
-	// text, not trigger a slice-bounds panic. Regression: the close-delimiter
-	// search started at index 0 instead of just after the opener.
 	got := schema.Interpolate(
 		"close }} then open {{ a }}",
 		map[string]string{"a": "X"},
@@ -83,8 +80,6 @@ func TestInterpolateCloseBraceBeforeOpen(t *testing.T) {
 }
 
 func TestNegateNilDefIsDefensive(t *testing.T) {
-	// def==nil cannot occur via Import (the parser drops unmatched lines), but the
-	// negation must not panic if a node is hand-built or injected by a transform.
 	assert.Equal(
 		t,
 		"no flux-capacitor on",

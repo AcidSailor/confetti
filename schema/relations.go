@@ -38,7 +38,7 @@ func (r Relation) IsExclusion() bool {
 	return r.Scope == ScopeSiblings && r.Want == Absent
 }
 
-// spaceShape is what every member of one exclusive name space must agree on.
+// spaceShape describes an exclusive name space.
 type spaceShape struct {
 	arity   int  // The exclusive arg count.
 	listIdx int  // The List position among the exclusive args, or -1.
@@ -57,19 +57,19 @@ func shapeOf(n *Def) spaceShape {
 	return s
 }
 
-// exclusiveSpace records what the keyed members of one exclusive name space declare.
+// exclusiveSpace records declarations for one keyed name space.
 type exclusiveSpace struct {
 	members    int
 	namespaced int  // Members declaring the label as their Namespace.
 	declared   bool // Set when a member declares a Namespace or an extent.
-	// shape is what the first member fixed; each varied flag records a later disagreement.
+	// shape comes from the first member; varied flags record conflicts.
 	shape        spaceShape
 	variedArity  bool
 	variedList   bool
 	variedExtent bool
 }
 
-// spaceIndex holds the keyed members of each exclusive name space in declaration order.
+// spaceIndex groups keyed definitions by exclusive label.
 type spaceIndex struct {
 	order  []string
 	byName map[string]*exclusiveSpace
@@ -77,7 +77,7 @@ type spaceIndex struct {
 
 // add registers one keyed definition in the space its exclusive label names.
 func (si *spaceIndex) add(n *Def) {
-	// A member that fails its own checks must not fix the shape for the rest.
+	// Invalid members must not define the shared shape.
 	if len(n.KeyArgs) == 0 {
 		return
 	}
@@ -85,7 +85,7 @@ func (si *spaceIndex) add(n *Def) {
 		return
 	}
 	label := n.ExclusiveLabel()
-	// An empty label means the definition alone names its space, shared with nothing.
+	// Unlabeled definitions do not share a space.
 	if label == "" {
 		return
 	}
@@ -110,12 +110,11 @@ func (si *spaceIndex) add(n *Def) {
 		got.anchor != sp.shape.anchor || got.device != sp.shape.device
 }
 
-// report reports members of one shared name space that disagree on its shape.
+// report reports conflicting shared-space shapes.
 func (si spaceIndex) report(d *diag.Diagnostics) {
-	// One report per label; blaming each member would depend on declaration order.
+	// Report each label once to avoid declaration-order-dependent blame.
 	for _, label := range si.order {
 		sp := si.byName[label]
-		// Members that never declared a shared space cannot disagree about one.
 		if !sp.declared || sp.members < 2 {
 			continue
 		}
@@ -150,17 +149,15 @@ func (s *Schema) ValidateRelations(d *diag.Diagnostics) {
 	rc.spaces.report(d)
 }
 
-// relationCheck holds what ValidateRelations indexes before it checks anything.
+// relationCheck contains cross-definition indexes.
 type relationCheck struct {
-	// kinds records every declared Kind name so a Tag cannot shadow one.
-	kinds map[string]bool
-	// keysOf records the key args each label is keyed by, for relation targets.
+	kinds  map[string]bool
 	keysOf map[string]map[string]bool
 	spaces spaceIndex
 	d      *diag.Diagnostics
 }
 
-// index records the labels, key args, and exclusive space one definition declares.
+// index records a definition's labels, keys, and exclusive space.
 func (rc *relationCheck) index(n *Def) {
 	if n.KindName != "" {
 		rc.kinds[n.KindName] = true
@@ -176,7 +173,7 @@ func (rc *relationCheck) index(n *Def) {
 	}
 }
 
-// check reports every defect one definition declares against the index.
+// check validates a definition against the cross-definition indexes.
 func (rc *relationCheck) check(n *Def) {
 	// A label cannot be both identity-bearing and non-identity metadata.
 	for _, name := range n.TagNames {
@@ -193,9 +190,8 @@ func (rc *relationCheck) check(n *Def) {
 	n.checkScope(rc.d)
 }
 
-// checkScope reports an exclusive name this definition declares but cannot hold.
+// checkScope reports exclusive declarations without a Key.
 func (n *Def) checkScope(d *diag.Diagnostics) {
-	// An exclusive name is held by the key, so without one nothing holds it.
 	if len(n.KeyArgs) > 0 {
 		return
 	}
@@ -211,7 +207,7 @@ func (n *Def) checkScope(d *diag.Diagnostics) {
 	}
 }
 
-// checkScopeAnchors reports a ScopedBy anchor that is not an ancestor on every path to the definition naming it.
+// checkScopeAnchors requires each ScopedBy anchor on every path to its definition.
 func (s *Schema) checkScopeAnchors(d *diag.Diagnostics) {
 	var anchored []*Def
 	s.Walk(func(n *Def) {
@@ -220,7 +216,6 @@ func (s *Schema) checkScopeAnchors(d *diag.Diagnostics) {
 		}
 	})
 	for _, n := range anchored {
-		// A path that avoids the anchor is a path on which it is not an ancestor.
 		if s.reaches(n, n.ScopeAnchor) {
 			d.Add(
 				diag.Error,
@@ -247,7 +242,7 @@ func (s *Schema) reaches(target, skip *Def) bool {
 	return slices.ContainsFunc(s.Roots, walk)
 }
 
-// checkNamespace reports the first defect that makes this definition's Namespace unusable, plus a keyed label it stays out of.
+// checkNamespace validates a definition's namespace membership.
 func (n *Def) checkNamespace(spaces spaceIndex, d *diag.Diagnostics) {
 	if label := n.NamespaceLabel; label != "" {
 		sp := spaces.byName[label]
@@ -263,7 +258,6 @@ func (n *Def) checkNamespace(spaces spaceIndex, d *diag.Diagnostics) {
 				n.Template,
 				label,
 			)
-		// A space this definition qualifies for is registered, so nil means none.
 		case sp == nil || sp.namespaced < 2:
 			d.Add(diag.Error,
 				"%s: Namespace %q has no other keyed member", n.Template, label)
@@ -272,7 +266,7 @@ func (n *Def) checkNamespace(spaces spaceIndex, d *diag.Diagnostics) {
 	if len(n.KeyArgs) == 0 {
 		return
 	}
-	// A keyed carrier outside the namespace would never release the shared name.
+	// Every keyed carrier must participate in the shared namespace.
 	for _, label := range n.Labels() {
 		sp := spaces.byName[label]
 		if sp != nil && sp.namespaced > 0 && n.NamespaceLabel != label {
@@ -305,7 +299,6 @@ func (n *Def) checkRelation(
 		d.Add(diag.Error, "%s: relation has an empty label", n.Template)
 		return
 	}
-	// Unsupported relation shapes are authoring errors.
 	if rel.Scope == ScopeTree && rel.Want == Absent ||
 		rel.Scope == ScopeSiblings && rel.Want == Present {
 		d.Add(diag.Error, "%s: relation on label %q is unsupported;"+

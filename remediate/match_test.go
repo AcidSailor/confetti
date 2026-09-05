@@ -13,9 +13,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// testSchema is the shared fixture for the remediate suite: vlan (keyed, with a
-// child), interface with idempotent + full-line + toggle children, and the
-// vlan cross-ref.
+// testSchema defines the shared remediation fixture.
 func testSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)

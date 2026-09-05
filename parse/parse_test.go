@@ -103,13 +103,11 @@ func TestParseBlockDelim(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	top := cfg.Root.Children
 	require.Len(t, top, 2)
-	// body verbatim: internal spacing, blank line, and schema-looking lines kept
 	assert.Equal(
 		t,
 		[]string{"hello  world", "", "  interface fake"},
 		top[0].Block,
 	)
-	// parsing resumed cleanly after the terminator
 	assert.Equal(t, "interface eth1", top[1].Text)
 	require.Equal(t, 1, len(top[1].Children))
 }
@@ -189,8 +187,6 @@ func TestParseBlockCRLF(t *testing.T) {
 }
 
 func TestParseIndentAfterBlockStrict(t *testing.T) {
-	// A deeper-indented line after a block terminator errors like it would
-	// Keep deeper input under an ordinary leaf isolated instead of reparenting it.
 	d := diag.New()
 	cfg := Parse(blockSchema(), "banner motd ^\nbody\n^\n  interface eth1\n",
 		Reject, d)
@@ -199,8 +195,6 @@ func TestParseIndentAfterBlockStrict(t *testing.T) {
 }
 
 func TestParseLineNumbers(t *testing.T) {
-	// Blank lines and skipped input still count: numbers are positions in
-	// the imported text, not indices into what survived.
 	in := "\ninterface Ethernet1/1\n\n  shutdown\nvlan 10\n"
 	d := diag.New()
 	cfg := Parse(miniSchema(), in, Reject, d)

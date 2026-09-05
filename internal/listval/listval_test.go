@@ -94,8 +94,6 @@ func TestCompress(t *testing.T) {
 }
 
 func TestCompressZeroPaddedRoundTrip(t *testing.T) {
-	// Zero-padded spellings never fold into ranges ("007-9" would re-expand
-	// to 7,8,9) and dedupe against their canonical twin by value.
 	out := Compress([]string{"007", "008", "9"}, "")
 	assert.Equal(t, "007,008,9", out)
 	back, err := Expand(out, "")

@@ -83,8 +83,7 @@ func TestLazify(t *testing.T) {
 	}
 }
 
-// Regression: a "}}" appearing in literal text before a "{{" must not be
-// mistaken for the capture's closing delimiter.
+// A literal "}}" before a capture is not its closing delimiter.
 func TestLiteralBracesBeforeCapture(t *testing.T) {
 	s := mustSpec(t, "a}}b {{ x }}")
 	f, ok := s.Match("a}}b VALUE")
