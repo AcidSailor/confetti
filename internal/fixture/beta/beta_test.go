@@ -39,7 +39,7 @@ const vlanTmpl = "bridge 1 protocol rstp vlan-bridge\n" +
 	"vlan database\n" +
 	"  vlan 10 bridge 1 %s\n"
 
-// bridged wires a bridge, a VLAN, and an interface that refers to both.
+// bridged defines a bridge, VLAN, and interface referencing both.
 const bridged = "bridge 1 protocol rstp vlan-bridge\n" +
 	"vlan database\n" +
 	"  vlan 10 bridge 1 state enable\n" +
@@ -61,7 +61,7 @@ func TestImportDropsNoise(t *testing.T) {
 	_, d := e.Import(
 		"!\nvlan database\n vlan 10 bridge 1 state enable\n!\nend\n",
 	)
-	// "!"/"end" dropped pre-parse; the bridge ref is a commit-check concern
+	// Import drops "!" and "end"; CommitCheck validates the bridge reference.
 	assert.False(t, d.HasErrors(), d.String())
 }
 
@@ -82,7 +82,6 @@ func TestCommitCheckRefs(t *testing.T) {
 		require.False(t, d.HasErrors(), d.String())
 		assert.True(t, e.CommitCheck(cfg).HasErrors(), bad)
 	}
-	// jointly consistent config passes
 	cfg, d := e.Import(canonical)
 	require.False(t, d.HasErrors())
 	assert.False(t, e.CommitCheck(cfg).HasErrors())
@@ -100,7 +99,7 @@ func TestValueRanges(t *testing.T) {
 		_, d := e.Import(bad)
 		assert.True(t, d.HasErrors(), bad)
 	}
-	// 4-byte asn accepted (would fail alpha's 1..65535)
+	// Beta accepts ASNs above the alpha fixture's 16-bit limit.
 	_, d := e.Import("router bgp 4200000001\n")
 	assert.False(t, d.HasErrors(), d.String())
 }

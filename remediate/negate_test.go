@@ -22,7 +22,6 @@ func TestNegateStripsExistingNoPrefix(t *testing.T) {
 	n := s.Node("no shutdown")
 	f, ok := n.MatchLine("no shutdown")
 	require.True(t, ok)
-	// negating "no shutdown" yields "shutdown", never "no no shutdown"
 	assert.Equal(t, "shutdown", negateLine(n, f, n.Render(f)))
 }
 
@@ -54,7 +53,6 @@ func TestNegateTemplateLiteral(t *testing.T) {
 	n := s.Node("description {{ text:rest }}").NegateAs("no description")
 	f, ok := n.MatchLine("description Customer A")
 	require.True(t, ok)
-	// capture-free template renders to its literal
 	assert.Equal(t, "no description", negateLine(n, f, n.Render(f)))
 }
 

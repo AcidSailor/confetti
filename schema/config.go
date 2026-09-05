@@ -122,7 +122,7 @@ func (n *Node) InsertChildBefore(ref, c *Node) {
 	n.Children = spliceChildren(n.Children, ref, []*Node{c, ref})
 }
 
-// spliceChildren substitutes repl for old; slices.Concat reallocates so a held child slice stays valid across a splice.
+// spliceChildren replaces old with repl in a new slice so existing child slices remain valid.
 func spliceChildren(list []*Node, old *Node, repl []*Node) []*Node {
 	if i := slices.Index(list, old); i >= 0 {
 		return slices.Concat(list[:i], repl, list[i+1:])

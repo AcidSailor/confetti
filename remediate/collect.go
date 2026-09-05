@@ -25,7 +25,7 @@ func (a pathKey) compare(b pathKey) int {
 	return len(a) - len(b)
 }
 
-// op is one pending remediation change plus everything ordering needs.
+// op stores a pending change and its ordering data.
 type op struct {
 	node    *schema.Node // built remediation node (OpAdd subtree / OpRemove leaf / OpModify leaf)
 	pre     *schema.Node // negate half of a replace pair, emitted immediately before node
@@ -227,7 +227,7 @@ func (dv *differ) collect(
 			dv.expandRemove(rc, secs, k)
 			continue
 		}
-		// Refuse deletion of a protected node or descendant in both policies after toggle flips are removed.
+		// Check protection after excluding toggle flips from removals.
 		if dv.refuseDelete(rc) {
 			continue
 		}

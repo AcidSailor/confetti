@@ -4,8 +4,7 @@
 // preserved exactly. A schema.SectionExit token closes each section that
 // declares one.
 //
-// The round-trip contract is canonical, not byte-exact: render(parse(x))
-// == canonical(x), and canonical is a fixed point. Remediation trees arrive
-// already scheduled by the remediate package and use the same rendering path.
-// The renderer ignores operation tags.
+// The round-trip contract is render(parse(x)) == canonical(x); repeating
+// it produces the same text. Remediation trees arrive already scheduled and
+// use the same rendering path. The renderer ignores operation tags.
 package render

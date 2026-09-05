@@ -44,7 +44,6 @@ func FuzzParse(f *testing.F) {
 			if cfg == nil {
 				t.Fatalf("Parse returned nil config for %q", in)
 			}
-			// Every node has a panic-free Path and normalized text.
 			schema.Walk(cfg, func(n *schema.Node) {
 				_ = n.Path()
 				if got := normalize(n.Text); got != n.Text {
@@ -55,7 +54,6 @@ func FuzzParse(f *testing.F) {
 					)
 				}
 			})
-			// Render is panic-free and deterministic.
 			first := render.Render(cfg)
 			if second := render.Render(cfg); first != second {
 				t.Fatalf("Render not deterministic for %q", in)

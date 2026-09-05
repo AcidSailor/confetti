@@ -63,11 +63,11 @@ func TestCollectEmptyKeptSectionYieldsNoOps(t *testing.T) {
 }
 
 func TestPathKeyCompare(t *testing.T) {
-	// creates ascend before removes descend, prefixes sort before extensions
+	// Creates sort first in ascending order, then removals in descending order.
 	a := pathKey{{0, 1, 0}}
 	b := pathKey{{0, 2, 0}}
 	c := pathKey{{1, -2, 0}} // remove of rank 2
-	d := pathKey{{1, -1, 0}} // remove of rank 1: emits AFTER rank-2 remove
+	d := pathKey{{1, -1, 0}} // Rank 1 removal follows rank 2.
 	e := pathKey{{0, 1, 0}, {0, 5, 0}}
 	assert.Negative(t, a.compare(b))
 	assert.Negative(t, b.compare(c))
@@ -79,7 +79,7 @@ func TestPathKeyCompare(t *testing.T) {
 func TestCollectBaselineKeysMatchDeclarationOrder(t *testing.T) {
 	ops := collectOps(t, "", "vlan 10\ninterface Ethernet1/1\n  shutdown\n")
 	require.Len(t, ops, 2) // added vlan subtree + added interface subtree
-	// vlan is declared before interface => smaller key
+	// VLAN has a smaller key because it is declared before interface.
 	assert.Negative(t, ops[0].key.compare(ops[1].key))
 	assert.Equal(t, "vlan 10", ops[0].node.Text)
 }

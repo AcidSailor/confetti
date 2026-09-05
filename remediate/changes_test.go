@@ -94,7 +94,6 @@ func TestChangesSectionAddIsOneChange(t *testing.T) {
 	c := res.Changes[0]
 	assert.Equal(t, graph.Add, c.Action)
 	assert.Same(t, findNode(t, intended, "interface Ethernet1/1"), c.Intended)
-	// the added subtree stays reachable through the intended-side node
 	kids := c.Intended.Children
 	require.Len(t, kids, 1)
 	assert.Equal(t, "description A", kids[0].Text)
@@ -128,11 +127,9 @@ func TestChangesToggleFlipCarriesBothSides(t *testing.T) {
 	assert.Equal(t, graph.Add, c.Action)
 	assert.Same(t, findNode(t, intended, "no shutdown"), c.Intended)
 	assert.Same(t, findNode(t, running, "shutdown"), c.Running)
-	// artifact unchanged: one forward line, no negation
 	assert.Equal(t,
 		"interface Ethernet1/1\n  no shutdown\n", render.Render(res.Tree))
 
-	// Pair the reverse direction symmetrically.
 	running2 := mustParse(t, s, "interface Ethernet1/1\n  no shutdown\n")
 	intended2 := mustParse(t, s, "interface Ethernet1/1\n  shutdown\n")
 	res2, d2 := Diff(running2, intended2, Options{Cycle: Break})

@@ -8,7 +8,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Extent is how far an exclusive name reaches when the schema does not declare it.
+// Extent supplies the default scope for an exclusive name.
 type Extent int
 
 const (
@@ -57,7 +57,7 @@ func ScopeOf(n *schema.Node, dflt Extent) Scope {
 	anchor, device := def.ScopeExtent()
 	switch {
 	case anchor != nil:
-		// Outside every anchor the node falls back to the device-wide space.
+		// A node outside its declared anchor uses device scope.
 		s.Owner = pathKey(anchorOf(n, anchor))
 	case device:
 		s.Owner = ""

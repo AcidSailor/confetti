@@ -42,7 +42,7 @@ func TestRemediateAlphaEndToEnd(t *testing.T) {
 		out)
 }
 
-func TestRemediateAlphaAddressFamilyExit(t *testing.T) { // E8
+func TestRemediateAlphaAddressFamilyExit(t *testing.T) {
 	e := Engine()
 	running, _ := e.Import("feature bgp\nrouter bgp 65001\n")
 	intended, _ := e.Import(
@@ -55,7 +55,7 @@ func TestRemediateAlphaAddressFamilyExit(t *testing.T) { // E8
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 	assert.Contains(t, out, "exit-address-family")
-	// route-map defined before the bgp stanza that references it
+	// Define the route-map before its BGP referrer.
 	assert.Less(
 		t,
 		indexOf(out, "route-map RM permit 10"),
@@ -76,7 +76,7 @@ func TestRemediateAlphaIdempotent(t *testing.T) {
 
 func TestRemediateAlphaRemovedAddressFamilyNoExit(
 	t *testing.T,
-) { // E8 (removal side)
+) {
 	e := Engine()
 	running, dr := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
@@ -90,29 +90,27 @@ func TestRemediateAlphaRemovedAddressFamilyNoExit(
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
 
-	// the AF is negated as a single header line, with NO exit token
 	assert.Contains(t, out, "no address-family ipv4 unicast")
 	assert.NotContains(t, out, "exit-address-family")
 }
 
-func TestRemediateAlphaSafilessAddressFamilyExit(t *testing.T) { // E8 SAFI-less
+func TestRemediateAlphaSafilessAddressFamilyExit(t *testing.T) {
 	e := Engine()
 	running, _ := e.Import("feature bgp\nrouter bgp 65001\n")
 	intended, di := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
-			"  address-family ipv4\n" + // SAFI-less Adopt'd form
+			"  address-family ipv4\n" + // Shared grammar without a SAFI.
 			"    neighbor 10.0.0.1 activate\n")
 	require.False(t, di.HasErrors(), di.String())
 
 	res, d := e.Remediate(running, intended)
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
-	// the added SAFI-less AF still fires its section-exit token
 	assert.Contains(t, out, "address-family ipv4\n")
 	assert.Contains(t, out, "exit-address-family")
 }
 
-func TestRemediateAlphaRemovedSafilessAddressFamilyNoExit(t *testing.T) { // E8
+func TestRemediateAlphaRemovedSafilessAddressFamilyNoExit(t *testing.T) {
 	e := Engine()
 	running, dr := e.Import(
 		"feature bgp\nrouter bgp 65001\n" +
@@ -124,7 +122,6 @@ func TestRemediateAlphaRemovedSafilessAddressFamilyNoExit(t *testing.T) { // E8
 	res, d := e.Remediate(running, intended)
 	require.False(t, d.HasErrors(), d.String())
 	out := render.Render(res.Tree)
-	// removed AF is negated as a single header line, with NO exit token
 	assert.Contains(t, out, "no address-family ipv4")
 	assert.NotContains(t, out, "exit-address-family")
 }
@@ -161,7 +158,7 @@ func TestBannerRemediateAndRollback(t *testing.T) {
 	assert.Equal(t, "banner motd ^\nold\n^\n", render.Render(back.Tree))
 }
 
-func TestRemediateAlphaPhysicalPortReset(t *testing.T) { // E7 physical
+func TestRemediateAlphaPhysicalPortReset(t *testing.T) {
 	e := Engine()
 	running, d := e.Import("interface Ethernet1/1\n  description X\n")
 	require.False(t, d.HasErrors(), d.String())
@@ -175,7 +172,7 @@ func TestRemediateAlphaPhysicalPortReset(t *testing.T) { // E7 physical
 
 func TestRemediateAlphaLogicalInterfaceStillNegates(
 	t *testing.T,
-) { // E7 logical
+) {
 	e := Engine()
 	running, _ := e.Import("interface Vlan10\n  description X\n")
 	intended, _ := e.Import("")
@@ -273,7 +270,7 @@ func TestRemediateAlphaMalformedMembershipDegrades(t *testing.T) {
 }
 
 func TestRemediateAlphaTrunkKeywordSpellingNoChurn(t *testing.T) {
-	// "all" and the explicit full range are the same set: not drift.
+	// All and the explicit full range represent the same set.
 	e := Engine()
 	running, dr := e.Import(
 		"interface Ethernet1/5\n  switchport trunk allowed vlan all\n")
@@ -356,13 +353,12 @@ func TestRollbackAlphaVlanMembershipInverts(t *testing.T) {
 
 	res, d := e.Rollback(running, intended)
 	require.False(t, d.HasErrors(), d.String())
-	// Removals emit in descending order (creates ascend, removes descend).
 	assert.Equal(t,
 		"vlan 20\nno vlan 10\nno vlan 9\n",
 		render.Render(res.Tree))
 }
 
-func TestRollbackReAddsResetInterface(t *testing.T) { // E7 rollback direction
+func TestRollbackReAddsResetInterface(t *testing.T) {
 	e := Engine()
 	running, dr := e.Import("interface Ethernet1/1\n  description X\n")
 	require.False(t, dr.HasErrors(), dr.String())

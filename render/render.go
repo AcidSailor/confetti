@@ -6,7 +6,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-const indentUnit = "  " // Use canonical two-space indentation.
+const indentUnit = "  "
 
 // Render emits canonical text in tree order.
 func Render(cfg *schema.Config) string {
@@ -40,7 +40,6 @@ func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	for _, c := range n.Children {
 		renderNode(b, c, depth+1)
 	}
-	// Emit a declared section-exit token at the section's indentation.
 	if def != nil && def.SectionExitToken != "" {
 		b.WriteString(indent)
 		b.WriteString(def.SectionExitToken)

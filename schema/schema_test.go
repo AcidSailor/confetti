@@ -337,7 +337,6 @@ func TestListDeclaration(t *testing.T) {
 	}, n.ListSpec)
 	// A set-valued slot is idempotent by nature; List declares it once.
 	assert.True(t, n.Idempotent)
-	// Zero value on ordinary nodes.
 	assert.Equal(t, ListStrategy{}, s.Node("plain").ListSpec)
 }
 
@@ -396,7 +395,6 @@ func TestMembersDeclaration(t *testing.T) {
 	s := New()
 	n := s.Node("vlan {{ ids:word }}").List("ids", "uint").Members("vlan")
 	assert.Equal(t, "vlan", n.MembersKind)
-	// Zero value on ordinary and plain-list nodes.
 	assert.Equal(t, "", s.Node("plain").MembersKind)
 	assert.Equal(t, "",
 		s.Node("g {{ v:word }}").List("v", "uint").MembersKind)
@@ -456,7 +454,6 @@ func TestListSepAndKeywordsDeclaration(t *testing.T) {
 	assert.Equal(t, "all", ls.AllWord)
 	assert.Equal(t, "except", ls.ExceptWord)
 	assert.Equal(t, "1-8", ls.Domain)
-	// The adapter mirrors the fields one-to-one.
 	kw := ls.Keywords()
 	assert.Equal(t, "none", kw.None)
 	assert.Equal(t, "1-8", kw.Domain)
@@ -675,14 +672,14 @@ func TestRespellAsRails(t *testing.T) {
 		n := s.Node("acl {{ id:uint }} {{ act:word }}").Card(ZeroToN)
 		return s, n
 	}
-	// header must reference a capture arg
+	// The header must reference a captured argument.
 	_, n := mk()
 	assert.Panics(t, func() { n.RespellAs("ip acl standard") })
 	_, n = mk()
 	assert.Panics(t, func() { n.RespellAs("ip acl {{ id }} {{ typo }}") })
 	_, n = mk()
 	assert.Panics(t, func() { n.RespellAs("ip acl {{ id }}", "{{ typo }}") })
-	// double declaration
+	// Reject a second declaration.
 	_, n = mk()
 	n.RespellAs("ip acl {{ id }}", "{{ act }}")
 	assert.Panics(t, func() { n.RespellAs("ip acl {{ id }}") })
@@ -695,7 +692,7 @@ func TestRespellAsRails(t *testing.T) {
 	withKid := s.Node("y {{ v:word }}").Card(ZeroToN)
 	withKid.Child("z")
 	assert.Panics(t, func() { withKid.RespellAs("q {{ v }}") })
-	// mutually exclusive with Members / ListDelta / ListContinues / blocks
+	// Reject Members, ListDelta, ListContinues, and blocks.
 	s, _ = mk()
 	lst := s.Node("m {{ ids:word }}").Card(ZeroToN).List("ids", "uint")
 	lst.RespellAs("m2 {{ ids }}")
@@ -709,7 +706,7 @@ func TestRespellAsRails(t *testing.T) {
 	_, n = mk()
 	n.RespellAs("ip acl {{ id }}")
 	assert.Panics(t, func() { n.BlockUntil("end") })
-	// reverse orders
+	// Check the reverse builder call orders.
 	s, _ = mk()
 	mem := s.Node("mm {{ ids:word }}").Card(ZeroToN).
 		List("ids", "uint").Members("k")
@@ -726,7 +723,7 @@ func mkNode(t *testing.T) *Def {
 
 func TestNegateAsUnknownArgPanics(t *testing.T) {
 	s := New()
-	// A typo'd placeholder would interpolate as "" and emit corrupt CLI.
+	// Unknown placeholders would render as empty text and corrupt the command.
 	assert.Panics(t, func() {
 		s.Node("router bgp {{ asn:uint }}").NegateAs("no router bgp {{ as }}")
 	})
@@ -792,7 +789,7 @@ func TestLabelsCombineKindAndTags(t *testing.T) {
 }
 
 func TestToggleMemberRejectsKeyAndCard(t *testing.T) {
-	// The Toggles rails (non-keyed ZeroToOne) must hold AFTER grouping too.
+	// Toggle members must remain non-keyed ZeroToOne nodes after grouping.
 	s := New()
 	a := s.Node("shutdown").Card(ZeroToOne)
 	b := s.Node("no shutdown").Card(ZeroToOne).Toggles(a)
@@ -805,7 +802,7 @@ func TestBlockUntilEmptyPanics(t *testing.T) {
 }
 
 func TestMatchChildRecomputesAfterNewChild(t *testing.T) {
-	// The specificity-order memo must not go stale when the child slice grows.
+	// Adding a child must invalidate the cached match order.
 	s := New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:ifname }}")
@@ -870,7 +867,7 @@ func TestListContinuesSelfUnion(t *testing.T) {
 	m.ListDelta("vlan add {{ v }}", "vlan remove {{ v }}")
 	assert.Same(t, m, m.ListContinuation)
 
-	// A TRUE (two-def) continuation still excludes ListDelta, either order.
+	// A separate continuation excludes ListDelta in both builder call orders.
 	s3 := New()
 	b := s3.Node("vlan {{ v:word }}").Card(ZeroToOne).List("v", "uint")
 	c := s3.Node("vlan add {{ v:word }}").Card(ZeroToN).List("v", "uint").

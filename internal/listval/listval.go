@@ -26,7 +26,7 @@ type Keywords struct {
 	Domain            string
 }
 
-// domains caches schema-static expansions; registered schemas bound its growth.
+// domains caches expansions by domain text and separator.
 var domains sync.Map
 
 // domain returns the expanded keyword domain. Callers must not modify the result.
@@ -165,7 +165,7 @@ func (m Members) Intersects(o Members) bool {
 	return false
 }
 
-// exceptRest reports raw as "<Except> <list>", returning the list part.
+// exceptRest extracts the list from an "<Except> <list>" spelling.
 func exceptRest(raw string, kw Keywords) (string, bool) {
 	if kw.Except == "" {
 		return "", false

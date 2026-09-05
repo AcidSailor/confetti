@@ -1,10 +1,10 @@
 # confetti design
 
 confetti is a schema-aware, offline engine for network-device CLI
-configurations: parse, validate (Juniper-style commit check), canonicalize,
-remediate (ordered CLI converging running → intended), roll back, diff, and
-merge. It processes text without device connections. The core contains no
-vendor-specific logic.
+configurations. It parses, validates, canonicalizes, remediates, rolls back,
+compares, and merges text. Remediation produces ordered commands that change
+running configuration into intended configuration. The library has no device
+connections or vendor-specific logic.
 
 ## Scope
 
@@ -19,7 +19,7 @@ vendor-specific logic.
 ## Package map
 
 ```
-confetti (root)   Engine: option wiring + the pipelines below
+confetti (root)   Engine options and pipelines
 ├── schema        grammar and config tree (Def templates, kinds/keys/refs,
 │                 strategies, MatchChild, Node, Config, op tags)
 ├── value         value-type registry (builtins: word, rest, uint)
@@ -27,7 +27,7 @@ confetti (root)   Engine: option wiring + the pipelines below
 │                 the import fold (Respell → ListContinues → Members)
 ├── validate      ImportCheck (values, cardinality, dup keys, toggles,
 │                 required children) and CommitCheck (relations: refs,
-│                 Requires, tag exclusions)
+│                 Requires, tag exclusions, exclusive names)
 ├── render        tree → canonical text
 ├── transform     text rules (DropLines, PerLineSub) + tree transforms
 ├── remediate     Diff: pair → collect ops → derive edges → schedule →
@@ -40,7 +40,7 @@ confetti (root)   Engine: option wiring + the pipelines below
 └── internal/
     ├── ident     node-pairing identity shared by remediate + merge
     ├── lcp       longest-common-prefix for scheduler section affinity
-    ├── listval   the one comma+range list codec
+    ├── listval   shared list and numeric-range codec
     ├── testtypes domain value types for core tests
     ├── valcheck  the shared ipv4 and numeric-range value checks
     └── fixture/{alpha,beta}  imaginary-platform schemas (see fixtures.md)
@@ -56,12 +56,13 @@ Layering rules:
 - **Presentation stays out of `remediate`**: `compare` renders the change log,
   while `remediate` produces it. This matches the boundary between `render`
   and the operation-tagged tree.
-- **Put each capability in the lowest package that owns its behavior.**
+- **Keep each capability in a leaf package at the lowest layer that owns it.**
+  Limit changes to the packages that need them.
 - Core ships no platforms. Domain value types (`ifname`, `ipv4`, `vlan`,
-  `asn`) are platform data; the builtin registry is exactly the structural
-  three: `word`, `rest`, and `uint`. `word` is required because it is the
-  default for untyped captures.
-- Shared identity logic belongs in `internal/ident`. Shared IPv4 and numeric
+  `asn`) are platform data. The built-in types are `word`, `rest`, and `uint`.
+  `word` is required as the default for untyped captures.
+- Prefer limited duplication until three uses justify a shared abstraction.
+  Shared identity logic belongs in `internal/ident`. Shared IPv4 and numeric
   range checks belong in `internal/valcheck`.
 
 ## Pipelines
@@ -72,8 +73,8 @@ New:       baseline text → Import pipeline with parse.Reject and
 Import:    text transforms (outside block spans) → parse → fold
            (Respell → ListContinues → Members) → user tree transforms
            → ImportCheck
-CommitCheck: relations (refs, Requires, exclusions) over an assembled tree,
-           with baseline objects as extra ref and Requires targets
+CommitCheck: schema relations and exclusive names over an assembled tree,
+           with baseline objects as extra targets and name holders
            (exclusions stay sibling-scoped)
            → custom validators (WithCommitChecks)
 Render:    user tree transforms → render → text transforms (outside blocks)
@@ -83,11 +84,10 @@ Compare:   Diff + compare.Render; no commit check
 Merge:     fold parts left-to-right; no commit check
 ```
 
-The fold runs before user tree transforms so everything downstream of parse
-sees canonical instances only. Fold order within a level is fixed:
-Respell first (a respelled line may *be* a membership or continuation line in
-canonical form), continuations before membership (they may create the slots
-the membership pre-scan must see).
+Folds run before user tree transforms. Respell runs first because its output
+can be a membership or continuation line. Continuations run before membership
+because they can create slots needed by the membership scan. Failed folds
+retain the source line and report diagnostics.
 
 ## Invariants
 
@@ -108,9 +108,8 @@ the membership pre-scan must see).
 - **The Protected boundary: value changes are not deletions.** `ckModify`,
   a toggle flip, and list deltas on a protected node stay allowed.
 - **Protected is all-or-nothing for header negation but per-child for an
-  `EmptyOnRemove` expansion**, and `Protected` × `EmptyOnRemove` on one def
-  is an authoring panic ("never delete this" contradicts "here is how to
-  delete this").
+  `EmptyOnRemove` expansion.** Declaring both on one definition panics because
+  child removal conflicts with deletion protection.
 - **Safety refusals suppress output.** An `Abort` cycle produces an empty tree
   and empty Changes. A Protected refusal produces no operation or Change.
   Other Diff errors can retain a Result for inspection.
@@ -145,48 +144,48 @@ the membership pre-scan must see).
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
   `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
   platform-independent.
-- **Whole-tree validators belong to `Engine`.** `OrderHook` and `MergeFunc`
-  are schema behavior. Validators are Engine composition, so Engines that
-  share a schema can use different validator sets. `WithCommitChecks` appends
-  validators after the built-in `CommitCheck`, in registration order. They run
-  for `CommitCheck`, `Remediate` (intended), and `Rollback` (running). `Render`,
-  `Compare`, and `Merge` skip them. A validator reports into its own `diag.Diagnostics`,
-  merged after it returns, so it cannot drop what earlier checks recorded. It
-  must not modify the tree: `Remediate` validates the caller's `intended`
-  before `Diff`, so a mutation would silently change the remediation. A nil
-  validator panics at registration.
-- **Baseline objects are relation targets and removal guards.**
-  `WithBaseline` declares objects the device provides but never prints. A
-  baseline is platform data, but the parsed baseline depends on engine-level
-  import transforms and `schema` cannot parse, so the Engine owns it. The
-  engine imports the text once in `New`, after every option, so import text
-  and tree transforms apply in any option order. It uses `parse.Reject`
-  regardless of `WithUnknown` and panics on any diagnostic, Warning included,
-  because the baseline is authored platform data. `New` runs `FragmentCheck`,
-  which keeps every per-level rule (values, duplicate keys, single-occupancy
-  slots, toggle exclusions) and drops only the `missing required` loop,
-  because a baseline is a fragment but is not exempt from the other rules.
-  `New` always builds a baseline, so no consumer handles a nil.
-  `CommitCheck` seeds its index from the baseline before it walks the tree
-  and never checks the baseline's own relations. Exclusions stay
-  sibling-scoped, so the baseline contributes no exclusion targets. Custom
-  validators receive a clone as their second argument: the baseline is shared
-  engine state that outlives the call, unlike `cfg`, which the caller owns.
-  `Diff` counts baseline labels as `Requires` survivors so `Compare`,
-  `Remediate`, and `Rollback` agree with the commit check. Every baseline
-  label survives because a device-provided object cannot be removed.
-  Baseline nodes never render, merge, or enter a plan. A plan whose emitted
-  artifact negates a baseline object reports an Error and keeps the Result
-  for inspection, because a device-provided object cannot be deleted and the
-  goal must state it. The boundary is the emitted line, not the intent: a
-  `Remove` and the negation half of a `Replace` report, while an idempotent
-  reissue, a toggle flip, and a list delta do not, because they emit no
-  negation. Baseline identity is definition plus full key value, so a shared
-  label or one component of a composite key cannot match. A baseline extends
-  the target set; it does not relax the check for other values. Baseline and
-  configuration must share one `*schema.Schema`. `Diff` reports a mismatch
-  and emits nothing; `CommitCheck` reports it, drops the baseline, and still
-  checks the tree the caller asked about.
+- **Whole-tree validators belong to `Engine`.** Engines sharing a schema can
+  use different validators. `OrderHook` and `MergeFunc` remain schema behavior.
+  `WithCommitChecks` appends validators after the built-in check, in
+  registration order, for `CommitCheck`, `Remediate` (intended), and `Rollback`
+  (running). `Render`, `Compare`, and `Merge` skip them. A nil validator panics
+  at registration. Each validator reports into a separate diagnostic collector
+  so it cannot clear earlier results. Validators must not modify the tree:
+  `Remediate` validates the caller's intended tree before passing it to `Diff`.
+- **Baseline objects are relation targets, exclusive name holders, and removal
+  guards.** `WithBaseline` declares objects the device provides but never
+  prints. The Engine owns the parsed baseline because import transforms belong
+  to the Engine and `schema` cannot parse text.
+
+  `New` imports the baseline once, after all options, so import text and tree
+  transforms apply in either option order. It uses `parse.Reject` regardless
+  of `WithUnknown` and panics on any diagnostic, including warnings.
+  `FragmentCheck` validates values, duplicate keys, single-occupancy slots,
+  and toggles. It skips only missing required nodes because the baseline is a
+  fragment. The baseline is always non-nil.
+
+  `CommitCheck` indexes baseline targets and exclusive names before walking
+  the configuration. It does not check the baseline's own relations.
+  Exclusions remain sibling-scoped; baseline nodes are not configuration
+  siblings. Each custom validator receives a baseline clone to protect shared
+  engine state. The configuration remains caller-owned.
+
+  `Diff` treats every baseline label as a surviving `Requires` target because
+  device-provided objects cannot be removed. `Compare`, `Remediate`, and
+  `Rollback` therefore use the same prerequisite targets as `CommitCheck`.
+  Baseline nodes never render, merge, or enter a plan.
+
+  An operation that emits a baseline object's negation reports an Error and
+  retains the Result for inspection. This covers `Remove` and the negation
+  half of `Replace`. Idempotent reissues, toggle flips, and list deltas emit
+  no negation and remain allowed. Removal checks identify baseline objects by
+  definition and full key; a shared label or one composite-key component is
+  insufficient. The baseline adds targets without relaxing checks for other
+  values.
+
+  Baseline and configuration must share one `*schema.Schema`. On mismatch,
+  `Diff` reports an Error and emits nothing. `CommitCheck` reports the mismatch,
+  omits the baseline, and still checks the configuration.
 - **Toggle pairs are declared, never text-detected.** The `"no "`-prefix
   heuristic has no fallback. A test verifies that an undeclared pair emits
   separate remove and add operations.
@@ -246,7 +245,7 @@ the membership pre-scan must see).
   declaration rank, removes descend (define-before-reference on add,
   reference-before-definition on removal).
 - **Preserve declaration-rank order** when it satisfies every derived edge.
-  The output must remain byte-identical to pre-graph output. Derivation and
+  Adding satisfied edges must not change rendered bytes. Derivation and
   scheduling must not depend on map iteration order.
 - **Edges connect only operations in the plan.** An unchanged reference target
   needs no edge; commit check validates its existence. Scheduler affinity and
@@ -275,7 +274,8 @@ the membership pre-scan must see).
 - **Members of a declared shared name space must use the same shape.**
   `ValidateRelations` checks exclusive argument count, List position, and
   extent. The List position is omitted from the bucket key so overlapping
-  lists share a bucket. Definitions that declare no shared name space may use
+  lists share a bucket. Incompatible shapes would hide collisions and required
+  ordering edges. Definitions that declare no shared name space may use
   different key shapes under one Kind.
 - **Declare the extent of an exclusive name.** Both ordering and validation
   use `ident.ScopeOf` and `ident.ExclusiveName`.
@@ -287,13 +287,16 @@ the membership pre-scan must see).
   | `Namespace(label).ScopedBy(anchor)` | One space per anchor instance; `ScopedBy` wins |
   | none | `Device` for ordering; `PerOwner` for validation |
 
-  `Namespace` and `ScopedByDevice` are device-wide. `ScopedBy` narrows the
-  space to an anchor instance and takes precedence over `Namespace`.
   Conflicting or repeated extent declarations panic in either call order.
   `ValidateRelations` requires the anchor to be an ancestor on every path to
   the holder, including paths created by `Adopt`. An invalid out-of-anchor
   definition falls back to device scope during Diff. Lists compare resolved
   members, not source spellings.
+
+  Anchor validation checks whether a root can reach the holder while skipping
+  the anchor. This is linear per anchored definition and terminates on
+  recursive grammars. Enumerating paths through shared `Adopt` children can
+  take exponential time.
 
   Without an explicit extent, ordering uses device scope to avoid missing a
   required release-before-claim edge. Validation uses per-owner scope to
@@ -364,12 +367,10 @@ reason when edge derivation recorded one.
 
 ### Diagnostics
 
-- **Omit a source position when no position is accurate.** Synthesized or
-  many-to-one-folded nodes remain positionless instead of referring to a
-  line whose text the diagnostic doesn't describe. Absence-shaped
-  diagnostics ("missing required", op/conflict messages spanning two source
-  texts) carry no line by nature. A dangling-ref diagnostic points at the
-  referring line, which is the line the author must fix.
+- **Omit a source position when no single line identifies the problem.**
+  Synthesized nodes and unions of multiple lines have no source position.
+  Missing-required and multi-line conflict diagnostics also omit it.
+  Dangling-reference diagnostics point at the referring line.
 - **Line numbers index the original text**, so `transform.TextRule` maps one
   line to one line and no rule can change the line count: `DropLines` blanks
   instead of removing. Raw and transformed block spans therefore always align.

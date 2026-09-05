@@ -15,13 +15,15 @@ testify. The license is Apache-2.0.
 ## Commands
 
 ```bash
-task test     # go test ./...
-task ci       # read-only gate: golangci-lint fmt --diff + run  (CI runs this)
-task lint     # writes files: golangci-lint fmt + run --fix; keep the fixes
+task test     # go test -race ./...
+task ci       # Check formatting and lint without changing files.
+task lint     # Apply formatting and lint fixes; keep the fixes.
 ```
 
-`task lint` rewrites files. Keep its automatic fixes because `task ci` checks
-them. Run the full test suite with `-race` before you merge.
+Keep automatic fixes from `task lint`; `task ci` checks them. Run the full
+test suite with `-race` before you merge.
+
+Run parser fuzzing with `go test -run '^$' -fuzz FuzzParse ./parse/`.
 
 ## Review constraints
 

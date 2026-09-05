@@ -136,7 +136,6 @@ func TestEngineExportTreeTransformRuns(t *testing.T) {
 	out, rd := e.Render(cfg)
 	require.False(t, rd.HasErrors(), rd.String())
 	assert.True(t, ran, "export tree-transform should run during Render")
-	// The text rule sees the transformed line.
 	assert.Contains(t, out, "  link down ! tagged")
 }
 
@@ -146,7 +145,6 @@ func TestEngineMerge(t *testing.T) {
 	b, _ := e.Import("interface Ethernet1/1\n  switchport access vlan 10\n")
 	merged, d := e.Merge(merge.Options{}, a, b)
 	require.False(t, d.HasErrors())
-	// The merged artifact passes CommitCheck.
 	require.False(t, e.CommitCheck(merged).HasErrors())
 	out, _ := e.Render(merged)
 	assert.Equal(
@@ -164,7 +162,6 @@ func TestEngineRemediatePassesCycleToOrdering(t *testing.T) {
 		g.AddEdge(0, 1)
 		g.AddEdge(1, 0) // forced cycle
 	})
-	// Abort emits no artifact.
 	e := confetti.New(s)
 	run, d := e.Import("")
 	require.False(t, d.HasErrors())
@@ -174,7 +171,6 @@ func TestEngineRemediatePassesCycleToOrdering(t *testing.T) {
 	assert.True(t, rd.HasErrors())
 	assert.True(t, res.Empty())
 
-	// Break drops an edge and emits the artifact.
 	eb := confetti.New(s, confetti.WithCycle(remediate.Break))
 	runB, _ := eb.Import("")
 	wantB, _ := eb.Import("alpha one\nbeta two\n")
@@ -205,8 +201,8 @@ func TestEngineExportTextTransformSkipsBlocks(t *testing.T) {
 	)
 	require.False(t, d.HasErrors(), d.String())
 	out, _ := e.Render(cfg)
-	assert.Contains(t, out, "secret body line")     // block body untouched
-	assert.Contains(t, out, "description REDACTED") // outside text transformed
+	assert.Contains(t, out, "secret body line")
+	assert.Contains(t, out, "description REDACTED")
 }
 
 func TestEngineExportTextTransformReachesRemediationArtifact(t *testing.T) {
@@ -248,7 +244,7 @@ func TestImportTextTransformNestedFalseOpenerStaysUnprotected(t *testing.T) {
 		"interface Ethernet1/1\n  banner motd ^\n!noise\ninterface Ethernet1/2\n",
 	)
 	assert.NotContains(t, d.String(), "!noise", d.String())
-	// The stray nested line itself is ordinary unknown-command territory.
+	// The nested line is an unknown command.
 	assert.Contains(t, d.String(), `"banner motd ^"`)
 	require.Len(t, cfg.Root.Children, 2)
 	assert.Equal(t, "interface Ethernet1/2", cfg.Root.Children[1].Text)

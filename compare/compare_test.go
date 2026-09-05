@@ -179,7 +179,6 @@ func TestRenderSectionHeaderModifyHeaderOnly(t *testing.T) {
 }
 
 func TestRenderReplacePairFromDiff(t *testing.T) {
-	// Render Replace as one removal and addition pair.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("vlan {{ id:vlan }} state {{ st:word }}").

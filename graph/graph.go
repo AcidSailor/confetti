@@ -52,7 +52,7 @@ func New(ops []Op) *Graph {
 	return &Graph{ops: ops, succ: make([]map[int]bool, len(ops))}
 }
 
-// Ops returns a deep-enough copy that hooks can sort or modify safely.
+// Ops copies operations and their paths so hooks can modify the result safely.
 func (g *Graph) Ops() []Op {
 	ops := slices.Clone(g.ops)
 	for i := range ops {

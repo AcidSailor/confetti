@@ -6,18 +6,18 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Category classifies a node for pairing purposes.
+// Category selects a node-pairing rule.
 type Category int
 
 const (
-	Unmatched        Category = iota // def == nil
-	Keyed                            // len(KeyArgs()) > 0
+	Unmatched        Category = iota // No matched definition.
+	Keyed                            // One or more key arguments.
 	KindedSingle                     // A Kind identifies one unkeyed slot.
 	IdempotentSingle                 // The definition identifies one reissuable slot.
-	FullLine                         // everything else
+	FullLine                         // The definition and full line identify the node.
 )
 
-// CategoryOf classifies a tree node by its schema def.
+// CategoryOf selects a pairing rule from the node definition.
 func CategoryOf(n *schema.Node) Category {
 	def := n.Def
 	switch {

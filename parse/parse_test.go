@@ -65,7 +65,7 @@ func TestParseUnknownStrict(t *testing.T) {
 		d,
 	)
 	assert.True(t, d.HasErrors())
-	assert.Empty(t, cfg.Root.Children) // dropped from tree
+	assert.Empty(t, cfg.Root.Children)
 }
 
 func TestParseUnknownLenient(t *testing.T) {
@@ -74,7 +74,7 @@ func TestParseUnknownLenient(t *testing.T) {
 		"  flux-capacitor on\n" +
 		"  shutdown\n"
 	cfg := Parse(miniSchema(), in, Drop, d)
-	assert.False(t, d.HasErrors()) // warnings only
+	assert.False(t, d.HasErrors())
 	require.Len(t, cfg.Root.Children, 1)
 	require.Equal(t, 1, len(cfg.Root.Children[0].Children))
 	assert.Equal(t, "shutdown", cfg.Root.Children[0].Children[0].Text)

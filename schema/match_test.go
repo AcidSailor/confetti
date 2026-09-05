@@ -75,7 +75,7 @@ func TestLazify(t *testing.T) {
 		{`\S+\+`, `\S+\+`},    // escaped '+': required literal, untouched
 		{`\S+\\+`, `\S+\\+?`}, // even backslash run: still a quantifier
 		{`a{1,3}`, `a{1,3}`},  // trailing '}' is ambiguous: untouched
-		{`ab?`, `ab?`},        // already-greedy '?': untouched
+		{`ab?`, `ab?`},        // optional quantifier: unchanged
 		{``, ``},
 	}
 	for _, tt := range tests {

@@ -19,16 +19,16 @@ jobs:
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Push the branch Claude works on
-      pull-requests: write # Open the PR from that branch
+      contents: write # Push branch changes.
+      pull-requests: write # Open pull requests.
       issues: write
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read # Read CI results.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          # Full history so review commands can diff the branch against its base
+          # Full history lets reviews compare the branch with its base.
           fetch-depth: 0
 
       - name: Run Claude Code
@@ -37,21 +37,13 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # Enables '@claude /pr-review-toolkit:review-pr'
+          # Enable '@claude /pr-review-toolkit:review-pr'.
           plugin_marketplaces: "https://github.com/anthropics/claude-plugins-official.git"
           plugins: "pr-review-toolkit@claude-plugins-official"
 
-          # Inspect the diff and CI, build/test, and publish the work as a PR.
-          # golangci-lint is not installed here on purpose — ci.yml runs `task ci` on the PR.
+          # Lint runs in ci.yml; this job has no golangci-lint installation.
           claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr create:*),Bash(gh run view:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(go test:*),Bash(go vet:*),Bash(go build:*),Bash(gofmt:*)"'
 
-          # This is an optional setting that allows Claude to read CI results on PRs
+          # Allow Claude to read CI results.
           additional_permissions: |
             actions: read
-
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-

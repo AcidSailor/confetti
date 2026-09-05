@@ -40,7 +40,7 @@ func TestDiffAddLeafAndSection(t *testing.T) {
 	assert.Equal(t, "interface Ethernet1/1\n  description A\n", out)
 }
 
-func TestDiffModifyIdempotent(t *testing.T) { // E2
+func TestDiffModifyIdempotent(t *testing.T) {
 	out, res := remediation(t,
 		"interface Ethernet1/1\n  description A\n",
 		"interface Ethernet1/1\n  description B\n")
@@ -54,14 +54,14 @@ func TestDiffModifyIdempotent(t *testing.T) { // E2
 	assert.True(t, sawModify)
 }
 
-func TestDiffRemoveLeaf(t *testing.T) { // E3
+func TestDiffRemoveLeaf(t *testing.T) {
 	out, _ := remediation(t,
 		"interface Ethernet1/1\n  description Customer A\n",
 		"interface Ethernet1/1\n  switchport access vlan 10\n  no shutdown\n")
 	assert.Contains(t, out, "no description Customer A")
 }
 
-func TestDiffToggleForward(t *testing.T) { // E1 forward
+func TestDiffToggleForward(t *testing.T) {
 	out, _ := remediation(t,
 		"interface Ethernet1/1\n  shutdown\n",
 		"interface Ethernet1/1\n  no shutdown\n")
@@ -70,7 +70,7 @@ func TestDiffToggleForward(t *testing.T) { // E1 forward
 
 func TestDiffToggleReverse(
 	t *testing.T,
-) { // Exercise the reverse E1 direction.
+) {
 	out, _ := remediation(t,
 		"interface Ethernet1/1\n  no shutdown\n",
 		"interface Ethernet1/1\n  shutdown\n")
@@ -78,31 +78,31 @@ func TestDiffToggleReverse(
 	assert.NotContains(t, out, "no no shutdown")
 }
 
-func TestDiffKeyChangeIsRemoveAdd(t *testing.T) { // E4
+func TestDiffKeyChangeIsRemoveAdd(t *testing.T) {
 	out, _ := remediation(t, "vlan 10\n", "vlan 20\n")
 	assert.Equal(t, "vlan 20\nno vlan 10\n", out)
 }
 
-func TestDiffKeptKeyedBodyChange(t *testing.T) { // E5
+func TestDiffKeptKeyedBodyChange(t *testing.T) {
 	out, _ := remediation(t,
 		"vlan 10\n  name FOO\n",
 		"vlan 10\n  name BAR\n")
 	assert.Equal(t, "vlan 10\n  name BAR\n", out)
 }
 
-func TestDiffWholeSectionRemove(t *testing.T) { // E7a
+func TestDiffWholeSectionRemove(t *testing.T) {
 	out, _ := remediation(t, "interface Ethernet1/1\n  shutdown\n", "")
 	assert.Equal(t, "no interface Ethernet1/1\n", out)
 }
 
-func TestDiffKeptSectionAllChildrenRemoved(t *testing.T) { // E7b
+func TestDiffKeptSectionAllChildrenRemoved(t *testing.T) {
 	out, _ := remediation(t,
 		"interface Ethernet1/1\n  description A\n  shutdown\n",
 		"interface Ethernet1/1\n  description A\n")
 	assert.Equal(t, "interface Ethernet1/1\n  no shutdown\n", out)
 }
 
-func TestDiffAddOrderingDefinitionFirst(t *testing.T) { // E9
+func TestDiffAddOrderingDefinitionFirst(t *testing.T) {
 	out, _ := remediation(t,
 		"",
 		"vlan 50\ninterface Ethernet1/1\n  switchport access vlan 50\n")
@@ -112,7 +112,7 @@ func TestDiffAddOrderingDefinitionFirst(t *testing.T) { // E9
 
 func TestDiffRemoveOrderingReferrerFirst(
 	t *testing.T,
-) { // Guard the E10 ordering case.
+) {
 	out, _ := remediation(t,
 		"vlan 50\ninterface Ethernet1/1\n  switchport access vlan 50\n",
 		"")
@@ -120,7 +120,7 @@ func TestDiffRemoveOrderingReferrerFirst(
 	assert.Equal(t, want, out)
 }
 
-func TestDiffDoesNotMutateInputs(t *testing.T) { // aliasing guard
+func TestDiffDoesNotMutateInputs(t *testing.T) {
 	s := testSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  description A\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  description B\n")
@@ -137,7 +137,7 @@ func TestDiffDoesNotMutateInputs(t *testing.T) { // aliasing guard
 	)
 }
 
-func TestDiffFullLineValueIsAddRemoveNotModify(t *testing.T) { // E6
+func TestDiffFullLineValueIsAddRemoveNotModify(t *testing.T) {
 	out, res := remediation(
 		t,
 		"interface Ethernet1/1\n  ip address 10.0.0.1 255.255.255.0 secondary\n",
@@ -169,7 +169,6 @@ func TestDiffFullLineValueIsAddRemoveNotModify(t *testing.T) { // E6
 }
 
 func TestDiffOpTagsAddRemoveSection(t *testing.T) {
-	// Check operation tags and rendered text for add, remove, and section nodes.
 	_, res := remediation(t,
 		"interface Ethernet1/1\n  shutdown\n",
 		"interface Ethernet1/1\n  description NEW\nvlan 99\n")
@@ -180,7 +179,7 @@ func TestDiffOpTagsAddRemoveSection(t *testing.T) {
 	assert.Equal(t, schema.OpRemove, ops["no shutdown"])
 }
 
-func TestDiffUnmatchedNodeDefensive(t *testing.T) { // E11
+func TestDiffUnmatchedNodeDefensive(t *testing.T) {
 	s := testSchema()
 
 	running := schema.NewConfig(s)
@@ -189,7 +188,7 @@ func TestDiffUnmatchedNodeDefensive(t *testing.T) { // E11
 	assert.Equal(t, "no flux-capacitor on\n", render.Render(res.Tree))
 	assert.Contains(t, d.String(), "negating unmatched line")
 
-	// intended-only unmatched node => OpAdd verbatim, no warning.
+	// An unmatched intended node is added verbatim without a warning.
 	intended := schema.NewConfig(s)
 	intended.Root.AddChild(schema.NewNode("flux-capacitor on"))
 	res2, d2 := Diff(schema.NewConfig(s), intended, Options{Cycle: Break})
@@ -279,7 +278,7 @@ func TestDiffSymmetryOrdering(t *testing.T) {
 	)
 }
 
-// headerFieldSchema: a keyed SECTION whose header carries a non-key field.
+// headerFieldSchema defines a keyed section with a mutable header field.
 func headerFieldSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -322,7 +321,6 @@ func TestDiffSectionHeaderFieldChangeWithChildChange(t *testing.T) {
 }
 
 func TestDiffSectionHeaderUnchangedNoModify(t *testing.T) {
-	// An unchanged header must not produce a modification.
 	s := headerFieldSchema()
 	running := mustParse(t, s, "vlan 10 name FOO\n  shutdown\n")
 	intended := mustParse(t, s, "vlan 10 name FOO\n")
@@ -340,7 +338,7 @@ func TestDiffDuplicateRunningIdentWarns(t *testing.T) {
 	intended := mustParse(t, s, "vlan 10\n")
 	res, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
-	assert.True(t, res.Empty()) // surfaced, not remediated
+	assert.True(t, res.Empty()) // Report duplicates without commands.
 	assert.Contains(t, d.String(), "duplicate")
 	assert.Contains(t, d.String(), "vlan 10")
 }
@@ -462,7 +460,7 @@ func TestDiffKeyedLeafReplacePair(t *testing.T) {
 	intd := mustParse(t, s, "ip route 10.0.0.0/8 via 2.2.2.2\n")
 	res, d := Diff(run, intd, Options{Cycle: Break})
 	require.False(t, d.HasErrors())
-	// negate-first: never two values for one key on-device
+	// Negate first to avoid two values for one key.
 	assert.Equal(t,
 		"no ip route 10.0.0.0/8 via 1.1.1.1\nip route 10.0.0.0/8 via 2.2.2.2\n",
 		render.Render(res.Tree))
@@ -682,7 +680,7 @@ func duplexSchema() *schema.Schema {
 }
 
 func TestDiffToggleGroupThreeWayFlip(t *testing.T) {
-	// full -> half is a flip within the group: one forward line, no negate.
+	// A toggle flip emits only the new spelling.
 	s := duplexSchema()
 	running := mustParse(t, s, "interface Ethernet1/1\n  duplex full\n")
 	intended := mustParse(t, s, "interface Ethernet1/1\n  duplex half\n")
@@ -744,7 +742,7 @@ func TestDiffCustomNegationWord(t *testing.T) {
 	out := render.Render(res.Tree)
 	assert.Contains(t, out, "undo description X") // prepend form
 	assert.Contains(t, out, "\n  logging\n")      // strip form
-	assert.NotContains(t, out, "no ")             // the old hardcoded word
+	assert.NotContains(t, out, "no ")
 }
 
 // protectedSchema defines protected section and toggle cases.
@@ -881,14 +879,12 @@ func TestDiffProtectedDescendantInToggleFlipRefuses(t *testing.T) {
 }
 
 func TestDiffProtectedRollbackDirectionRefuses(t *testing.T) {
-	// Diff is direction-agnostic; a rollback that deletes protected refuses too.
+	// Protection also applies when Diff arguments are reversed for rollback.
 	s := protectedSchema()
 	running := mustParse(t, s, "logging on\n")
 	intended := mustParse(t, s, "router bgp 65000\nlogging on\n")
-	// Forward adds the protected section (fine)…
 	_, d := Diff(running, intended, Options{Cycle: Abort})
 	require.False(t, d.HasErrors(), d.String())
-	// …its rollback (reversed args) deletes it: refused.
 	_, rd := Diff(intended, running, Options{Cycle: Abort})
 	assert.True(t, rd.HasErrors())
 	assert.Contains(t, rd.String(), "refusing to delete protected")
@@ -908,7 +904,7 @@ func emptyOnRemoveSchema() *schema.Schema {
 	return s
 }
 
-func TestDiffEmptyOnRemoveSectionNegatesChildren(t *testing.T) { // E7c
+func TestDiffEmptyOnRemoveSectionNegatesChildren(t *testing.T) {
 	s := emptyOnRemoveSchema()
 	running := mustParse(t, s, "vlan database\n  vlan 10\n  vlan 20\n")
 	intended := mustParse(t, s, "")

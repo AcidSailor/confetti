@@ -10,7 +10,7 @@ import (
 type Type struct {
 	Name    string
 	Pattern string
-	Check   func(s string) error // nil => the pattern alone fully validates the value
+	Check   func(s string) error // Nil when the pattern alone validates the value.
 }
 
 // Registry maps type names to Types; the zero Registry gains the built-ins on first Register.

@@ -136,7 +136,7 @@ func (l ListStrategy) Keywords() listval.Keywords {
 	}
 }
 
-// Schema is a grammar of the config tree.
+// Schema defines a configuration grammar and its value types.
 type Schema struct {
 	Registry   *value.Registry
 	Roots      []*Def
@@ -305,7 +305,7 @@ func (n *Def) Card(c Cardinality) *Def {
 	return n
 }
 
-// Kind sets the name used for Ref resolution and pairs keyed siblings by Kind and key or unkeyed single-occupancy siblings by Kind unless they toggle or use EmptyOnRemove.
+// Kind sets the identity label used for node pairing and relations; see the package documentation.
 func (n *Def) Kind(k string) *Def { n.KindName = k; return n }
 
 // Key sets the arg names that form the identity key for this node.
@@ -340,10 +340,10 @@ func (n *Def) Key(args ...string) *Def {
 	return n
 }
 
-// Idempotent marks this node as idempotent (re-applying has no effect).
+// MarkIdempotent declares that reapplying this command has no effect.
 func (n *Def) MarkIdempotent() *Def { n.Idempotent = true; return n }
 
-// Protect marks a definition as undeletable and is mutually exclusive with ClearOnRemove.
+// Protect forbids deletion and is mutually exclusive with ClearOnRemove.
 func (n *Def) Protect() *Def {
 	if n.EmptyOnRemove {
 		panic(
@@ -419,7 +419,7 @@ func (n *Def) setMerge(s MergeStrategy) {
 	n.Merge = s
 }
 
-// EmptyOnRemove retains an always-present section header and removes each child; it excludes explicit negation, blocks, lists, and Protected.
+// ClearOnRemove retains the section header and removes its children; it excludes negation strategies, blocks, lists, and Protect.
 func (n *Def) ClearOnRemove() *Def {
 	if n.Protected {
 		panic(
@@ -535,7 +535,7 @@ func (n *Def) Ref(fromArg, target string) *Def {
 	return n
 }
 
-// Requires requires an instance with label while this node exists.
+// Requires declares that an instance with label must exist while this node exists.
 func (n *Def) Requires(label string) *Def {
 	if label == "" {
 		panic("schema: Requires label must be non-empty: " + n.Template)
@@ -643,7 +643,7 @@ func (n *Def) ScopedBy(anchor *Def) *Def {
 		panic("schema: ScopedBy anchor may not be the definition itself: " +
 			n.Template)
 	}
-	// Check the reciprocal conflict to preserve call-order independence.
+	// The conflict must hold in both builder call orders.
 	if n.DeviceScoped {
 		panic(scopeExtentTwice + n.Template)
 	}
@@ -819,7 +819,7 @@ func (n *Def) ListContinues(base *Def) *Def {
 	return n
 }
 
-// Members folds each list item into a canonical keyed instance of Kind and excludes keys, delta forms, continuations, blocks, and RespellAs.
+// Members folds list items into keyed instances of kind; see the package documentation for incompatible declarations.
 func (n *Def) Members(kind string) *Def {
 	if kind == "" {
 		panic("schema: Members kind must be non-empty: " + n.Template)

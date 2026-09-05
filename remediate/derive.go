@@ -148,7 +148,7 @@ func removedSubtree(o op) *schema.Node {
 	return o.flipRun
 }
 
-// negatedSubtree is the emitted-line counterpart of removedSubtree: the subtree an operation negates, or nil when it emits no negation.
+// negatedSubtree returns the subtree an operation negates, or nil when it emits no negation.
 func negatedSubtree(o op) *schema.Node {
 	switch o.action {
 	case graph.Remove:
@@ -260,7 +260,6 @@ func (dv *differ) checkBaselineRemovals() {
 		if rm == nil {
 			continue
 		}
-		// Report every distinct baseline object the operation negates, once each.
 		var seen map[resource]bool
 		for _, r := range definedIdents(rm) {
 			if !dv.provided[r] || seen[r] {
@@ -421,7 +420,6 @@ func (dv *differ) deriveMoveEdges() {
 			continue
 		}
 		for _, r := range resourcesHeld(src, dv.d) {
-			// Compare every release and claim in the bucket.
 			for _, old := range freed[r.resource] {
 				if old.op != i && old.conflicts(r) {
 					dv.addEdge(old.op, i, "exclusive resource %s", r)
@@ -447,7 +445,7 @@ func (a heldResource) String() string {
 	}
 	out := fmt.Sprintf("%s %q", name,
 		strings.ReplaceAll(a.display, "\x00", ","))
-	// Two anchor spaces share a label, so the owner is what tells them apart.
+	// The owner distinguishes anchor instances with the same label.
 	if a.owner != "" {
 		out += " under " + ident.OwnerPath(a.owner)
 	}
@@ -537,7 +535,6 @@ func (dv *differ) deriveRequireEdges() {
 		}
 	}
 
-	// Index each removal once per label.
 	removeByLabel := map[string][]int{}
 	for j, o := range ops {
 		src := removedSubtree(o)
@@ -583,7 +580,7 @@ func (dv *differ) deriveRequireEdges() {
 					}
 					continue
 				}
-				// The goal neither keeps nor adds the prerequisite, so the emitted sequence cannot converge.
+				// The goal omits the prerequisite, so no command order can satisfy this requirement.
 				d.Add(
 					diag.Error,
 					"%s: requires a %q but the goal defines none",

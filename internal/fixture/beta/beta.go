@@ -12,7 +12,7 @@ import (
 	"github.com/acidsailor/confetti/value"
 )
 
-// Schema builds the beta fixture with bridges, VLANs, interfaces, route-maps, and BGP.
+// Schema builds the beta fixture; see docs/fixtures.md for grammar limits.
 func Schema() *schema.Schema {
 	s := schema.New()
 	registerTypes(s)
@@ -46,7 +46,6 @@ func Schema() *schema.Schema {
 	s.Node("route-map {{ name:word }} {{ action:word }} {{ seq:uint }}").
 		Card(schema.ZeroToN).Kind("route-map").Key("name", "action", "seq")
 
-	// Define VRF targets for interface forwarding and per-VRF BGP.
 	s.Node("ip vrf {{ name:word }}").
 		Card(schema.ZeroToN).Kind("vrf").Key("name")
 
@@ -122,7 +121,7 @@ func registerTypes(s *schema.Schema) {
 		{Name: "ipv4", Pattern: `\S+`, Check: valcheck.IPv4},
 	} {
 		if err := s.Registry.Register(t); err != nil {
-			panic(err) // Reject invalid fixture types during construction.
+			panic(err)
 		}
 	}
 }

@@ -66,7 +66,6 @@ func (c relationChecker) recordBaseline(n *schema.Node) {
 	c.record(n, true)
 }
 
-// recordConfig indexes what one node of the caller's configuration declares.
 func (c relationChecker) recordConfig(n *schema.Node) { c.record(n, false) }
 
 // record indexes the labels, key values, and exclusive name one node declares.

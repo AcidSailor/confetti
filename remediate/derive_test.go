@@ -50,7 +50,7 @@ func TestRefEdgeOrdersDefinitionBeforeReferrerOnAdd(t *testing.T) {
 		"",
 		"interface Ethernet1\n  member 10\ngrp 10\n")
 	require.False(t, d.HasErrors(), d.String())
-	// declaration rank says interface first; the ref edge must invert that
+	// The reference edge must override interface-first declaration order.
 	assert.Equal(t, "grp 10\ninterface Ethernet1\n  member 10\n", out)
 }
 
@@ -59,7 +59,7 @@ func TestRefEdgeOrdersReferrerBeforeDefinitionOnRemove(t *testing.T) {
 		"interface Ethernet1\n  member 10\ngrp 10\n",
 		"")
 	require.False(t, d.HasErrors(), d.String())
-	// removes descend by rank => "no grp 10" would come first; edge inverts
+	// The reference edge must override group-first removal order.
 	assert.Equal(t, "no interface Ethernet1\nno grp 10\n", out)
 }
 
@@ -102,7 +102,7 @@ func TestRetargetModifyEdges(t *testing.T) {
 		t.Fatalf("no op %q", text)
 		return -1
 	}
-	// modify waits for the new target and precedes the old target's removal
+	// Modify must follow the new target and precede removal of the old target.
 	assert.True(t, g.HasEdge(idx("grp 20"), idx("member 20")))
 	assert.True(t, g.HasEdge(idx("member 20"), idx("no grp 10")))
 }
@@ -147,7 +147,7 @@ func TestRetargetReplaceEdges(t *testing.T) {
 	}
 	assert.Equal(t, graph.Replace, action)
 
-	// replace waits for the new target and precedes the old target's removal
+	// Replace must follow the new target and precede removal of the old target.
 	assert.True(t, g.HasEdge(idx("grp 20"), memberIdx))
 	assert.True(t, g.HasEdge(memberIdx, idx("no grp 10")))
 }
@@ -201,7 +201,7 @@ func TestCrossDefModifyOldRequiresOrdersBeforeTargetRemoval(t *testing.T) {
 	assert.Equal(t, "features\n  feature off\ntargets\n  no gate\n", out)
 }
 
-// moveSchema: a keyed child that can migrate between sections.
+// moveSchema defines a keyed child that can move between sections.
 func moveSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -573,7 +573,7 @@ func TestOrderHookReordersOutput(t *testing.T) {
 			}
 		}
 		if a >= 0 && b >= 0 {
-			g.AddEdge(b, a) // quirk: beta must precede alpha
+			g.AddEdge(b, a) // Require beta before alpha.
 		}
 	})
 	out, d := orderedDiff(t, s, "", "alpha one\nbeta two\n")
@@ -600,7 +600,7 @@ func TestOrderHookCycleFollowsPolicy(t *testing.T) {
 	)
 	require.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "ordering cycle")
-	assert.True(t, res.Empty()) // strict: no artifact
+	assert.True(t, res.Empty()) // Abort suppresses the artifact.
 
 	s2 := mk()
 	res2, d2 := Diff(
@@ -610,11 +610,11 @@ func TestOrderHookCycleFollowsPolicy(t *testing.T) {
 	)
 	assert.False(t, d2.HasErrors())
 	assert.Contains(t, d2.String(), "dropped ordering edge")
-	assert.False(t, res2.Empty()) // lenient: artifact emitted
+	assert.False(t, res2.Empty()) // Break permits an artifact.
 }
 
 func TestCycleBreakNamesRefEndToEnd(t *testing.T) {
-	// A lenient break of a mutual-reference removal cycle must identify the affected reference.
+	// Breaking a mutual-reference removal cycle must identify the affected reference.
 	s := schema.New()
 	s.Node("a {{ x:word }}").Card(schema.ZeroToN).Kind("a").Key("x").
 		Ref("x", "b.y")
@@ -809,7 +809,7 @@ func TestBaselineRemovalIsError(t *testing.T) {
 	assert.Equal(t, "no feature bgp\n", render.Render(res.Tree))
 }
 
-// baselineIdentSchema gives one composite-keyed def and two keyless defs that share a Kind.
+// baselineIdentSchema defines one composite key and two keyless definitions sharing a Kind.
 func baselineIdentSchema() *schema.Schema {
 	s := schema.New()
 	s.Node("route-map {{ name:word }} permit {{ seq:word }}").

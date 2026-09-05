@@ -37,11 +37,11 @@ func (r *Result) Empty() bool {
 	return empty
 }
 
-// isChange reports whether a node carries a change rather than section scaffolding.
+// isChange reports whether a node carries a change operation.
 func isChange(n *schema.Node) bool {
 	switch n.Op {
 	case schema.OpNone, schema.OpSection:
-		// Section scaffolding and untagged nodes are not changes.
+		// Retained section headers and untagged nodes are not changes.
 		return false
 	default:
 		// Treat unknown future operations as changes.
@@ -174,7 +174,7 @@ func cloneNode(src *schema.Node, op schema.Op) *schema.Node {
 	return n
 }
 
-// buildAdd deep-rebuilds an intended subtree as OpAdd nodes.
+// buildAdd copies an intended subtree as OpAdd nodes.
 func buildAdd(src *schema.Node) *schema.Node {
 	n := cloneNode(src, schema.OpAdd)
 	for _, c := range src.Children {

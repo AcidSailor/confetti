@@ -41,7 +41,7 @@ func TestRenderNormalizesMessyInput(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	out := Render(cfg)
 	assert.Equal(t, canonical, out)
-	// idempotent: re-parsing+rendering the canonical form is stable
+	// Parsing and rendering canonical output must preserve it.
 	cfg2 := parse.Parse(miniSchema(), out, parse.Reject, d)
 	assert.Equal(t, canonical, Render(cfg2))
 }

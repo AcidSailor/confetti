@@ -100,7 +100,6 @@ func (c relationChecker) checkExclusive(n *schema.Node) {
 		if first.node == n {
 			return
 		}
-		// Report every conflicting holder of a List claim.
 		if !sameObject(first, cl) && conflicts(first, cl) {
 			c.reportCollision(cl, first)
 		}

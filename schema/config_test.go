@@ -128,12 +128,12 @@ func TestReplaceChild(t *testing.T) {
 	assert.Same(t, p, r2.Parent)
 	assert.Nil(t, b.Parent)
 
-	// Empty replacement = removal; the in-place splice leaves no stale entry.
+	// An empty replacement removes the child.
 	p.ReplaceChild(a)
 	assert.Equal(t, []string{"r1", "r2", "c"}, texts(p.Children))
 	assert.Nil(t, a.Parent)
 
-	// Rails: non-child old, already-parented replacement.
+	// Reject an absent child or an owned replacement.
 	assert.Panics(t, func() { p.ReplaceChild(b) })
 	assert.Panics(t, func() { p.ReplaceChild(c, r1) })
 }
@@ -143,7 +143,7 @@ func TestLineSetAndClonesDrop(t *testing.T) {
 	assert.Equal(t, 0, n.Line)
 	n.Line = 7
 	assert.Equal(t, 7, n.Line)
-	// Clones live in built trees, not the imported text (the RealIndent rule).
+	// Value clones omit source indentation and line numbers.
 	assert.Equal(t, 0, n.CloneValue().Line)
 	dst := NewNode("x")
 	dst.Line = 3

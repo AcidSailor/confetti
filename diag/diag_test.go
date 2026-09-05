@@ -44,7 +44,7 @@ func TestMerge(t *testing.T) {
 	assert.Equal(t, Diagnostic{Severity: Error, Message: "second"}, items[1])
 	assert.Equal(t, Diagnostic{Severity: Warning, Message: "third"}, items[2])
 	assert.True(t, a.HasErrors())
-	// merge must not mutate the source
+	// Merge must preserve the source diagnostics.
 	assert.Len(t, b.Items, 2)
 }
 

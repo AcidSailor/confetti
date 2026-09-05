@@ -9,7 +9,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// Fold canonicalizes RespellAs, ListContinues, and Members spellings in that order and leaves a line unchanged when it cannot fold atomically.
+// Fold applies RespellAs, ListContinues, and Members in order; failed folds report diagnostics and retain the line.
 func Fold(cfg *schema.Config, d *diag.Diagnostics) {
 	foldLevel(cfg.Root, cfg.Schema.Roots, d)
 }
@@ -27,7 +27,6 @@ func foldLevel(
 	d *diag.Diagnostics,
 ) {
 	lf := &levelFold{parent: parent, candidates: candidates, d: d}
-	// Apply RespellAs first.
 	var respells []*schema.Node
 	for _, c := range parent.Children {
 		if def := c.Def; def != nil && def.Respell != nil {
@@ -38,7 +37,6 @@ func foldLevel(
 		lf.foldRespell(m)
 	}
 
-	// Apply list continuations second.
 	var conts []*schema.Node
 	for _, c := range parent.Children {
 		if def := c.Def; def != nil && def.ListContinuation != nil {
