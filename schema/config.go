@@ -160,8 +160,11 @@ func CloneConfig(c *Config) *Config {
 	return out
 }
 
-// Walk visits every real node (excludes the sentinel root) in pre-order.
+// Walk visits every real node (excludes the sentinel root) in pre-order; a config without a root has no nodes.
 func Walk(c *Config, fn func(*Node)) {
+	if c == nil || c.Root == nil {
+		return
+	}
 	for _, n := range c.Root.Children {
 		n.Walk(fn)
 	}

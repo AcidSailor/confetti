@@ -30,15 +30,23 @@ type Result struct {
 func (r *Result) Empty() bool {
 	empty := true
 	schema.Walk(r.Tree, func(n *schema.Node) {
-		switch n.Op {
-		case schema.OpNone, schema.OpSection:
-			// Section scaffolding and untagged nodes are not changes.
-		default:
-			// Treat unknown future operations as changes.
+		if isChange(n) {
 			empty = false
 		}
 	})
 	return empty
+}
+
+// isChange reports whether a node carries a change rather than section scaffolding.
+func isChange(n *schema.Node) bool {
+	switch n.Op {
+	case schema.OpNone, schema.OpSection:
+		// Section scaffolding and untagged nodes are not changes.
+		return false
+	default:
+		// Treat unknown future operations as changes.
+		return true
+	}
 }
 
 // Diff returns the remediation from running to intended without modifying any input; running, intended, and any baseline must use the same schema.

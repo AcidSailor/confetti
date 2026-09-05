@@ -263,6 +263,92 @@ The explanations record constraints that tests do not show.
 - **Declare exclusivity with `Unique`.** `Requires` is
   existential only. Use `OrderHook` for sequencing preferences that have no
   existence semantics.
+- **Exclusive resources are scoped by `Namespace`, then `Kind`; a tag scopes
+  one only when it is also declared as the `Namespace`.** Four mechanisms
+  resolve labels, and only the exclusive resource ignores undeclared tags,
+  because a tag that merely classifies keyed definitions must not derive
+  move edges between unrelated commands.
+
+  | Mechanism | Resolves on |
+  | --- | --- |
+  | `CommitCheck` label index (`record`), `Ref`, `Requires` | `Labels()`: Kind and Tags |
+  | Reference ordering (`appendDefines`) | `Labels()`: Kind and Tags |
+  | Identity-conflict ordering (`definedIdents`) | `Labels()`: Kind and Tags |
+  | Exclusive resources (`appendHeld`, `claimOf`) | `ExclusiveLabel()`: `Namespace`, else `Kind`, else the definition |
+
+  Definitions with distinct Kinds that share one device-side name space
+  declare the same `Namespace(label)`. `ValidateRelations` rejects a
+  namespace that the definition does not carry, one without a `Key`, one
+  with a single keyed member, and a keyed carrier of the label that does not
+  declare the namespace. It also rejects `Unique` without a `Key`, and a
+  declared extent without one: an exclusive name is held by the key, so
+  without a key nothing holds it and the declaration is inert. Two nodes
+  with the same definition, key values, and owner are one object restated,
+  not a collision; that is how a baseline object repeated in the
+  configuration stays valid. The owner in that test is the structural
+  parent, never the declared extent: a wider name space still contains
+  narrower objects, so two positions must not read as one object. A keyless
+  slot holds no name.
+
+  **Members of one name space must agree on its shape.** A shared space is
+  one whose members declare a `Namespace` or an extent; `ValidateRelations`
+  reports members that disagree on the exclusive arg count, on which
+  exclusive arg is a `List`, or on the extent. Each disagreement silently
+  splits the space rather than narrowing it, which is the worst outcome
+  available: the ordering side stops deriving the move edge and emits a plan
+  the device rejects, and the validation side stops seeing the collision.
+  Disagreement on the `List` position matters because a `List` arg is left
+  blank in the bucket key, so a list name and a scalar name never meet.
+  Definitions that declare nothing are not held to one shape — two keyed
+  definitions may share a `Kind` with different key arities and simply never
+  contest a name.
+- **Declare the extent of an exclusive name; an undeclared extent is guessed
+  conservatively, in opposite directions.** `ident.ScopeOf` is the single
+  place that answers "which name space does this node's name live in", and
+  `ident.ExclusiveName` is the single place that builds the name itself.
+  Both consumers call both: `appendHeld` with `ident.Device`, `claimOf` with
+  `ident.PerOwner`. Keeping one function each is the invariant; parallel
+  implementations of the same question drift.
+
+  | Declaration | Extent |
+  | --- | --- |
+  | `ScopedBy(anchor)` | One space per instance of the anchor definition |
+  | `ScopedByDevice()`, `Namespace(label)` | One space for the whole configuration |
+  | `Namespace(label).ScopedBy(anchor)` | One space per anchor instance; `ScopedBy` wins |
+  | none | Guessed: `Device` for ordering, `PerOwner` for validation |
+
+  `Namespace` implies a device-wide extent, which is the surprise worth
+  stating: adding it to two Kinds turns previously valid per-owner repeats
+  into commit-check errors. `ScopedBy` narrows that back. `ScopedBy` and
+  `ScopedByDevice` name different extents and panic together in either call
+  order, as does setting either declaration twice, because both are
+  order-independent authoring errors.
+
+  The defaults differ because the two mechanisms fail in opposite ways. A
+  release-before-claim edge that was not required is harmless, while a
+  missing one emits a plan the device rejects, so ordering assumes the wider
+  extent. Rejecting a valid configuration is worse than missing a collision
+  — a global BGP neighbour and one under `vrf red` are distinct objects — so
+  validation assumes the narrower one. Declaring the extent removes the
+  guess and both agree exactly.
+
+  `ScopedBy` names the ancestor definition directly rather than a label,
+  matching `Toggles` and `ListContinues`; the anchor is structural, not a
+  label match. It reaches past the parent, which is the case the `PerOwner`
+  default cannot express: neighbours under `vrf red / address-family ipv4`
+  and `vrf red / address-family ipv6` share one space, so the second use of
+  a name there is a collision, not a restatement. `ValidateRelations`
+  rejects an anchor that is not an ancestor on **every** path to the holder,
+  because `Adopt` lets one definition hang under several parents. That check
+  asks, per anchored definition, whether a root still reaches it with the
+  anchor removed — linear, and it terminates on a recursive grammar.
+  Enumerating paths instead is exponential on the diamonds `Adopt` creates.
+  A definition that sits outside every anchor falls back to the device-wide
+  space; only a schema `ValidateRelations` rejects can reach that state, and
+  `Diff` does not run `ValidateRelations`, so a consumer generating plans
+  without `CommitCheck` is trusting a schema nothing checked. Exclusive
+  names built on a `List` arg compare resolved members, not spellings, in
+  both mechanisms.
 - **Sibling exclusions order removals before additions.** `Diff` does not check
   intermediate states, but the emitted operations must remain valid for the
   device. Each conflicting sibling is removed before its excluder is installed
@@ -354,7 +440,9 @@ reason when edge derivation recorded one.
 - **`EmptyOnRemove` is per definition, not per Kind** because its mode-like,
   always-present section declares no Kind.
 - **Tags are non-identity labels.** Relations match a node's Kind and Tags.
-  Identity and pairing use only Kind, but ordering also uses Tags. Sibling
+  Identity and pairing use only Kind, but ordering also uses Tags. A Tag
+  declared as a `Namespace` also scopes the exclusive resource; see the
+  exclusive-resource invariant. Sibling
   relations compare direct children of one parent; top-level nodes share the
   sentinel root. Use `Toggles` for alternate spellings of one setting and
   `ExcludeTag` for many-to-many mode splits such as L2 versus L3.

@@ -14,10 +14,16 @@ type relationChecker struct {
 	index map[target]bool
 	// present records whether any instance carries each label.
 	present map[string]bool
-	d       *diag.Diagnostics
+	// held lists every claim on each exclusive name in walk order, baseline first.
+	held map[holder][]claim
+	// claims records the claim each node made so checking never resolves a list twice.
+	claims map[*schema.Node]claim
+	// baseline marks every node the device provides so a collision names the right source.
+	baseline map[*schema.Node]bool
+	d        *diag.Diagnostics
 }
 
-// CommitCheck validates relations (references, prerequisites, exclusions) against the assembled tree; a nil baseline provides no targets.
+// CommitCheck validates relations and exclusive-name collisions against the assembled tree; a nil baseline provides no targets and holds no names.
 func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 	if baseline != nil && baseline.Schema != cfg.Schema {
 		d.Add(
@@ -27,26 +33,44 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 		// Drop the unusable baseline but still check the tree the caller asked about.
 		baseline = nil
 	}
+	// A baseline with no tree supplies nothing; say so instead of blaming the configuration.
+	if baseline != nil && baseline.Root == nil {
+		d.Add(diag.Error, "validate: baseline has no parsed nodes")
+		baseline = nil
+	}
 	// Validate the complete schema, including definitions absent from the configuration.
 	if cfg.Schema != nil {
 		cfg.Schema.ValidateRelations(d)
 	}
 	c := relationChecker{
-		index:   map[target]bool{},
-		present: map[string]bool{},
-		d:       d,
+		index:    map[target]bool{},
+		present:  map[string]bool{},
+		held:     map[holder][]claim{},
+		claims:   map[*schema.Node]claim{},
+		baseline: map[*schema.Node]bool{},
+		d:        d,
 	}
 
-	// Baseline nodes are relation targets only; their own relations are never checked.
+	// Baseline nodes are relation targets and name holders; their own relations are never checked.
 	if baseline != nil {
-		schema.Walk(baseline, c.record)
+		schema.Walk(baseline, c.recordBaseline)
 	}
-	schema.Walk(cfg, c.record)
+	schema.Walk(cfg, c.recordConfig)
 	schema.Walk(cfg, c.checkRelations)
+	schema.Walk(cfg, c.checkExclusive)
 }
 
-// record indexes the labels and key values one node declares.
-func (c relationChecker) record(n *schema.Node) {
+// recordBaseline marks a device-provided node and indexes what it declares.
+func (c relationChecker) recordBaseline(n *schema.Node) {
+	c.baseline[n] = true
+	c.record(n, true)
+}
+
+// recordConfig indexes what one node of the caller's configuration declares.
+func (c relationChecker) recordConfig(n *schema.Node) { c.record(n, false) }
+
+// record indexes the labels, key values, and exclusive name one node declares.
+func (c relationChecker) record(n *schema.Node, fromBaseline bool) {
 	def := n.Def
 	if def == nil {
 		return
@@ -56,6 +80,10 @@ func (c relationChecker) record(n *schema.Node) {
 		for _, arg := range def.KeyArgs {
 			c.index[target{label, arg, n.Fields[arg]}] = true
 		}
+	}
+	if cl, ok := c.claimOf(n, fromBaseline); ok {
+		c.claims[n] = cl
+		c.held[cl.holder] = append(c.held[cl.holder], cl)
 	}
 }
 

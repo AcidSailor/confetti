@@ -9,8 +9,12 @@
 // therefore affects schema behavior.
 //
 // Relations target labels: a definition's Kind name or Tags. Ref, Requires,
-// and ExcludeTag build the supported relations. ValidateRelations checks
-// constraints that depend on multiple definitions.
+// and ExcludeTag build the supported relations. Namespace scopes the exclusive
+// resource a keyed definition holds by label instead of Kind and makes that
+// name space device-wide; Unique narrows which args form the name. ScopedBy
+// narrows the extent to one anchor instance and wins over the Namespace
+// default, ScopedByDevice widens it to the whole configuration.
+// ValidateRelations checks constraints that depend on multiple definitions.
 //
 // Remediation changes contain read-only references to caller-owned trees.
 // CloneValue copies node values without source position or tree ownership.

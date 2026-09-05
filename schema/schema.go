@@ -191,6 +191,9 @@ type Def struct {
 	Relations        []Relation
 	TagNames         []string // Non-identity labels; see Tag.
 	UniqueArgs       []string
+	NamespaceLabel   string // The label that scopes the exclusive resource; see Namespace.
+	ScopeAnchor      *Def   // The ancestor whose instance opens the name space; see ScopedBy.
+	DeviceScoped     bool   // The name space covers the whole configuration; see ScopedByDevice.
 	Idempotent       bool
 	Negate           NegateStrategy
 	Merge            MergeStrategy
@@ -590,13 +593,90 @@ func (n *Def) HasLabel(name string) bool {
 		(n.KindName == name || slices.Contains(n.TagNames, name))
 }
 
-// Unique restricts exclusive resource identity to captured key arguments so remediation frees the resource before moving it.
+// Unique restricts exclusive resource identity to the named captures so remediation frees the resource before moving it; each arg must have a type that cannot match empty, and the definition still needs a Key to hold the name.
 func (n *Def) Unique(args ...string) *Def {
 	for _, arg := range args {
-		n.mustArg("Unique", arg)
+		// An exclusive name that can be empty would bucket every instance together.
+		n.mustNonEmptyArg("Unique", arg)
 	}
 	n.UniqueArgs = args
 	return n
+}
+
+// ExclusiveArgs returns the args that identify this definition's exclusive resource: Unique args when set, else the key args.
+func (n *Def) ExclusiveArgs() []string {
+	// Clone so a caller appending to the result cannot write into UniqueArgs or KeyArgs.
+	if len(n.UniqueArgs) > 0 {
+		return slices.Clone(n.UniqueArgs)
+	}
+	return slices.Clone(n.KeyArgs)
+}
+
+// ExclusiveLabel returns the label that scopes this definition's exclusive resource: Namespace when set, else Kind.
+func (n *Def) ExclusiveLabel() string {
+	if n.NamespaceLabel != "" {
+		return n.NamespaceLabel
+	}
+	return n.KindName
+}
+
+// Namespace scopes the exclusive resource by label instead of Kind and makes the name space device-wide unless ScopedBy narrows it, so definitions with distinct Kinds release a shared name before claiming it.
+func (n *Def) Namespace(label string) *Def {
+	if label == "" {
+		panic("schema: Namespace label must be non-empty: " + n.Template)
+	}
+	if n.NamespaceLabel != "" && n.NamespaceLabel != label {
+		panic("schema: Namespace set twice: " + n.Template)
+	}
+	n.NamespaceLabel = label
+	return n
+}
+
+const scopeExtentTwice = "schema: ScopedBy and ScopedByDevice are mutually exclusive: "
+
+// ScopedBy gives each instance of anchor its own exclusive name space, so the same name under two anchors is two objects.
+func (n *Def) ScopedBy(anchor *Def) *Def {
+	if anchor == nil {
+		panic("schema: ScopedBy anchor must be non-nil: " + n.Template)
+	}
+	if anchor == n {
+		panic("schema: ScopedBy anchor may not be the definition itself: " +
+			n.Template)
+	}
+	// Guard both setters so either call order reports the conflict.
+	if n.DeviceScoped {
+		panic(scopeExtentTwice + n.Template)
+	}
+	if n.ScopeAnchor != nil && n.ScopeAnchor != anchor {
+		panic("schema: ScopedBy anchor set twice: " + n.Template)
+	}
+	n.ScopeAnchor = anchor
+	return n
+}
+
+// ScopedByDevice makes the exclusive name space cover the whole configuration, so a name moves between owners rather than repeating.
+func (n *Def) ScopedByDevice() *Def {
+	if n.ScopeAnchor != nil {
+		panic(scopeExtentTwice + n.Template)
+	}
+	n.DeviceScoped = true
+	return n
+}
+
+// ScopeExtent returns the ancestor whose instance opens the exclusive name space and whether that space is device-wide; both zero means the extent is undeclared.
+func (n *Def) ScopeExtent() (anchor *Def, device bool) {
+	switch {
+	case n.ScopeAnchor != nil:
+		return n.ScopeAnchor, false
+	case n.DeviceScoped || n.NamespaceLabel != "":
+		return nil, true
+	}
+	return nil, false
+}
+
+// DeclaresSpace reports whether the definition explicitly places its exclusive name in a shared space.
+func (n *Def) DeclaresSpace() bool {
+	return n.NamespaceLabel != "" || n.ScopeAnchor != nil || n.DeviceScoped
 }
 
 // List declares a leaf capture as an idempotent unordered set with numeric ranges and elements of elemType.

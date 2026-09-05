@@ -421,3 +421,489 @@ func TestCommitCheckBaselineSchemaMismatchIsError(t *testing.T) {
 	// The unusable baseline is dropped, but the tree is still checked.
 	assert.Contains(t, d.String(), `vlan "1" does not exist`)
 }
+
+func TestCommitCheckNamespaceAcrossKindsIsValid(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	// Namespace before Tag must validate the same as after it.
+	s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Namespace("acl").Kind("mac-acl").Tag("acl").Key("name")
+	d := checkText(t, s, "ip access-list A\nmac access-list B\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckNamespaceNotCarriedIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Key("name").Namespace("acl")
+	s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name").Namespace("acl")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`Namespace "acl" is not a Kind or Tag of this definition`,
+	)
+}
+
+func TestCommitCheckNamespaceOnKeylessDefIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac access-list").Card(schema.ZeroToOne).
+		Kind("mac-acl").Tag("acl").Namespace("acl")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `Namespace "acl" needs a Key`)
+}
+
+func TestCommitCheckNamespaceWithOneMemberIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `Namespace "acl" has no other keyed member`)
+}
+
+func TestCommitCheckNamespaceHalfDeclaredIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`mac access-list {{ name:word }}: carries label "acl" used as a Namespace but does not declare Namespace("acl")`,
+	)
+}
+
+func TestCommitCheckNamespaceArityMismatchIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac access-list {{ name:word }} {{ seq:uint }}").
+		Card(schema.ZeroToN).
+		Kind("mac-acl").
+		Tag("acl").
+		Key("name", "seq").
+		Namespace("acl")
+	d := checkText(t, s, "ip access-list A\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`exclusive name space "acl": members disagree on exclusive arg count`,
+	)
+}
+
+// aclNamespaceSchema returns two Kinds that share one device-side name space.
+func aclNamespaceSchema() *schema.Schema {
+	s := schema.New()
+	s.Node("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	s.Node("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name").Namespace("acl")
+	return s
+}
+
+func TestCommitCheckNamespaceCollisionIsError(t *testing.T) {
+	d := checkText(t, aclNamespaceSchema(),
+		"ip access-list L\nmac access-list L\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`mac access-list L: name "L" under label "acl" is already held by "ip access-list L" (line 1)`,
+	)
+	// Locate the collision by message so an unrelated earlier item cannot pass it.
+	for _, it := range d.Items {
+		if strings.Contains(it.Message, `name "L"`) {
+			assert.Equal(t, 2, it.Line, "points at the later holder")
+			return
+		}
+	}
+	t.Fatal("no collision diagnostic: " + d.String())
+}
+
+func TestCommitCheckNamespaceDistinctNamesCoexist(t *testing.T) {
+	d := checkText(t, aclNamespaceSchema(),
+		"ip access-list L\nmac access-list M\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckNamespaceSameObjectReenteredIsNotCollision(t *testing.T) {
+	d := checkText(t, aclNamespaceSchema(),
+		"ip access-list L\nip access-list L\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckNamespaceCollisionWithBaselineIsError(t *testing.T) {
+	d := diag.New()
+	s := aclNamespaceSchema()
+	baseline := parse.Parse(s, "ip access-list L\n", parse.Reject, d)
+	cfg := parse.Parse(s, "mac access-list L\n", parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, baseline, d)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`name "L" under label "acl" is already held by baseline "ip access-list L"`,
+	)
+}
+
+// prioNamespaceSchema returns two Kinds whose exclusive name is a list of ids.
+func prioNamespaceSchema() *schema.Schema {
+	s := schema.New()
+	s.Node("ip prio {{ ids:word }} value {{ v:word }}").Card(schema.ZeroToN).
+		Kind("ip-prio").Tag("prio").Key("v").Unique("ids").
+		List("ids", "uint").Namespace("prio")
+	s.Node("mac prio {{ ids:word }} value {{ v:word }}").Card(schema.ZeroToN).
+		Kind("mac-prio").Tag("prio").Key("v").Unique("ids").
+		List("ids", "uint").Namespace("prio")
+	return s
+}
+
+func TestCommitCheckListMembersOverlapIsError(t *testing.T) {
+	d := checkText(t, prioNamespaceSchema(),
+		"ip prio 1-3 value a\nmac prio 2 value b\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `under label "prio" is already held by`)
+}
+
+func TestCommitCheckListMembersDisjointCoexist(t *testing.T) {
+	d := checkText(t, prioNamespaceSchema(),
+		"ip prio 1-3 value a\nmac prio 4-5 value b\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+// Set-equal spellings must reach the same verdict; comparing raw text would not.
+func TestCommitCheckListSpellingDoesNotChangeVerdict(t *testing.T) {
+	same := checkText(t, prioNamespaceSchema(),
+		"ip prio 1-3 value a\nmac prio 3,2,1 value b\n")
+	require.True(t, same.HasErrors(), same.String())
+	disjoint := checkText(t, prioNamespaceSchema(),
+		"ip prio 1,2,3 value a\nmac prio 4 value b\n")
+	assert.False(t, disjoint.HasErrors(), disjoint.String())
+}
+
+// One list can overlap several disjoint holders, and each is a separate fix.
+func TestCommitCheckListReportsEveryOverlappingHolder(t *testing.T) {
+	d := checkText(
+		t,
+		prioNamespaceSchema(),
+		"ip prio 10-20 value a\nmac prio 30-40 value b\nip prio 15-35 value c\n",
+	)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `is already held by "ip prio 10-20 value a"`)
+	assert.Contains(t, d.String(),
+		`is already held by "mac prio 30-40 value b"`)
+}
+
+// A baseline list the device supplies is not a line the caller can fix.
+func TestCommitCheckBaselineUnresolvableListWarnsWithoutALine(t *testing.T) {
+	d := diag.New()
+	s := prioNamespaceSchema()
+	baseline := parse.Parse(s, "ip prio 9-1 value a\n", parse.Reject, d)
+	cfg := parse.Parse(s, "mac prio 4 value b\n", parse.Reject, d)
+	CommitCheck(cfg, baseline, d)
+	assert.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "baseline ip prio 9-1 value a")
+	assert.Contains(t, d.String(), "warning")
+	// A baseline position is not a line number in the configuration the caller wrote.
+	assert.NotContains(t, d.String(), "1: warning")
+}
+
+// A configuration list the caller wrote keeps its own line.
+func TestCommitCheckUnresolvableListWarnsAtItsLine(t *testing.T) {
+	d := checkText(t, prioNamespaceSchema(),
+		"mac prio 4 value b\nip prio 9-1 value a\n")
+	assert.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "2: warning")
+	assert.Contains(t, d.String(), `unresolvable list "9-1"`)
+	assert.NotContains(t, d.String(), "baseline")
+}
+
+// An unusable baseline is named, not silently dropped onto the configuration.
+func TestCommitCheckBaselineWithoutNodesIsReported(t *testing.T) {
+	d := diag.New()
+	s := aclNamespaceSchema()
+	cfg := parse.Parse(s, "ip access-list L\n", parse.Reject, d)
+	CommitCheck(cfg, &schema.Config{Schema: s}, d)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "baseline has no parsed nodes")
+}
+
+// A third claim must be checked against every earlier one, not only the first.
+func TestCommitCheckListOverlapWithLaterHolderIsError(t *testing.T) {
+	d := checkText(t, prioNamespaceSchema(),
+		"ip prio 1 value a\nmac prio 5 value b\nip prio 5 value c\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`is already held by "mac prio 5 value b" (line 2)`,
+	)
+}
+
+func TestCommitCheckUniqueCollisionUnderKindIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("slot {{ id:word }} owner {{ own:word }}").Card(schema.ZeroToN).
+		Kind("slot").Key("id", "own").Unique("id")
+	d := checkText(t, s, "slot 1 owner a\nslot 1 owner b\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`slot 1 owner b: name "1" under label "slot" is already held by "slot 1 owner a" (line 1)`,
+	)
+}
+
+func TestCommitCheckKeyedKindCollisionAcrossDefsIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("vrf {{ name:word }}").Card(schema.ZeroToN).Kind("vrf").Key("name")
+	s.Node("vrf context {{ name:word }}").Card(schema.ZeroToN).Kind("vrf").
+		Key("name")
+	d := checkText(t, s, "vrf RED\nvrf context RED\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `name "RED" under label "vrf"`)
+}
+
+func TestCommitCheckKeylessKindHoldsNoName(t *testing.T) {
+	s := schema.New()
+	r := s.Node("router bgp {{ as:word }}").Card(schema.ZeroToOne)
+	r.Child("default-originate").Card(schema.ZeroToOne).Kind("do")
+	r.Child("default-originate always").Card(schema.ZeroToOne).Kind("do")
+	d := checkText(t, s,
+		"router bgp 65000\n  default-originate\n  default-originate always\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+// A keyed definition with neither Kind nor Namespace is exclusive in ordering, so it must be here too.
+func TestCommitCheckUniqueCollisionWithoutKindIsError(t *testing.T) {
+	s := schema.New()
+	s.Node("slot {{ id:word }} owner {{ own:word }}").Card(schema.ZeroToN).
+		Key("id", "own").Unique("id")
+	d := checkText(t, s, "slot 1 owner a\nslot 1 owner b\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(
+		t,
+		d.String(),
+		`name "1" under definition "slot {{ id:word }} owner {{ own:word }}"`,
+	)
+}
+
+// nbrSchema declares one keyed Kind reachable under two different parents.
+func nbrSchema() *schema.Schema {
+	s := schema.New()
+	bgp := s.Node("router bgp {{ as:word }}").Card(schema.ZeroToOne)
+	bgp.Child("neighbor {{ ip:word }}").Card(schema.ZeroToN).
+		Kind("nbr").Key("ip")
+	vrf := bgp.Child("vrf {{ name:word }}").Card(schema.ZeroToN).
+		Kind("bgp-vrf").Key("name")
+	vrf.Child("neighbor {{ ip:word }}").Card(schema.ZeroToN).
+		Kind("nbr").Key("ip")
+	return s
+}
+
+// A Kind names one space per owner: a global and a VRF neighbour are distinct objects.
+func TestCommitCheckKindNameIsScopedToItsOwner(t *testing.T) {
+	d := checkText(t, nbrSchema(),
+		"router bgp 1\n  neighbor 10.0.0.1\n  vrf red\n    neighbor 10.0.0.1\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckKindCollisionUnderOneOwnerIsError(t *testing.T) {
+	s := schema.New()
+	r := s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Key("b")
+	r.Child("slot {{ id:word }} owner {{ own:word }}").Card(schema.ZeroToN).
+		Kind("slot").Key("id", "own").Unique("id")
+	d := checkText(t, s, "box a\n  slot 1 owner x\n  slot 1 owner y\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `name "1" under label "slot"`)
+}
+
+func TestCommitCheckKindCollisionAcrossOwnersIsNotAnError(t *testing.T) {
+	s := schema.New()
+	r := s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Key("b")
+	r.Child("slot {{ id:word }} owner {{ own:word }}").Card(schema.ZeroToN).
+		Kind("slot").Key("id", "own").Unique("id")
+	d := checkText(t, s, "box a\n  slot 1 owner x\nbox b\n  slot 1 owner y\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+// A Namespace names one device-wide space, so it collides across owners.
+func TestCommitCheckNamespaceNameSpansOwners(t *testing.T) {
+	s := schema.New()
+	r := s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Key("b")
+	r.Child("ip access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name").Namespace("acl")
+	r.Child("mac access-list {{ name:word }}").Card(schema.ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name").Namespace("acl")
+	d := checkText(
+		t,
+		s,
+		"box a\n  ip access-list L\nbox b\n  mac access-list L\n",
+	)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `name "L" under label "acl"`)
+}
+
+// afNbrSchema puts the holder two levels below the object that opens its name space.
+func afNbrSchema(scoped bool) *schema.Schema {
+	s := schema.New()
+	bgp := s.Node("router bgp {{ as:word }}").Card(schema.ZeroToOne)
+	vrf := bgp.Child("vrf {{ name:word }}").Card(schema.ZeroToN).
+		Kind("bgp-vrf").Key("name")
+	af := vrf.Child("address-family {{ af:word }}").Card(schema.ZeroToN).
+		Kind("af").Key("af")
+	nbr := af.Child("neighbor {{ ip:word }}").Card(schema.ZeroToN).
+		Kind("nbr").Key("ip")
+	if scoped {
+		nbr.ScopedBy(vrf)
+	}
+	return s
+}
+
+const twoAfOneVrf = "router bgp 1\n  vrf red\n" +
+	"    address-family ipv4\n      neighbor 10.0.0.1\n" +
+	"    address-family ipv6\n      neighbor 10.0.0.1\n"
+
+// The parent is the address-family, but the name space belongs to the VRF.
+func TestCommitCheckScopedByFindsCollisionAboveTheParent(t *testing.T) {
+	d := checkText(t, afNbrSchema(true), twoAfOneVrf)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `name "10.0.0.1" under label "nbr"`)
+}
+
+// Without the declaration the per-owner default cannot see past the address-family.
+func TestCommitCheckUnscopedMissesCollisionAboveTheParent(t *testing.T) {
+	d := checkText(t, afNbrSchema(false), twoAfOneVrf)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestCommitCheckScopedBySeparatesAnchorInstances(t *testing.T) {
+	d := checkText(
+		t,
+		afNbrSchema(true),
+		"router bgp 1\n  vrf red\n    address-family ipv4\n      neighbor 10.0.0.1\n"+
+			"  vrf blue\n    address-family ipv4\n      neighbor 10.0.0.1\n",
+	)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+// ScopedByDevice makes one Kind exclusive device-wide without a second Namespace member.
+func TestCommitCheckScopedByDeviceSpansOwners(t *testing.T) {
+	s := schema.New()
+	r := s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Key("b")
+	r.Child("claim {{ id:word }}").Card(schema.ZeroToN).
+		Kind("claim").Key("id").ScopedByDevice()
+	d := checkText(t, s, "box a\n  claim 1\nbox b\n  claim 1\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `name "1" under label "claim"`)
+}
+
+func TestValidateRelationsScopeAnchorMustBeOnEveryPath(t *testing.T) {
+	s := schema.New()
+	dest := s.Node("destination").Card(schema.ZeroToOne)
+	claim := dest.Child("claim {{ id:word }}").Card(schema.ZeroToN).
+		Kind("claim").Key("id")
+	features := s.Node("features").Card(schema.ZeroToOne)
+	features.Child("feature on").Card(schema.ZeroToOne).Adopt(claim)
+	claim.ScopedBy(dest)
+	d := checkText(t, s, "destination\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(),
+		`ScopedBy anchor "destination" is not an ancestor on every path`)
+}
+
+func TestValidateRelationsScopeAnchorOnEveryPathIsValid(t *testing.T) {
+	s := schema.New()
+	dest := s.Node("destination").Card(schema.ZeroToOne)
+	dest.Child("claim {{ id:word }}").Card(schema.ZeroToN).
+		Kind("claim").Key("id").ScopedBy(dest)
+	d := checkText(t, s, "destination\n  claim 1\n")
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+func TestValidateRelationsScopeNeedsKey(t *testing.T) {
+	s := schema.New()
+	box := s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Key("b")
+	box.Child("flag").Card(schema.ZeroToOne).Kind("flag").ScopedByDevice()
+	d := checkText(t, s, "box a\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(),
+		"a declared exclusive scope needs a Key to hold a name")
+}
+
+// Unique without a Key declares a name nothing holds, like every other extent.
+func TestValidateRelationsUniqueNeedsKey(t *testing.T) {
+	s := schema.New()
+	s.Node("box {{ b:word }}").Card(schema.ZeroToN).Kind("box").Unique("b")
+	d := checkText(t, s, "box a\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "Unique needs a Key to hold a name")
+}
+
+// An empty config and unmatched lines must degrade, not panic.
+func TestCommitCheckToleratesEmptyConfigAndUnmatchedNodes(t *testing.T) {
+	d := diag.New()
+	assert.NotPanics(t, func() {
+		CommitCheck(&schema.Config{Schema: aclNamespaceSchema()}, nil, d)
+	})
+	assert.NotPanics(t, func() { CommitCheck(&schema.Config{}, nil, d) })
+
+	// A hand-built tree can carry a node that never matched a definition.
+	cfg := schema.NewConfig(aclNamespaceSchema())
+	cfg.Root.AddChild(schema.NewNode("who knows"))
+	assert.NotPanics(t, func() { CommitCheck(cfg, nil, d) })
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+// Restating a device-provided object must not read as a second claim on its name.
+func TestCommitCheckBaselineObjectRestatedIsNotCollision(t *testing.T) {
+	d := diag.New()
+	s := aclNamespaceSchema()
+	baseline := parse.Parse(s, "ip access-list L\n", parse.Reject, d)
+	cfg := parse.Parse(s, "ip access-list L\n", parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	CommitCheck(cfg, baseline, d)
+	assert.False(t, d.HasErrors(), d.String())
+}
+
+// A composite exclusive name renders every component, not just the first.
+func TestCommitCheckCompositeNameRendersEveryComponent(t *testing.T) {
+	s := schema.New()
+	s.Node("ip acl {{ name:word }} seq {{ seq:uint }}").Card(schema.ZeroToN).
+		Kind("ip-acl").Tag("acl").Key("name", "seq").Namespace("acl")
+	s.Node("mac acl {{ name:word }} seq {{ seq:uint }}").Card(schema.ZeroToN).
+		Kind("mac-acl").Tag("acl").Key("name", "seq").Namespace("acl")
+	d := checkText(t, s, "ip acl L seq 10\nmac acl L seq 10\n")
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), `name "L,10" under label "acl"`)
+}
+
+// Members match exclusive args by position, so the arg names may differ.
+func TestCommitCheckNamespaceMatchesUniqueArgsByPosition(t *testing.T) {
+	build := func() *schema.Schema {
+		s := schema.New()
+		s.Node("ip acl {{ name:word }} owner {{ own:word }}").
+			Card(schema.ZeroToN).Kind("ip-acl").Tag("acl").
+			Key("name", "own").Unique("name").Namespace("acl")
+		s.Node("mac acl {{ id:word }} owner {{ own:word }}").
+			Card(schema.ZeroToN).Kind("mac-acl").Tag("acl").
+			Key("id", "own").Unique("id").Namespace("acl")
+		return s
+	}
+	hit := checkText(t, build(), "ip acl L owner a\nmac acl L owner b\n")
+	require.True(t, hit.HasErrors(), hit.String())
+	assert.Contains(t, hit.String(), `name "L" under label "acl"`)
+	miss := checkText(t, build(), "ip acl L owner a\nmac acl M owner b\n")
+	assert.False(t, miss.HasErrors(), miss.String())
+}
