@@ -7,7 +7,6 @@ import (
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/value"
 )
 
 // FuzzParse checks that arbitrary input never panics and always returns a config.
@@ -22,11 +21,6 @@ func FuzzParse(f *testing.F) {
 	s.Node("banner motd {{ delim:word }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
 	// A trailing capture is what lets an opener close on its own line.
-	if err := s.Registry.Register(
-		value.Type{Name: "text", Pattern: `.*`},
-	); err != nil {
-		f.Fatal(err)
-	}
 	s.Node("banner login {{ delim:word }}{{ msg:text }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
 

@@ -18,7 +18,6 @@ import (
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/transform"
-	"github.com/acidsailor/confetti/value"
 )
 
 func engineSchema() *schema.Schema {
@@ -210,10 +209,6 @@ func TestEngineImportTextTransformAfterInlineBlockClose(t *testing.T) {
 	// An opener that closes on its own line protects that line only, not the next one.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
-	require.NoError(
-		t,
-		s.Registry.Register(value.Type{Name: "text", Pattern: `.*`}),
-	)
 	s.Node("banner motd {{ delim:word }}{{ msg:text }}").
 		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
 	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne).MarkIdempotent()

@@ -66,7 +66,7 @@ func Parse(
 					diag.Warning,
 					"%q ends with block terminator %q but the text before it does not bind the same command; opening a multi-line block",
 					st.txt,
-					st.term,
+					st.def.Block.Term(st.fields),
 				)
 			}
 			tn := liveParent(
