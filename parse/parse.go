@@ -59,12 +59,22 @@ func Parse(
 			}
 			nodes = append(nodes[:st.depth-1], nil)
 		case stepMatched:
+			if st.nearClose {
+				// The opener would otherwise swallow the rest of the input without a diagnostic.
+				d.AddAt(
+					st.lineNo,
+					diag.Warning,
+					"%q ends with block terminator %q but the text before it does not bind the same command; opening a multi-line block",
+					st.txt,
+					st.term,
+				)
+			}
 			tn := liveParent(
 				nodes[:st.depth-1],
 			).AddChild(schema.NewNode(st.txt))
 			tn.Def, tn.Fields, tn.RealIndent = st.def, st.fields, st.indent
 			tn.Line = st.lineNo
-			// Use a non-nil empty body to distinguish an empty block from a non-block node.
+			// An inline close has no body lines; any other opener starts capturing them.
 			if st.closesBlock {
 				tn.Block = []string{}
 			} else if st.opensBlock {

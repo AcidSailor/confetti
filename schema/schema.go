@@ -488,7 +488,7 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 }
 
 // BlockDelim opens a raw block terminated by a non-empty captured argument and excludes child nodes.
-// An opener that ends with its terminator closes on that line when the remaining text still matches; a required trailing capture rejects an empty one-line body.
+// An opener that ends with its terminator closes on that line when the shorter text still binds the same definition and delimiter; otherwise the block opens and Parse reports a Warning.
 func (n *Def) BlockDelim(arg string) *Def {
 	// Reject empty terminators because they close at the first blank line and bypass block protection.
 	n.mustNonEmptyArg("BlockDelim", arg)

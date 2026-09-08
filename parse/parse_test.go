@@ -8,6 +8,7 @@ import (
 
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/internal/testtypes"
+	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/value"
 )
@@ -304,7 +305,7 @@ func TestParseBlockInlineCloseMultiLineUnchanged(t *testing.T) {
 	assert.Equal(t, []string{"line two ^"}, top[0].Block)
 }
 
-func TestParseBlockInlineCloseStillReportsUnterminated(t *testing.T) {
+func TestParseBlockOpenerWithoutTerminatorStaysOpen(t *testing.T) {
 	d := diag.New()
 	Parse(inlineBlockSchema(), "banner motd ^ open\nhostname sw1\n", Reject, d)
 	assert.True(t, d.HasErrors())
@@ -322,4 +323,157 @@ func TestParseBlockUntilOpenerIgnoresTerminator(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "certificate ca quit", cfg.Root.Children[0].Text)
 	assert.Equal(t, []string{"MIIB"}, cfg.Root.Children[0].Block)
+}
+
+// nearCloseSchema requires at least one character of banner text, so an empty one-line body cannot re-bind.
+func nearCloseSchema() *schema.Schema {
+	s := schema.New()
+	s.Node("banner motd {{ delim:word }}{{ body:rest }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne)
+	return s
+}
+
+func TestParseBlockInlineCloseCutsToFirstTerminator(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"banner motd ^ hi ^ ^\nhostname sw1\n",
+		Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	top := cfg.Root.Children
+	require.Len(t, top, 2)
+	// Cutting only the last terminator would leave a node that re-parses shorter.
+	assert.Equal(t, "banner motd ^ hi", top[0].Text)
+	assert.Equal(t, []string{}, top[0].Block)
+	assert.Equal(t, "hostname sw1", top[1].Text)
+}
+
+func TestParseBlockInlineCloseRoundTrips(t *testing.T) {
+	s := inlineBlockSchema()
+	for _, in := range []string{
+		"banner motd ^ Authorized users only. ^\n",
+		"banner motd ^ hi ^ ^\n",
+		"banner motd ^^^\n",
+		"banner motd ^^\n",
+	} {
+		first := render.Render(Parse(s, in, Reject, diag.New()))
+		d := diag.New()
+		second := render.Render(Parse(s, first, Reject, d))
+		require.False(t, d.HasErrors(), "%q: %s", in, d.String())
+		assert.Equal(t, first, second, "render is not idempotent for %q", in)
+	}
+}
+
+func TestParseBlockInlineCloseRejectsDifferentDef(t *testing.T) {
+	s := schema.New()
+	if err := s.Registry.Register(
+		value.Type{Name: "text", Pattern: `.*`},
+	); err != nil {
+		panic(err)
+	}
+	// A sibling block with the same delimiter arg makes the terminator check agree.
+	s.Node("banner motd {{ delim:word }}{{ msg:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("banner motd {{ delim:word }} hello").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	want := s.Roots[0]
+	d := diag.New()
+	cfg := Parse(s, "banner motd ^ hello ^\nhostname sw1\n", Reject, d)
+	// The shorter text binds the sibling, so the opener may not close on itself.
+	require.Len(t, cfg.Root.Children, 1)
+	got := cfg.Root.Children[0]
+	assert.Equal(t, want, got.Def)
+	assert.Equal(t, "banner motd ^ hello ^", got.Text)
+	assert.Equal(t, []string{"hostname sw1"}, got.Block)
+}
+
+func TestParseBlockInlineCloseRejectsDifferentTerminator(t *testing.T) {
+	s := schema.New()
+	s.Node("banner {{ msg:rest }} {{ delim:word }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	d := diag.New()
+	cfg := Parse(s, "banner ^ hello ^\n", Reject, d)
+	// The shorter text re-binds delim to "hello", so the delimiter would change.
+	assert.Equal(t, "banner ^ hello ^", cfg.Root.Children[0].Text)
+	assert.Equal(t, "^", cfg.Root.Children[0].Fields["delim"])
+}
+
+func TestParseBlockInlineCloseMultiCharDelimiter(t *testing.T) {
+	s := schema.New()
+	s.Node("banner motd {{ delim:word }} {{ msg:rest }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne)
+	d := diag.New()
+	cfg := Parse(s, "banner motd EOF hello EOF\nhostname sw1\n", Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	top := cfg.Root.Children
+	require.Len(t, top, 2)
+	assert.Equal(t, "banner motd EOF hello", top[0].Text)
+	assert.Equal(t, "EOF", top[0].Fields["delim"])
+	assert.Equal(t, "hostname sw1", top[1].Text)
+}
+
+func TestParseBlockInlineCloseNested(t *testing.T) {
+	s := schema.New()
+	if err := s.Registry.Register(
+		value.Type{Name: "text", Pattern: `.*`},
+	); err != nil {
+		panic(err)
+	}
+	iface := s.Node("interface {{ name:word }}").Card(schema.ZeroToN)
+	iface.Child("banner login {{ delim:word }}{{ msg:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	iface.Child("mtu {{ size:uint }}").Card(schema.ZeroToOne)
+	d := diag.New()
+	cfg := Parse(
+		s,
+		"interface eth1\n  banner login ^ hi ^\n  mtu 9000\n",
+		Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	kids := cfg.Root.Children[0].Children
+	require.Len(t, kids, 2)
+	assert.Equal(t, "banner login ^ hi", kids[0].Text)
+	assert.Equal(t, "mtu 9000", kids[1].Text)
+}
+
+func TestParseIndentAfterInlineCloseStrict(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"banner motd ^ hi ^\n  hostname sw1\n",
+		Reject,
+		d,
+	)
+	// A block definition has no children, so a deeper line is unknown.
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), `2: error: unknown command: "hostname sw1"`)
+	require.Len(t, cfg.Root.Children, 1)
+}
+
+func TestParseBlockNearCloseWarns(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		nearCloseSchema(),
+		"banner motd ^^\nhostname sw1\n^\n",
+		Reject,
+		d,
+	)
+	// Without the Warning the opener would absorb hostname sw1 silently.
+	require.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "1: warning:")
+	assert.Contains(t, d.String(), "ends with block terminator")
+	require.Len(t, cfg.Root.Children, 1)
+	assert.Equal(t, []string{"hostname sw1"}, cfg.Root.Children[0].Block)
+}
+
+func TestParseBlockPlainOpenerDoesNotWarn(t *testing.T) {
+	d := diag.New()
+	Parse(blockSchema(), "banner motd ^\nbody\n^\ninterface eth1\n", Reject, d)
+	// Every BlockDelim opener ends with its delimiter; only a second one is ambiguous.
+	assert.Empty(t, d.Items)
 }

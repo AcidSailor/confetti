@@ -7,6 +7,7 @@ import (
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
+	"github.com/acidsailor/confetti/value"
 )
 
 // FuzzParse checks that arbitrary input never panics and always returns a config.
@@ -20,6 +21,14 @@ func FuzzParse(f *testing.F) {
 	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
 	s.Node("banner motd {{ delim:word }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
+	// A trailing capture is what lets an opener close on its own line.
+	if err := s.Registry.Register(
+		value.Type{Name: "text", Pattern: `.*`},
+	); err != nil {
+		f.Fatal(err)
+	}
+	s.Node("banner login {{ delim:word }}{{ msg:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
 
 	seeds := []string{
 		"",
@@ -32,6 +41,11 @@ func FuzzParse(f *testing.F) {
 		"banner motd ^\nunterminated\n",
 		"banner motd ^\n^\n",
 		"banner motd ^\n\n  ! weird\n^\n",
+		"banner login ^ hi ^\n",
+		"banner login ^^\n",
+		"banner login ^ a ^ b ^\n",
+		"banner login ^ hi ^ ^\n",
+		"banner login ^\nhi\n^\n",
 	}
 	for _, sd := range seeds {
 		f.Add(sd)
@@ -57,6 +71,17 @@ func FuzzParse(f *testing.F) {
 			first := render.Render(cfg)
 			if second := render.Render(cfg); first != second {
 				t.Fatalf("Render not deterministic for %q", in)
+			}
+			// Canonical text is idempotent: re-parsing it must render identically.
+			rd := diag.New()
+			again := render.Render(Parse(s, first, unknown, rd))
+			if again != first {
+				t.Fatalf(
+					"render not idempotent for %q: %q then %q",
+					in,
+					first,
+					again,
+				)
 			}
 		}
 	})

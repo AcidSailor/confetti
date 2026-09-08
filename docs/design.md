@@ -351,8 +351,20 @@ retain the source line and report diagnostics.
 - **A `BlockDelim` opener can carry its own terminator.** When the opener
   ends with the terminator and the text before it still binds the same
   definition and delimiter, the block closes on that line with an empty body.
-  The node equals the multi-line spelling, and render emits the multi-line
-  form. `BlockUntil` and lines inside a block are unchanged.
+  Trailing terminators are cut until the shorter text no longer re-binds, so
+  the node re-parses unchanged from its own rendered form. A terminator
+  inside the opener text is body text, not a close. The body stays in the
+  opener's trailing capture and is therefore normalized, not byte-exact; the
+  node equals the one parsed from the same opener with the terminator on the
+  next line, not the one parsed from a multi-line body. Render emits the
+  multi-line form. `BlockUntil` and lines inside a block are unchanged.
+- **An opener that carries a terminator it cannot close on reports a
+  Warning.** Every `BlockDelim` opener ends with its delimiter, so the
+  Warning needs a second occurrence: the line ends with the terminator, the
+  text before it still contains one, and that text does not re-bind the same
+  definition and delimiter. The block then opens and consumes following
+  lines. Without the Warning that consumption is silent whenever a later line
+  happens to match the terminator.
 - **Text transforms never run inside block spans.** Span detection is
   level-aware (`parse.BlockSpans` mirrors the parser's indent walk) and the
   guard protects the union of the raw-text walk and the

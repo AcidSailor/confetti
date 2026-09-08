@@ -18,6 +18,7 @@ import (
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
 	"github.com/acidsailor/confetti/transform"
+	"github.com/acidsailor/confetti/value"
 )
 
 func engineSchema() *schema.Schema {
@@ -203,6 +204,39 @@ func TestEngineExportTextTransformSkipsBlocks(t *testing.T) {
 	out, _ := e.Render(cfg)
 	assert.Contains(t, out, "secret body line")
 	assert.Contains(t, out, "description REDACTED")
+}
+
+func TestEngineImportTextTransformAfterInlineBlockClose(t *testing.T) {
+	// An opener that closes on its own line protects that line only, not the next one.
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	require.NoError(
+		t,
+		s.Registry.Register(value.Type{Name: "text", Pattern: `.*`}),
+	)
+	s.Node("banner motd {{ delim:word }}{{ msg:text }}").
+		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
+	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne).MarkIdempotent()
+	sub, err := transform.PerLineSub(`secret`, "REDACTED")
+	require.NoError(t, err)
+	e := confetti.New(s,
+		confetti.WithUnknown(parse.Reject),
+		confetti.WithImportText(sub),
+	)
+
+	inline, d := e.Import("banner motd ^ secret ^\nhostname secret\n")
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "banner motd ^ secret", inline.Root.Children[0].Text)
+	assert.Equal(t, "hostname REDACTED", inline.Root.Children[1].Text)
+
+	multi, md := e.Import("banner motd ^\nhostname secret\n^\n")
+	require.False(t, md.HasErrors(), md.String())
+	// The same line inside a multi-line body stays raw.
+	assert.Equal(
+		t,
+		[]string{"hostname secret"},
+		multi.Root.Children[0].Block,
+	)
 }
 
 func TestEngineExportTextTransformReachesRemediationArtifact(t *testing.T) {

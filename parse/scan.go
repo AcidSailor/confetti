@@ -31,8 +31,10 @@ type step struct {
 	depth       int // stack depth after this line, including the root frame
 	def         *schema.Def
 	fields      map[string]string
-	opensBlock  bool
-	closesBlock bool // the opener also carried its terminator, so the body is empty
+	opensBlock  bool   // the definition declares a block; closesBlock reports whether one stayed open
+	closesBlock bool   // the opener also carried its terminator, so the body is empty
+	nearClose   bool   // the opener carried a terminator it could not close on, so the block stays open
+	term        string // the terminator of an opened block, reported with nearClose
 }
 
 // scanner drives the indent-stack walk that Parse and BlockSpans must perform identically.
@@ -83,12 +85,13 @@ func (sc *scanner) line(raw string) step {
 		}
 	}
 	opens := def.Block.Kind != schema.BlockNone
-	closes := false
+	closes, near, term := false, false, ""
 	if opens {
-		term := def.Block.Term(fields)
+		term = def.Block.Term(fields)
 		if head, f, ok := inlineClose(top.children, def, txt, term); ok {
 			txt, fields, closes = head, f, true
 		} else {
+			near = carriesTerm(def, txt, term)
 			sc.term = term
 		}
 	}
@@ -103,10 +106,12 @@ func (sc *scanner) line(raw string) step {
 		fields:      fields,
 		opensBlock:  opens,
 		closesBlock: closes,
+		nearClose:   near,
+		term:        term,
 	}
 }
 
-// inlineClose reports whether a BlockDelim opener ends with its own terminator and still binds the same definition and delimiter without it.
+// inlineClose cuts trailing terminators off a BlockDelim opener while the shorter text still binds the same definition and delimiter, and returns the shortest such text.
 func inlineClose(
 	candidates []*schema.Def,
 	def *schema.Def,
@@ -115,6 +120,26 @@ func inlineClose(
 	if def.Block.Kind != schema.BlockDelim {
 		return "", nil, false
 	}
+	head, fields, ok := cutTerm(candidates, def, txt, term)
+	if !ok {
+		return "", nil, false
+	}
+	// Cut to the first terminator so the node re-parses unchanged from its rendered multi-line form.
+	for {
+		shorter, f, ok := cutTerm(candidates, def, head, term)
+		if !ok {
+			return head, fields, true
+		}
+		head, fields = shorter, f
+	}
+}
+
+// cutTerm removes one trailing terminator and re-matches the shorter text against all candidates at the level.
+func cutTerm(
+	candidates []*schema.Def,
+	def *schema.Def,
+	txt, term string,
+) (string, map[string]string, bool) {
 	head, ok := strings.CutSuffix(txt, term)
 	if !ok {
 		return "", nil, false
@@ -125,6 +150,15 @@ func inlineClose(
 		return "", nil, false
 	}
 	return head, fields, true
+}
+
+// carriesTerm reports whether a BlockDelim opener ends with a terminator that is not just its own delimiter token.
+func carriesTerm(def *schema.Def, txt, term string) bool {
+	if def.Block.Kind != schema.BlockDelim {
+		return false
+	}
+	head, ok := strings.CutSuffix(txt, term)
+	return ok && strings.Contains(head, term)
 }
 
 func countIndent(line string) int {
