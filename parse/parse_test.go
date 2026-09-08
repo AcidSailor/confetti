@@ -9,6 +9,7 @@ import (
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/schema"
+	"github.com/acidsailor/confetti/value"
 )
 
 func miniSchema() *schema.Schema {
@@ -222,4 +223,91 @@ func TestParseUnknownDiagCarriesLine(t *testing.T) {
 	assert.Equal(t, 1, ld.Items[0].Line)
 	// The aggregate "N nodes dropped" summary has no single line.
 	assert.Equal(t, 0, ld.Items[1].Line)
+}
+
+// inlineBlockSchema carries banner text on the opener so a terminator can land on the opening line.
+func inlineBlockSchema() *schema.Schema {
+	s := schema.New()
+	if err := s.Registry.Register(value.Type{Name: "text", Pattern: `.*`}); err != nil {
+		panic(err)
+	}
+	s.Node("banner motd {{ delim:word }}{{ first:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("certificate {{ name:rest }}").
+		Card(schema.ZeroToN).BlockUntil("quit")
+	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne)
+	return s
+}
+
+func TestParseBlockInlineClose(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"banner motd ^ Authorized users only. ^\nhostname sw1\n",
+		Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	top := cfg.Root.Children
+	require.Len(t, top, 2)
+	assert.Equal(t, "banner motd ^ Authorized users only.", top[0].Text)
+	assert.Equal(t, "^", top[0].Fields["delim"])
+	assert.Equal(t, []string{}, top[0].Block)
+	assert.Equal(t, "hostname sw1", top[1].Text)
+}
+
+func TestParseBlockInlineCloseEqualsMultiLine(t *testing.T) {
+	s := inlineBlockSchema()
+	one := Parse(s, "banner motd ^ Authorized users only. ^\n", Reject, diag.New())
+	multi := Parse(
+		s,
+		"banner motd ^ Authorized users only.\n^\n",
+		Reject,
+		diag.New(),
+	)
+	assert.True(t, one.Root.Children[0].SameValue(multi.Root.Children[0]))
+}
+
+func TestParseBlockInlineCloseEmptyBody(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(inlineBlockSchema(), "banner motd ^^\nhostname sw1\n", Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	top := cfg.Root.Children
+	require.Len(t, top, 2)
+	assert.Equal(t, "banner motd ^", top[0].Text)
+	assert.Equal(t, []string{}, top[0].Block)
+}
+
+func TestParseBlockInlineCloseMultiLineUnchanged(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"banner motd ^ line one\nline two ^\n^\nhostname sw1\n",
+		Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	top := cfg.Root.Children
+	require.Len(t, top, 2)
+	assert.Equal(t, []string{"line two ^"}, top[0].Block)
+}
+
+func TestParseBlockInlineCloseStillReportsUnterminated(t *testing.T) {
+	d := diag.New()
+	Parse(inlineBlockSchema(), "banner motd ^ open\nhostname sw1\n", Reject, d)
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "block not terminated before end of input")
+}
+
+func TestParseBlockUntilOpenerIgnoresTerminator(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"certificate ca quit\nMIIB\nquit\n",
+		Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "certificate ca quit", cfg.Root.Children[0].Text)
+	assert.Equal(t, []string{"MIIB"}, cfg.Root.Children[0].Block)
 }

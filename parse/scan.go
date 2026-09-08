@@ -24,14 +24,15 @@ const (
 
 // step reports how the scanner classified one input line.
 type step struct {
-	kind       stepKind
-	lineNo     int // 1-based
-	txt        string
-	indent     int
-	depth      int // stack depth after this line, including the root frame
-	def        *schema.Def
-	fields     map[string]string
-	opensBlock bool
+	kind        stepKind
+	lineNo      int // 1-based
+	txt         string
+	indent      int
+	depth       int // stack depth after this line, including the root frame
+	def         *schema.Def
+	fields      map[string]string
+	opensBlock  bool
+	closesBlock bool // the opener also carried its terminator, so the body is empty
 }
 
 // scanner drives the indent-stack walk that Parse and BlockSpans must perform identically.
@@ -82,20 +83,48 @@ func (sc *scanner) line(raw string) step {
 		}
 	}
 	opens := def.Block.Kind != schema.BlockNone
+	closes := false
 	if opens {
-		sc.term = def.Block.Term(fields)
+		term := def.Block.Term(fields)
+		if head, f, ok := inlineClose(top.children, def, txt, term); ok {
+			txt, fields, closes = head, f, true
+		} else {
+			sc.term = term
+		}
 	}
 	sc.stack = append(sc.stack, frame{indent: indent, children: def.Children})
 	return step{
-		kind:       stepMatched,
-		lineNo:     sc.lineNo,
-		txt:        txt,
-		indent:     indent,
-		depth:      len(sc.stack),
-		def:        def,
-		fields:     fields,
-		opensBlock: opens,
+		kind:        stepMatched,
+		lineNo:      sc.lineNo,
+		txt:         txt,
+		indent:      indent,
+		depth:       len(sc.stack),
+		def:         def,
+		fields:      fields,
+		opensBlock:  opens,
+		closesBlock: closes,
 	}
+}
+
+// inlineClose reports whether a BlockDelim opener ends with its own terminator and still binds the same definition and delimiter without it.
+func inlineClose(
+	candidates []*schema.Def,
+	def *schema.Def,
+	txt, term string,
+) (string, map[string]string, bool) {
+	if def.Block.Kind != schema.BlockDelim {
+		return "", nil, false
+	}
+	head, ok := strings.CutSuffix(txt, term)
+	if !ok {
+		return "", nil, false
+	}
+	head = strings.TrimRight(head, " ")
+	d, fields, ok := schema.MatchChild(candidates, head)
+	if !ok || d != def || d.Block.Term(fields) != term {
+		return "", nil, false
+	}
+	return head, fields, true
 }
 
 func countIndent(line string) int {

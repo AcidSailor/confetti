@@ -64,8 +64,10 @@ func Parse(
 			).AddChild(schema.NewNode(st.txt))
 			tn.Def, tn.Fields, tn.RealIndent = st.def, st.fields, st.indent
 			tn.Line = st.lineNo
-			if st.opensBlock {
-				// Use a non-nil empty body to distinguish an empty block from a non-block node.
+			// Use a non-nil empty body to distinguish an empty block from a non-block node.
+			if st.closesBlock {
+				tn.Block = []string{}
+			} else if st.opensBlock {
 				blk = &blockCapture{node: tn, body: []string{}}
 			}
 			nodes = append(nodes[:st.depth-1], tn)

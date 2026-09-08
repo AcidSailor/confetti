@@ -63,3 +63,11 @@ func TestBlockSpansTerminatorTrailingWhitespace(t *testing.T) {
 	spans := BlockSpans(blockSchema(), "banner motd ^\nbody\n^  \nmore")
 	assert.Equal(t, []bool{true, true, true, false}, spans)
 }
+
+func TestBlockSpansInlineCloseMarksOpenerOnly(t *testing.T) {
+	spans := BlockSpans(
+		inlineBlockSchema(),
+		"banner motd ^ hello ^\nhostname sw1\n",
+	)
+	assert.Equal(t, []bool{true, false, false}, spans)
+}

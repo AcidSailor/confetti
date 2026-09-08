@@ -348,6 +348,11 @@ retain the source line and report diagnostics.
   input is not always byte-identical after rendering. Rollback therefore
   restores canonical parsed running configuration, not original bytes. Lines
   dropped by a `parse.Drop` import cannot be restored.
+- **A `BlockDelim` opener can carry its own terminator.** When the opener
+  ends with the terminator and the text before it still binds the same
+  definition and delimiter, the block closes on that line with an empty body.
+  The node equals the multi-line spelling, and render emits the multi-line
+  form. `BlockUntil` and lines inside a block are unchanged.
 - **Text transforms never run inside block spans.** Span detection is
   level-aware (`parse.BlockSpans` mirrors the parser's indent walk) and the
   guard protects the union of the raw-text walk and the
