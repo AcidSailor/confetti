@@ -225,7 +225,7 @@ func TestParseUnknownDiagCarriesLine(t *testing.T) {
 	assert.Equal(t, 0, ld.Items[1].Line)
 }
 
-// inlineBlockSchema carries banner text on the opener so a terminator can land on the opening line.
+// inlineBlockSchema accepts banner text and a terminator on the opening line.
 func inlineBlockSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -245,7 +245,7 @@ func TestParseBlockInlineClose(t *testing.T) {
 			"banner motd ^ Authorized users only.",
 		},
 		{"empty body", "banner motd ^^", "banner motd ^"},
-		// Cutting only the last terminator leaves a node that re-parses shorter.
+		// Remove repeated terminators to keep canonical output idempotent.
 		{"trailing terminators", "banner motd ^ hi ^ ^", "banner motd ^ hi"},
 	}
 	for _, tc := range cases {
@@ -361,7 +361,7 @@ func TestParseBlockInlineCloseRoundTrips(t *testing.T) {
 func TestParseBlockInlineCloseRejectsDifferentDef(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
-	// A sibling block with the same delimiter arg makes the terminator check agree.
+	// Both definitions capture the same delimiter, so only the definition check rejects the close.
 	s.Node("banner motd {{ delim:word }}{{ msg:text }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
 	s.Node("banner motd {{ delim:word }} hello").
@@ -369,7 +369,6 @@ func TestParseBlockInlineCloseRejectsDifferentDef(t *testing.T) {
 	want := s.Roots[0]
 	d := diag.New()
 	cfg := Parse(s, "banner motd ^ hello ^\nhostname sw1\n", Reject, d)
-	// The shorter text binds the sibling, so the opener may not close on itself.
 	require.Len(t, cfg.Root.Children, 1)
 	got := cfg.Root.Children[0]
 	assert.Equal(t, want, got.Def)
@@ -383,7 +382,7 @@ func TestParseBlockInlineCloseRejectsDifferentTerminator(t *testing.T) {
 		Card(schema.ZeroToOne).BlockDelim("delim")
 	d := diag.New()
 	cfg := Parse(s, "banner ^ hello ^\n", Reject, d)
-	// The shorter text re-binds delim to "hello", so the delimiter would change.
+	// Removing the terminator changes the captured delimiter to "hello".
 	assert.Equal(t, "banner ^ hello ^", cfg.Root.Children[0].Text)
 	assert.Equal(t, "^", cfg.Root.Children[0].Fields["delim"])
 }
@@ -446,7 +445,7 @@ func TestParseBlockNearCloseWarns(t *testing.T) {
 		Reject,
 		d,
 	)
-	// Without the Warning the opener would absorb hostname sw1 silently.
+	// The warning reports that hostname sw1 becomes block content.
 	require.False(t, d.HasErrors(), d.String())
 	assert.Contains(t, d.String(), "1: warning:")
 	assert.Contains(t, d.String(), "ends with block terminator")
@@ -457,6 +456,6 @@ func TestParseBlockNearCloseWarns(t *testing.T) {
 func TestParseBlockPlainOpenerDoesNotWarn(t *testing.T) {
 	d := diag.New()
 	Parse(blockSchema(), "banner motd ^\nbody\n^\ninterface eth1\n", Reject, d)
-	// Every BlockDelim opener ends with its delimiter; only a second one is ambiguous.
+	// The delimiter alone is not an inline close.
 	assert.Empty(t, d.Items)
 }

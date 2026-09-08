@@ -73,7 +73,6 @@ func TestBlockSpansInlineCloseMarksOpenerOnly(t *testing.T) {
 }
 
 func TestBlockSpansNearCloseKeepsBlockOpen(t *testing.T) {
-	// The opener could not close on itself, so the block still runs to its terminator.
 	spans := BlockSpans(nearCloseSchema(), "banner motd ^^\nhostname sw1\n^\n")
 	assert.Equal(t, []bool{true, true, true, false}, spans)
 }

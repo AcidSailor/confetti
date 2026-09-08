@@ -24,9 +24,8 @@ Constructs supported by reference configurations or documentation:
 - `address-family {{afi}}` and `{{afi}} {{safi}}` share children through
   `Adopt`. Both are needed because reference output includes
   `address-family ipv4` without a SAFI token.
-- `banner motd {{delim}}` provides the multi-line block-capture fixture. It
-  has no trailing text capture, so it cannot exercise the engine's one-line
-  block close. Beta documentation describes only single-line banners.
+- `banner motd {{delim}}` tests multi-line block capture.
+  Beta documentation describes only single-line banners.
 - `interface {{name:ethport}}` models physical-port resets with
   `NegateDefault`; `{{name:ifname}}` models logical-port deletion. The
   templates have equal literal specificity, so the physical definition must
@@ -58,12 +57,10 @@ Unverified behavior and fixture limits:
 - `Baseline()` models VLAN 1 and the default VRF as device-provided, and
   `vrf member default` as their referrer. The device behavior was not
   confirmed on a lab image.
-- Single-line banners (`banner motd ^text^`) are not modeled. The engine
-  supports them through a trailing text capture on the opener; the fixture
-  template has none.
-- A device checked on 2026-09-08 drops an empty banner (`banner motd ^^`)
-  from its running configuration, so an empty one-line body is not real
-  device output.
+- Single-line banners (`banner motd ^text^`) require a trailing text capture,
+  which the fixture template does not have.
+- The device checked on 2026-09-08 omits empty banners (`banner motd ^^`)
+  from its running configuration. Empty inline blocks are parser test cases.
 
 ## beta (OcNOS lineage)
 

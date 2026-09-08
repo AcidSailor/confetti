@@ -32,8 +32,8 @@ type step struct {
 	def         *schema.Def
 	fields      map[string]string
 	opensBlock  bool // the definition declares a block
-	closesBlock bool // the opener also carried its terminator, so the body is empty
-	nearClose   bool // the opener carried a terminator it could not close on, so the block stays open
+	closesBlock bool // the block closes on this line with an empty body
+	nearClose   bool // an invalid inline close leaves the block open
 }
 
 // scanner drives the indent-stack walk that Parse and BlockSpans must perform identically.
@@ -87,7 +87,6 @@ func (sc *scanner) line(raw string) step {
 	closes, near := false, false
 	if opens {
 		term := def.Block.Term(fields)
-		// Only a BlockDelim opener can carry its own terminator.
 		if def.Block.Kind == schema.BlockDelim {
 			if head, f, ok := inlineClose(top.children, def, txt, term); ok {
 				txt, fields, closes = head, f, true
@@ -114,7 +113,7 @@ func (sc *scanner) line(raw string) step {
 	}
 }
 
-// inlineClose cuts trailing terminators off a BlockDelim opener while the shorter text still binds the same definition and delimiter, and returns the shortest such text.
+// inlineClose removes trailing terminators while preserving the matched definition and delimiter.
 func inlineClose(
 	candidates []*schema.Def,
 	def *schema.Def,
@@ -122,7 +121,7 @@ func inlineClose(
 ) (string, map[string]string, bool) {
 	var fields map[string]string
 	closed := false
-	// Cut every trailing terminator so the node re-parses unchanged from its rendered multi-line form.
+	// Repeated removal keeps canonical output idempotent.
 	for {
 		head, f, ok := cutTerm(candidates, def, txt, term)
 		if !ok {
@@ -132,7 +131,7 @@ func inlineClose(
 	}
 }
 
-// cutTerm removes one trailing terminator and re-matches the shorter text against all candidates at the level.
+// cutTerm removes one trailing terminator if the remaining text binds the same definition and delimiter.
 func cutTerm(
 	candidates []*schema.Def,
 	def *schema.Def,
@@ -143,7 +142,7 @@ func cutTerm(
 		return "", nil, false
 	}
 	head = strings.TrimRight(head, " ")
-	// The delimiter is captured from the shorter text, so a head without it cannot re-bind.
+	// The remaining text must still contain the captured delimiter.
 	if !strings.Contains(head, term) {
 		return "", nil, false
 	}
@@ -154,7 +153,7 @@ func cutTerm(
 	return head, fields, true
 }
 
-// carriesTerm reports whether an opener ends with a terminator that is not just its own delimiter token.
+// carriesTerm reports whether a trailing terminator has another occurrence before it.
 func carriesTerm(txt, term string) bool {
 	head, ok := strings.CutSuffix(txt, term)
 	return ok && strings.Contains(head, term)

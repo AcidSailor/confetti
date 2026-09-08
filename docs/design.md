@@ -348,23 +348,23 @@ retain the source line and report diagnostics.
   input is not always byte-identical after rendering. Rollback therefore
   restores canonical parsed running configuration, not original bytes. Lines
   dropped by a `parse.Drop` import cannot be restored.
-- **A `BlockDelim` opener can carry its own terminator.** When the opener
-  ends with the terminator and the text before it still binds the same
-  definition and delimiter, the block closes on that line with an empty body.
-  Trailing terminators are cut until the shorter text no longer re-binds, so
-  the node re-parses unchanged from its own rendered form. A terminator
-  inside the opener text is body text, not a close. The body stays in the
-  opener's trailing capture and is therefore normalized, not byte-exact; the
-  node equals the one parsed from the same opener with the terminator on the
-  next line, not the one parsed from a multi-line body. Render emits the
-  multi-line form. `BlockUntil` and lines inside a block are unchanged.
-- **An opener that carries a terminator it cannot close on reports a
-  Warning.** Every `BlockDelim` opener ends with its delimiter, so the
-  Warning needs a second occurrence: the line ends with the terminator, the
-  text before it still contains one, and that text does not re-bind the same
-  definition and delimiter. The block then opens and consumes following
-  lines. Without the Warning that consumption is silent whenever a later line
-  happens to match the terminator.
+- **A `BlockDelim` block can close on its opening line.** The parser removes
+  trailing terminators while the remaining text matches the same definition
+  and delimiter against all candidates at that level. Repeated removal keeps
+  canonical output idempotent. Terminators within the remaining text stay
+  literal.
+
+  Inline text stays in the opener's trailing capture and is normalized. The
+  node has an empty `Block` and equals one parsed with the terminator on the
+  next line. Text on separate body lines is stored byte-exact in `Block`, so
+  those nodes differ. Render puts the terminator on a separate line. Inline
+  close requires a trailing text capture and applies only to `BlockDelim`
+  openers.
+- **An invalid inline close reports a Warning and leaves the block open.**
+  The warning requires a trailing terminator, another occurrence before it,
+  and failure to match the shorter text to the same definition and delimiter.
+  A plain opener with only its delimiter does not warn. The warning prevents
+  silent capture of following lines when a later terminator closes the block.
 - **Text transforms never run inside block spans.** Span detection is
   level-aware (`parse.BlockSpans` mirrors the parser's indent walk) and the
   guard protects the union of the raw-text walk and the

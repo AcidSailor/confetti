@@ -206,7 +206,7 @@ func TestEngineExportTextTransformSkipsBlocks(t *testing.T) {
 }
 
 func TestEngineImportTextTransformAfterInlineBlockClose(t *testing.T) {
-	// An opener that closes on its own line protects that line only, not the next one.
+	// An inline block protects only its opening line from text transforms.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("banner motd {{ delim:word }}{{ msg:text }}").
@@ -226,7 +226,7 @@ func TestEngineImportTextTransformAfterInlineBlockClose(t *testing.T) {
 
 	multi, md := e.Import("banner motd ^\nhostname secret\n^\n")
 	require.False(t, md.HasErrors(), md.String())
-	// The same line inside a multi-line body stays raw.
+	// Block body lines retain their original text.
 	assert.Equal(
 		t,
 		[]string{"hostname secret"},

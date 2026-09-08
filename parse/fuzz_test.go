@@ -9,7 +9,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// FuzzParse checks that arbitrary input never panics and always returns a config.
+// FuzzParse checks parser safety, text normalization, and render determinism and idempotence.
 func FuzzParse(f *testing.F) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -20,7 +20,7 @@ func FuzzParse(f *testing.F) {
 	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
 	s.Node("banner motd {{ delim:word }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
-	// A trailing capture is what lets an opener close on its own line.
+	// The trailing capture permits inline close.
 	s.Node("banner login {{ delim:word }}{{ msg:text }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
 
@@ -66,7 +66,6 @@ func FuzzParse(f *testing.F) {
 			if second := render.Render(cfg); first != second {
 				t.Fatalf("Render not deterministic for %q", in)
 			}
-			// Canonical text is idempotent: re-parsing it must render identically.
 			rd := diag.New()
 			again := render.Render(Parse(s, first, unknown, rd))
 			if again != first {

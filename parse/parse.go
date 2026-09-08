@@ -60,7 +60,7 @@ func Parse(
 			nodes = append(nodes[:st.depth-1], nil)
 		case stepMatched:
 			if st.nearClose {
-				// The opener would otherwise swallow the rest of the input without a diagnostic.
+				// Warn before treating following lines as block content.
 				d.AddAt(
 					st.lineNo,
 					diag.Warning,
@@ -74,7 +74,7 @@ func Parse(
 			).AddChild(schema.NewNode(st.txt))
 			tn.Def, tn.Fields, tn.RealIndent = st.def, st.fields, st.indent
 			tn.Line = st.lineNo
-			// An inline close has no body lines; any other opener starts capturing them.
+			// A non-nil empty body distinguishes an empty block from a non-block node.
 			if st.closesBlock {
 				tn.Block = []string{}
 			} else if st.opensBlock {
