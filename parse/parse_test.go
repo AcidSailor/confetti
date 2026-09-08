@@ -228,7 +228,9 @@ func TestParseUnknownDiagCarriesLine(t *testing.T) {
 // inlineBlockSchema carries banner text on the opener so a terminator can land on the opening line.
 func inlineBlockSchema() *schema.Schema {
 	s := schema.New()
-	if err := s.Registry.Register(value.Type{Name: "text", Pattern: `.*`}); err != nil {
+	if err := s.Registry.Register(
+		value.Type{Name: "text", Pattern: `.*`},
+	); err != nil {
 		panic(err)
 	}
 	s.Node("banner motd {{ delim:word }}{{ first:text }}").
@@ -258,7 +260,12 @@ func TestParseBlockInlineClose(t *testing.T) {
 
 func TestParseBlockInlineCloseEqualsMultiLine(t *testing.T) {
 	s := inlineBlockSchema()
-	one := Parse(s, "banner motd ^ Authorized users only. ^\n", Reject, diag.New())
+	one := Parse(
+		s,
+		"banner motd ^ Authorized users only. ^\n",
+		Reject,
+		diag.New(),
+	)
 	multi := Parse(
 		s,
 		"banner motd ^ Authorized users only.\n^\n",
@@ -270,7 +277,12 @@ func TestParseBlockInlineCloseEqualsMultiLine(t *testing.T) {
 
 func TestParseBlockInlineCloseEmptyBody(t *testing.T) {
 	d := diag.New()
-	cfg := Parse(inlineBlockSchema(), "banner motd ^^\nhostname sw1\n", Reject, d)
+	cfg := Parse(
+		inlineBlockSchema(),
+		"banner motd ^^\nhostname sw1\n",
+		Reject,
+		d,
+	)
 	require.False(t, d.HasErrors(), d.String())
 	top := cfg.Root.Children
 	require.Len(t, top, 2)
