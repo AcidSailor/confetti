@@ -8,6 +8,7 @@ import (
 
 	"github.com/acidsailor/confetti/diag"
 	"github.com/acidsailor/confetti/internal/testtypes"
+	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
 )
 
@@ -222,4 +223,239 @@ func TestParseUnknownDiagCarriesLine(t *testing.T) {
 	assert.Equal(t, 1, ld.Items[0].Line)
 	// The aggregate "N nodes dropped" summary has no single line.
 	assert.Equal(t, 0, ld.Items[1].Line)
+}
+
+// inlineBlockSchema accepts banner text and a terminator on the opening line.
+func inlineBlockSchema() *schema.Schema {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("banner motd {{ delim:word }}{{ first:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("certificate {{ name:rest }}").
+		Card(schema.ZeroToN).BlockUntil("quit")
+	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne)
+	return s
+}
+
+func TestParseBlockInlineClose(t *testing.T) {
+	cases := []struct{ name, opener, want string }{
+		{
+			"body",
+			"banner motd ^ Authorized users only. ^",
+			"banner motd ^ Authorized users only.",
+		},
+		{"empty body", "banner motd ^^", "banner motd ^"},
+		// Remove repeated terminators to keep canonical output idempotent.
+		{"trailing terminators", "banner motd ^ hi ^ ^", "banner motd ^ hi"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := diag.New()
+			cfg := Parse(
+				inlineBlockSchema(),
+				tc.opener+"\nhostname sw1\n",
+				Reject,
+				d,
+			)
+			require.False(t, d.HasErrors(), d.String())
+			top := cfg.Root.Children
+			require.Len(t, top, 2)
+			assert.Equal(t, tc.want, top[0].Text)
+			assert.Equal(t, "^", top[0].Fields["delim"])
+			assert.Equal(t, []string{}, top[0].Block)
+			assert.Equal(t, "hostname sw1", top[1].Text)
+		})
+	}
+}
+
+func TestParseBlockInlineCloseEqualsMultiLine(t *testing.T) {
+	s := inlineBlockSchema()
+	one := Parse(
+		s,
+		"banner motd ^ Authorized users only. ^\n",
+		Reject,
+		diag.New(),
+	)
+	multi := Parse(
+		s,
+		"banner motd ^ Authorized users only.\n^\n",
+		Reject,
+		diag.New(),
+	)
+	assert.True(t, one.Root.Children[0].SameValue(multi.Root.Children[0]))
+}
+
+func TestParseBlockInlineCloseMultiLineUnchanged(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"banner motd ^ line one\nline two ^\n^\nhostname sw1\n",
+		Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	top := cfg.Root.Children
+	require.Len(t, top, 2)
+	assert.Equal(t, []string{"line two ^"}, top[0].Block)
+}
+
+func TestParseBlockOpenerWithoutTerminatorStaysOpen(t *testing.T) {
+	d := diag.New()
+	Parse(inlineBlockSchema(), "banner motd ^ open\nhostname sw1\n", Reject, d)
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), "block not terminated before end of input")
+}
+
+func TestParseBlockUntilOpenerIgnoresTerminator(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"certificate ca quit\nMIIB\nquit\n",
+		Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "certificate ca quit", cfg.Root.Children[0].Text)
+	assert.Equal(t, []string{"MIIB"}, cfg.Root.Children[0].Block)
+}
+
+func TestParseBlockUntilOpenerWithTerminatorInText(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"certificate quit quit\nMIIB\nquit\n",
+		Reject,
+		d,
+	)
+	// Only BlockDelim closes on its opener, even when the head re-binds.
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "certificate quit quit", cfg.Root.Children[0].Text)
+	assert.Equal(t, []string{"MIIB"}, cfg.Root.Children[0].Block)
+}
+
+// nearCloseSchema requires at least one character of banner text, so an empty one-line body cannot re-bind.
+func nearCloseSchema() *schema.Schema {
+	s := schema.New()
+	s.Node("banner motd {{ delim:word }}{{ body:rest }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne)
+	return s
+}
+
+func TestParseBlockInlineCloseRoundTrips(t *testing.T) {
+	s := inlineBlockSchema()
+	for _, in := range []string{
+		"banner motd ^ Authorized users only. ^\n",
+		"banner motd ^ hi ^ ^\n",
+		"banner motd ^^^\n",
+		"banner motd ^^\n",
+	} {
+		first := render.Render(Parse(s, in, Reject, diag.New()))
+		d := diag.New()
+		second := render.Render(Parse(s, first, Reject, d))
+		require.False(t, d.HasErrors(), "%q: %s", in, d.String())
+		assert.Equal(t, first, second, "render is not idempotent for %q", in)
+	}
+}
+
+func TestParseBlockInlineCloseRejectsDifferentDef(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	// Both definitions capture the same delimiter, so only the definition check rejects the close.
+	s.Node("banner motd {{ delim:word }}{{ msg:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("banner motd {{ delim:word }} hello").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	want := s.Roots[0]
+	d := diag.New()
+	cfg := Parse(s, "banner motd ^ hello ^\nhostname sw1\n", Reject, d)
+	require.Len(t, cfg.Root.Children, 1)
+	got := cfg.Root.Children[0]
+	assert.Equal(t, want, got.Def)
+	assert.Equal(t, "banner motd ^ hello ^", got.Text)
+	assert.Equal(t, []string{"hostname sw1"}, got.Block)
+}
+
+func TestParseBlockInlineCloseRejectsDifferentTerminator(t *testing.T) {
+	s := schema.New()
+	s.Node("banner {{ msg:rest }} {{ delim:word }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	d := diag.New()
+	cfg := Parse(s, "banner ^ hello ^\n", Reject, d)
+	// Removing the terminator changes the captured delimiter to "hello".
+	assert.Equal(t, "banner ^ hello ^", cfg.Root.Children[0].Text)
+	assert.Equal(t, "^", cfg.Root.Children[0].Fields["delim"])
+}
+
+func TestParseBlockInlineCloseMultiCharDelimiter(t *testing.T) {
+	s := schema.New()
+	s.Node("banner motd {{ delim:word }} {{ msg:rest }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne)
+	d := diag.New()
+	cfg := Parse(s, "banner motd EOF hello EOF\nhostname sw1\n", Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	top := cfg.Root.Children
+	require.Len(t, top, 2)
+	assert.Equal(t, "banner motd EOF hello", top[0].Text)
+	assert.Equal(t, "EOF", top[0].Fields["delim"])
+	assert.Equal(t, "hostname sw1", top[1].Text)
+}
+
+func TestParseBlockInlineCloseNested(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	iface := s.Node("interface {{ name:word }}").Card(schema.ZeroToN)
+	iface.Child("banner login {{ delim:word }}{{ msg:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	iface.Child("mtu {{ size:uint }}").Card(schema.ZeroToOne)
+	d := diag.New()
+	cfg := Parse(
+		s,
+		"interface eth1\n  banner login ^ hi ^\n  mtu 9000\n",
+		Reject,
+		d,
+	)
+	require.False(t, d.HasErrors(), d.String())
+	kids := cfg.Root.Children[0].Children
+	require.Len(t, kids, 2)
+	assert.Equal(t, "banner login ^ hi", kids[0].Text)
+	assert.Equal(t, "mtu 9000", kids[1].Text)
+}
+
+func TestParseIndentAfterInlineCloseStrict(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		inlineBlockSchema(),
+		"banner motd ^ hi ^\n  hostname sw1\n",
+		Reject,
+		d,
+	)
+	// A block definition has no children, so a deeper line is unknown.
+	assert.True(t, d.HasErrors())
+	assert.Contains(t, d.String(), `2: error: unknown command: "hostname sw1"`)
+	require.Len(t, cfg.Root.Children, 1)
+}
+
+func TestParseBlockNearCloseWarns(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		nearCloseSchema(),
+		"banner motd ^^\nhostname sw1\n^\n",
+		Reject,
+		d,
+	)
+	// The warning reports that hostname sw1 becomes block content.
+	require.False(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "1: warning:")
+	assert.Contains(t, d.String(), "ends with block terminator")
+	require.Len(t, cfg.Root.Children, 1)
+	assert.Equal(t, []string{"hostname sw1"}, cfg.Root.Children[0].Block)
+}
+
+func TestParseBlockPlainOpenerDoesNotWarn(t *testing.T) {
+	d := diag.New()
+	Parse(blockSchema(), "banner motd ^\nbody\n^\ninterface eth1\n", Reject, d)
+	// The delimiter alone is not an inline close.
+	assert.Empty(t, d.Items)
 }

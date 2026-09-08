@@ -24,14 +24,16 @@ const (
 
 // step reports how the scanner classified one input line.
 type step struct {
-	kind       stepKind
-	lineNo     int // 1-based
-	txt        string
-	indent     int
-	depth      int // stack depth after this line, including the root frame
-	def        *schema.Def
-	fields     map[string]string
-	opensBlock bool
+	kind        stepKind
+	lineNo      int // 1-based
+	txt         string
+	indent      int
+	depth       int // stack depth after this line, including the root frame
+	def         *schema.Def
+	fields      map[string]string
+	opensBlock  bool // the definition declares a block
+	closesBlock bool // the block closes on this line with an empty body
+	nearClose   bool // an invalid inline close leaves the block open
 }
 
 // scanner drives the indent-stack walk that Parse and BlockSpans must perform identically.
@@ -82,20 +84,79 @@ func (sc *scanner) line(raw string) step {
 		}
 	}
 	opens := def.Block.Kind != schema.BlockNone
+	closes, near := false, false
 	if opens {
-		sc.term = def.Block.Term(fields)
+		term := def.Block.Term(fields)
+		if def.Block.Kind == schema.BlockDelim {
+			if head, f, ok := inlineClose(top.children, def, txt, term); ok {
+				txt, fields, closes = head, f, true
+			} else {
+				near = carriesTerm(txt, term)
+			}
+		}
+		if !closes {
+			sc.term = term
+		}
 	}
 	sc.stack = append(sc.stack, frame{indent: indent, children: def.Children})
 	return step{
-		kind:       stepMatched,
-		lineNo:     sc.lineNo,
-		txt:        txt,
-		indent:     indent,
-		depth:      len(sc.stack),
-		def:        def,
-		fields:     fields,
-		opensBlock: opens,
+		kind:        stepMatched,
+		lineNo:      sc.lineNo,
+		txt:         txt,
+		indent:      indent,
+		depth:       len(sc.stack),
+		def:         def,
+		fields:      fields,
+		opensBlock:  opens,
+		closesBlock: closes,
+		nearClose:   near,
 	}
+}
+
+// inlineClose removes trailing terminators while preserving the matched definition and delimiter.
+func inlineClose(
+	candidates []*schema.Def,
+	def *schema.Def,
+	txt, term string,
+) (string, map[string]string, bool) {
+	var fields map[string]string
+	closed := false
+	// Repeated removal keeps canonical output idempotent.
+	for {
+		head, f, ok := cutTerm(candidates, def, txt, term)
+		if !ok {
+			return txt, fields, closed
+		}
+		txt, fields, closed = head, f, true
+	}
+}
+
+// cutTerm removes one trailing terminator if the remaining text binds the same definition and delimiter.
+func cutTerm(
+	candidates []*schema.Def,
+	def *schema.Def,
+	txt, term string,
+) (string, map[string]string, bool) {
+	head, ok := strings.CutSuffix(txt, term)
+	if !ok {
+		return "", nil, false
+	}
+	head = strings.TrimRight(head, " ")
+	// The remaining text must still contain the captured delimiter.
+	if !strings.Contains(head, term) {
+		return "", nil, false
+	}
+	fields, ok := schema.BindsDef(candidates, def, head)
+	if !ok || def.Block.Term(fields) != term {
+		return "", nil, false
+	}
+	return head, fields, true
+}
+
+// carriesTerm reports whether a trailing terminator has another occurrence before it.
+func carriesTerm(txt, term string) bool {
+	head, ok := strings.CutSuffix(txt, term)
+	return ok && strings.Contains(head, term)
 }
 
 func countIndent(line string) int {

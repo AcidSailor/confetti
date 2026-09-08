@@ -39,7 +39,7 @@ func Schema() *schema.Schema {
 	rmap.Child("set metric {{ metric:uint }}").
 		Card(schema.ZeroToOne).MarkIdempotent()
 
-	// The fixture supports multiline banners only.
+	// Inline banners require a trailing text capture.
 	s.Node("banner motd {{ delim:word }}").
 		Card(schema.ZeroToOne).MarkIdempotent().
 		BlockDelim("delim").

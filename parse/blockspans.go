@@ -6,7 +6,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// BlockSpans marks lines from each recognized raw-block opener through its terminator or EOF and returns nil when the schema has no blocks.
+// BlockSpans marks recognized blocks from opener through terminator or EOF; it returns nil for schemas without blocks.
 func BlockSpans(s *schema.Schema, text string) []bool {
 	if !hasBlocks(s.Roots) {
 		return nil

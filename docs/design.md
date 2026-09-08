@@ -348,6 +348,23 @@ retain the source line and report diagnostics.
   input is not always byte-identical after rendering. Rollback therefore
   restores canonical parsed running configuration, not original bytes. Lines
   dropped by a `parse.Drop` import cannot be restored.
+- **A `BlockDelim` block can close on its opening line.** The parser removes
+  trailing terminators while the remaining text matches the same definition
+  and delimiter against all candidates at that level. Repeated removal keeps
+  canonical output idempotent. Terminators within the remaining text stay
+  literal.
+
+  Inline text stays in the opener's trailing capture and is normalized. The
+  node has an empty `Block` and equals one parsed with the terminator on the
+  next line. Text on separate body lines is stored byte-exact in `Block`, so
+  those nodes differ. Render puts the terminator on a separate line. Inline
+  close requires a trailing text capture and applies only to `BlockDelim`
+  openers.
+- **An invalid inline close reports a Warning and leaves the block open.**
+  The warning requires a trailing terminator, another occurrence before it,
+  and failure to match the shorter text to the same definition and delimiter.
+  A plain opener with only its delimiter does not warn. The warning prevents
+  silent capture of following lines when a later terminator closes the block.
 - **Text transforms never run inside block spans.** Span detection is
   level-aware (`parse.BlockSpans` mirrors the parser's indent walk) and the
   guard protects the union of the raw-text walk and the

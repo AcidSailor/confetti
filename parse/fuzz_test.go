@@ -9,7 +9,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// FuzzParse checks that arbitrary input never panics and always returns a config.
+// FuzzParse checks parser safety, text normalization, and render determinism and idempotence.
 func FuzzParse(f *testing.F) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
@@ -19,6 +19,9 @@ func FuzzParse(f *testing.F) {
 		Card(schema.ZeroToOne)
 	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
 	s.Node("banner motd {{ delim:word }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	// The trailing capture permits inline close.
+	s.Node("banner login {{ delim:word }}{{ msg:text }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
 
 	seeds := []string{
@@ -32,6 +35,11 @@ func FuzzParse(f *testing.F) {
 		"banner motd ^\nunterminated\n",
 		"banner motd ^\n^\n",
 		"banner motd ^\n\n  ! weird\n^\n",
+		"banner login ^ hi ^\n",
+		"banner login ^^\n",
+		"banner login ^ a ^ b ^\n",
+		"banner login ^ hi ^ ^\n",
+		"banner login ^\nhi\n^\n",
 	}
 	for _, sd := range seeds {
 		f.Add(sd)
@@ -57,6 +65,16 @@ func FuzzParse(f *testing.F) {
 			first := render.Render(cfg)
 			if second := render.Render(cfg); first != second {
 				t.Fatalf("Render not deterministic for %q", in)
+			}
+			rd := diag.New()
+			again := render.Render(Parse(s, first, unknown, rd))
+			if again != first {
+				t.Fatalf(
+					"render not idempotent for %q: %q then %q",
+					in,
+					first,
+					again,
+				)
 			}
 		}
 	})
