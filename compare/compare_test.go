@@ -236,3 +236,19 @@ func TestRenderBlockBody(t *testing.T) {
 		"+ ^\n"
 	assert.Equal(t, want, Render(res.Changes))
 }
+
+func TestRenderInlineBlock(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("banner motd {{ delim:word }}{{ first:text }}").
+		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
+	res, d := remediate.Diff(
+		mustParse(t, s, "banner motd ^ hello\n^\n"),
+		mustParse(t, s, "banner motd ^ world ^\n"),
+		remediate.Options{Cycle: remediate.Break},
+	)
+	require.False(t, d.HasErrors(), d.String())
+	want := "- banner motd ^ hello ^\n" +
+		"+ banner motd ^ world ^\n"
+	assert.Equal(t, want, Render(res.Changes))
+}

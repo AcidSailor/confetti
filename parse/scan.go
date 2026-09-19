@@ -88,7 +88,12 @@ func (sc *scanner) line(raw string) step {
 	if opens {
 		term := def.Block.Term(fields)
 		if def.Block.Kind == schema.BlockDelim {
-			if head, f, ok := inlineClose(top.children, def, txt, term); ok {
+			if head, f, ok := schema.InlineClose(
+				top.children,
+				def,
+				txt,
+				term,
+			); ok {
 				txt, fields, closes = head, f, true
 			} else {
 				near = carriesTerm(txt, term)
@@ -111,46 +116,6 @@ func (sc *scanner) line(raw string) step {
 		closesBlock: closes,
 		nearClose:   near,
 	}
-}
-
-// inlineClose removes trailing terminators while preserving the matched definition and delimiter.
-func inlineClose(
-	candidates []*schema.Def,
-	def *schema.Def,
-	txt, term string,
-) (string, map[string]string, bool) {
-	var fields map[string]string
-	closed := false
-	// Repeated removal keeps canonical output idempotent.
-	for {
-		head, f, ok := cutTerm(candidates, def, txt, term)
-		if !ok {
-			return txt, fields, closed
-		}
-		txt, fields, closed = head, f, true
-	}
-}
-
-// cutTerm removes one trailing terminator if the remaining text binds the same definition and delimiter.
-func cutTerm(
-	candidates []*schema.Def,
-	def *schema.Def,
-	txt, term string,
-) (string, map[string]string, bool) {
-	head, ok := strings.CutSuffix(txt, term)
-	if !ok {
-		return "", nil, false
-	}
-	head = strings.TrimRight(head, " ")
-	// The remaining text must still contain the captured delimiter.
-	if !strings.Contains(head, term) {
-		return "", nil, false
-	}
-	fields, ok := schema.BindsDef(candidates, def, head)
-	if !ok || def.Block.Term(fields) != term {
-		return "", nil, false
-	}
-	return head, fields, true
 }
 
 // carriesTerm reports whether a trailing terminator has another occurrence before it.

@@ -59,3 +59,98 @@ func TestRenderBlock(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, in, Render(cfg)) // byte-exact through the block
 }
+
+func inlineSchema() *schema.Schema {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("banner motd {{ delim:word }}{{ first:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne)
+	sec := s.Node("line {{ name:word }}").Card(schema.ZeroToN)
+	sec.Child("banner exec {{ delim:word }}{{ first:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	return s
+}
+
+func TestRenderBlockInline(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{
+			"terminator on next line",
+			"banner motd # one line banner\n#\nhostname sw1\n",
+			"banner motd # one line banner #\nhostname sw1\n",
+		},
+		{
+			"already inline",
+			"banner motd # one line banner #\nhostname sw1\n",
+			"banner motd # one line banner #\nhostname sw1\n",
+		},
+		{"empty body", "banner motd #\n#\n", "banner motd # #\n"},
+		{
+			"nested",
+			"line vty\n  banner exec ^ hi\n^\n",
+			"line vty\n  banner exec ^ hi ^\n",
+		},
+		{
+			"body lines stay multi-line",
+			"banner motd # first\nsecond\n#\n",
+			"banner motd # first\nsecond\n#\n",
+		},
+		{
+			"blank body line stays multi-line",
+			"banner motd # first\n\n#\n",
+			"banner motd # first\n\n#\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := inlineSchema()
+			d := diag.New()
+			cfg := parse.Parse(s, tc.in, parse.Reject, d)
+			require.False(t, d.HasErrors(), d.String())
+			out := Render(cfg)
+			assert.Equal(t, tc.want, out)
+			// The rendered form parses back to an equal tree without diagnostics.
+			d2 := diag.New()
+			cfg2 := parse.Parse(s, out, parse.Reject, d2)
+			assert.Empty(t, d2.String())
+			assert.Equal(t, out, Render(cfg2))
+			require.Len(t, cfg2.Root.Children, len(cfg.Root.Children))
+			for i, n := range cfg.Root.Children {
+				assert.True(t, n.SameValue(cfg2.Root.Children[i]))
+			}
+		})
+	}
+}
+
+func TestRenderBlockInlineFallsBackWithoutTrailingCapture(t *testing.T) {
+	s := schema.New()
+	s.Node("banner motd {{ delim:word }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	in := "banner motd ^\n^\n"
+	d := diag.New()
+	cfg := parse.Parse(s, in, parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	// "banner motd ^ ^" does not match the opener, so the terminator keeps its own line.
+	assert.Equal(t, in, Render(cfg))
+}
+
+func TestRenderBlockUntilStaysMultiLine(t *testing.T) {
+	s := schema.New()
+	s.Node("certificate {{ name:rest }}").
+		Card(schema.ZeroToN).BlockUntil("quit")
+	in := "certificate ca\nquit\n"
+	d := diag.New()
+	cfg := parse.Parse(s, in, parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, in, Render(cfg))
+}
+
+func TestRenderBlockInlineMultiCharDelimiter(t *testing.T) {
+	s := schema.New()
+	s.Node("banner motd {{ delim:word }} {{ msg:rest }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	d := diag.New()
+	cfg := parse.Parse(s, "banner motd EOF hi\nEOF\n", parse.Reject, d)
+	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(t, "banner motd EOF hi EOF\n", Render(cfg))
+}

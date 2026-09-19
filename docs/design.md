@@ -357,9 +357,14 @@ retain the source line and report diagnostics.
   Inline text stays in the opener's trailing capture and is normalized. The
   node has an empty `Block` and equals one parsed with the terminator on the
   next line. Text on separate body lines is stored byte-exact in `Block`, so
-  those nodes differ. Render puts the terminator on a separate line. Inline
-  close requires a trailing text capture and applies only to `BlockDelim`
-  openers.
+  those nodes differ. Inline close requires a trailing text capture and
+  applies only to `BlockDelim` openers.
+
+  `render` and `compare` write an empty-body `BlockDelim` node on one line
+  (`banner motd ^ hi ^`) through `Node.InlineBlock`. The one-line form is used
+  only if it binds the same definition against all siblings and inline close
+  restores the same opener and fields. Otherwise the terminator keeps its own
+  line. Nodes with body lines always render multi-line.
 - **An invalid inline close reports a Warning and leaves the block open.**
   The warning requires a trailing terminator, another occurrence before it,
   and failure to match the shorter text to the same definition and delimiter.

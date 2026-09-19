@@ -12,8 +12,9 @@
 // leaves text that matches the same definition and delimiter. The parser removes
 // trailing terminators while that match holds, keeping canonical output
 // idempotent. Inline text stays in the opener's trailing capture and is normalized;
-// Block is empty. Render puts the terminator on a separate line. Inline close
-// requires a trailing text capture. An invalid close warns and leaves the block
+// Block is empty. Render writes such a node back on one line when
+// schema.Node.InlineBlock confirms the round trip. Inline close requires a
+// trailing text capture. An invalid close warns and leaves the block
 // open if the opener ends with a terminator and contains another occurrence.
 //
 // A Fold change is atomic for each line. Each synthesized node matches its

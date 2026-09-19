@@ -62,6 +62,11 @@ func renderChange(b *strings.Builder, c remediate.Change, depth int) {
 
 // writeTree writes a signed node and its complete subtree.
 func writeTree(b *strings.Builder, sign string, n *schema.Node, depth int) {
+	// Match render: an empty BlockDelim body closes on the opening line.
+	if line, ok := n.InlineBlock(); ok {
+		writeLine(b, sign, depth, line)
+		return
+	}
 	writeLine(b, sign, depth, lineText(n))
 	if def := n.Def; def != nil && def.Block.Kind != schema.BlockNone {
 		// Preserve the block body at column zero after the sign.

@@ -1,7 +1,8 @@
 // Package render converts a schema.Config to canonical text. Matched nodes use
 // their schema definition with normalized spacing and two-space indentation.
 // Unmatched nodes use their raw text. Raw block bodies and terminators are
-// preserved exactly. A schema.SectionExit token closes each section that
+// preserved exactly. An empty BlockDelim body closes on the opening line when
+// schema.Node.InlineBlock confirms the round trip. A schema.SectionExit token closes each section that
 // declares one.
 //
 // The round-trip contract is render(parse(x)) == canonical(x); repeating
