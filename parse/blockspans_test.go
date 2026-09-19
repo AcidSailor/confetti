@@ -40,7 +40,7 @@ func TestBlockSpansNestedLineIsNotAnOpener(t *testing.T) {
 func TestBlockSpansNestedBlockDefMatchesAtItsLevel(t *testing.T) {
 	s := schema.New()
 	iface := s.Node("interface {{ name:word }}").Card(schema.ZeroToN)
-	iface.Child("banner login {{ delim:word }}").
+	iface.Child("banner login {{ delim:delim }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
 	spans := BlockSpans(
 		s,
@@ -72,7 +72,11 @@ func TestBlockSpansInlineCloseMarksOpenerOnly(t *testing.T) {
 	assert.Equal(t, []bool{true, false, false}, spans)
 }
 
-func TestBlockSpansNearCloseKeepsBlockOpen(t *testing.T) {
-	spans := BlockSpans(nearCloseSchema(), "banner motd ^^\nhostname sw1\n^\n")
-	assert.Equal(t, []bool{true, true, true, false}, spans)
+// A body line that carries the delimiter closes the block on that line.
+func TestBlockSpansDelimiterInBodyClosesThere(t *testing.T) {
+	spans := BlockSpans(
+		inlineBlockSchema(),
+		"banner motd ^\nbody ^ tail\nhostname sw1\n",
+	)
+	assert.Equal(t, []bool{true, true, false, false}, spans)
 }

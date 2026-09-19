@@ -3,6 +3,7 @@ package schema
 import (
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"strings"
 
 	"github.com/acidsailor/confetti/value"
@@ -23,11 +24,13 @@ type token struct {
 
 // matchSpec compiles a "{{ name:type }}" template for parsing and rendering.
 type matchSpec struct {
-	tokens    []token
-	re        *regexp.Regexp
-	argTypes  map[string]string
-	emptyArgs map[string]bool // capture args whose type pattern matches ""
-	litLen    int             // total literal length, precomputed for specificity ordering
+	tokens      []token
+	re          *regexp.Regexp
+	prefixRe    *regexp.Regexp // re without the end anchor, for block openers
+	argTypes    map[string]string
+	emptyArgs   map[string]bool // capture args whose type pattern matches ""
+	oneCharArgs map[string]bool // capture args whose type pattern matches one rune
+	litLen      int             // total literal length, precomputed for specificity ordering
 }
 
 func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
@@ -36,9 +39,10 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 		return nil, err
 	}
 	m := &matchSpec{
-		tokens:    toks,
-		argTypes:  map[string]string{},
-		emptyArgs: map[string]bool{},
+		tokens:      toks,
+		argTypes:    map[string]string{},
+		emptyArgs:   map[string]bool{},
+		oneCharArgs: map[string]bool{},
 	}
 	seen := make(map[string]bool)
 	var b strings.Builder
@@ -63,9 +67,14 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 		}
 		pat := vt.Pattern
 		// Registry.Register already compiled the pattern; failure here only prevents the empty-match flag.
-		if anchored, err := regexp.Compile("^(?:" + pat + ")$"); err == nil &&
-			anchored.MatchString("") {
-			m.emptyArgs[t.text] = true
+		if anchored, err := regexp.Compile("^(?:" + pat + ")$"); err == nil {
+			if anchored.MatchString("") {
+				m.emptyArgs[t.text] = true
+			}
+			// A delimiter must be exactly one non-space character.
+			if maxRunes(pat) == 1 && !anchored.MatchString(" ") {
+				m.oneCharArgs[t.text] = true
+			}
 		}
 		if i != len(toks)-1 {
 			// Make non-terminal captures lazy so a following literal remains matchable.
@@ -78,13 +87,73 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 		b.WriteString(")")
 		m.argTypes[t.text] = t.typ
 	}
+	// A block opener matches a prefix: its delimiter is followed by body text.
+	prefixRe, err := regexp.Compile(b.String())
+	if err != nil {
+		return nil, fmt.Errorf("compiling %q: %w", tmpl, err)
+	}
 	b.WriteString("$")
 	re, err := regexp.Compile(b.String())
 	if err != nil {
 		return nil, fmt.Errorf("compiling %q: %w", tmpl, err)
 	}
-	m.re = re
+	m.re, m.prefixRe = re, prefixRe
 	return m, nil
+}
+
+// maxRunes returns the longest match of pattern in runes, or -1 when unbounded
+// or unparsable. It lets a schema require a capture of exactly one character.
+func maxRunes(pattern string) int {
+	re, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return -1
+	}
+	return maxRunesOf(re.Simplify())
+}
+
+func maxRunesOf(re *syntax.Regexp) int {
+	switch re.Op {
+	case syntax.OpEmptyMatch, syntax.OpBeginLine, syntax.OpEndLine,
+		syntax.OpBeginText, syntax.OpEndText, syntax.OpWordBoundary,
+		syntax.OpNoWordBoundary:
+		return 0
+	case syntax.OpLiteral:
+		return len(re.Rune)
+	case syntax.OpCharClass, syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		return 1
+	case syntax.OpCapture:
+		return maxRunesOf(re.Sub[0])
+	case syntax.OpQuest:
+		return maxRunesOf(re.Sub[0])
+	case syntax.OpConcat:
+		total := 0
+		for _, sub := range re.Sub {
+			n := maxRunesOf(sub)
+			if n < 0 {
+				return -1
+			}
+			total += n
+		}
+		return total
+	case syntax.OpAlternate:
+		best := 0
+		for _, sub := range re.Sub {
+			n := maxRunesOf(sub)
+			if n < 0 {
+				return -1
+			}
+			best = max(best, n)
+		}
+		return best
+	case syntax.OpRepeat:
+		n := maxRunesOf(re.Sub[0])
+		if n < 0 || re.Max < 0 {
+			return -1
+		}
+		return n * re.Max
+	default: // OpStar, OpPlus, and anything unrecognized are unbounded.
+		return -1
+	}
 }
 
 // lazify makes an unescaped trailing plus or asterisk lazy and leaves all other patterns unchanged.
@@ -143,6 +212,23 @@ func (m *matchSpec) Match(line string) (map[string]string, bool) {
 		fields[name] = sm[m.re.SubexpIndex(name)]
 	}
 	return fields, true
+}
+
+// MatchPrefix returns captured fields and the offset after the match, or false.
+func (m *matchSpec) MatchPrefix(line string) (map[string]string, int, bool) {
+	loc := m.prefixRe.FindStringSubmatchIndex(line)
+	if loc == nil {
+		return nil, 0, false
+	}
+	fields := make(map[string]string, len(m.argTypes))
+	for name := range m.argTypes {
+		i := m.prefixRe.SubexpIndex(name) * 2
+		if loc[i] < 0 {
+			continue
+		}
+		fields[name] = line[loc[i]:loc[i+1]]
+	}
+	return fields, loc[1], true
 }
 
 // Render produces the line by interleaving literals with field values.

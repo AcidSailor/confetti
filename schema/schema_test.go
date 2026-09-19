@@ -127,7 +127,7 @@ func TestNegateStrategy(t *testing.T) {
 
 func TestBlockBuilders(t *testing.T) {
 	s := New()
-	b := s.Node("banner motd {{ delim:word }}").BlockDelim("delim")
+	b := s.Node("banner motd {{ delim:delim }}").BlockDelim("delim")
 	assert.Equal(t, BlockDelim, b.Block.Kind)
 	assert.Equal(t, "delim", b.Block.Arg)
 
@@ -141,7 +141,7 @@ func TestBlockBuilders(t *testing.T) {
 func TestBlockDelimUnknownArgPanics(t *testing.T) {
 	s := New()
 	assert.Panics(t, func() {
-		s.Node("banner motd {{ delim:word }}").BlockDelim("nope")
+		s.Node("banner motd {{ delim:delim }}").BlockDelim("nope")
 	})
 }
 
@@ -158,7 +158,7 @@ func TestBlockDelimEmptyMatchingTypePanics(t *testing.T) {
 
 func TestBlockNodeCannotHaveChildren(t *testing.T) {
 	s := New()
-	blk := s.Node("banner motd {{ delim:word }}").BlockDelim("delim")
+	blk := s.Node("banner motd {{ delim:delim }}").BlockDelim("delim")
 	assert.Panics(t, func() { blk.Child("x") })
 	assert.Panics(t, func() { blk.Adopt(s.Node("y")) })
 
@@ -635,11 +635,11 @@ func TestEmptyOnRemovePanics(t *testing.T) {
 				})
 		}},
 		{"block first", func(s *Schema) {
-			s.Node("banner {{ delim:word }}").
+			s.Node("banner {{ delim:delim }}").
 				BlockDelim("delim").ClearOnRemove()
 		}},
 		{"block second", func(s *Schema) {
-			s.Node("banner {{ delim:word }}").
+			s.Node("banner {{ delim:delim }}").
 				ClearOnRemove().BlockDelim("delim")
 		}},
 		{"list first", func(s *Schema) {
@@ -712,7 +712,7 @@ func TestRespellAsRails(t *testing.T) {
 		List("ids", "uint").Members("k")
 	assert.Panics(t, func() { mem.RespellAs("mm2 {{ ids }}") })
 	s, _ = mk()
-	blk := s.Node("banner {{ d:word }}").Card(ZeroToOne).BlockDelim("d")
+	blk := s.Node("banner {{ d:delim }}").Card(ZeroToOne).BlockDelim("d")
 	assert.Panics(t, func() { blk.RespellAs("b2 {{ d }}") })
 }
 

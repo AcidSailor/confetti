@@ -41,9 +41,14 @@ func Parse(
 		switch st.kind {
 		case stepBlank:
 		case stepBody:
-			blk.body = append(blk.body, line)
+			blk.body = append(blk.body, st.body)
 		case stepBlockEnd:
+			if st.closed {
+				blk.body = append(blk.body, st.body)
+			}
+			blockTail(d, st, blk.node)
 			blk.node.Block = blk.body
+			dropEmptyBlock(blk.node)
 			blk = nil
 		case stepUnknown:
 			if unknown == Reject {
@@ -59,26 +64,26 @@ func Parse(
 			}
 			nodes = append(nodes[:st.depth-1], nil)
 		case stepMatched:
-			if st.nearClose {
-				// Warn before treating following lines as block content.
-				d.AddAt(
-					st.lineNo,
-					diag.Warning,
-					"%q ends with block terminator %q but the text before it does not bind the same command; opening a multi-line block",
-					st.txt,
-					st.def.Block.Term(st.fields),
-				)
-			}
 			tn := liveParent(
 				nodes[:st.depth-1],
 			).AddChild(schema.NewNode(st.txt))
 			tn.Def, tn.Fields, tn.RealIndent = st.def, st.fields, st.indent
 			tn.Line = st.lineNo
-			// A non-nil empty body distinguishes an empty block from a non-block node.
-			if st.closesBlock {
-				tn.Block = []string{}
-			} else if st.opensBlock {
-				blk = &blockCapture{node: tn, body: []string{}}
+			// A non-nil body distinguishes an empty block from a non-block node.
+			switch {
+			case st.closed:
+				tn.Block = []string{st.body}
+				blockTail(d, st, tn)
+				if dropEmptyBlock(tn) {
+					tn = nil
+				}
+			case st.opensBlock:
+				// A literal terminator owns its line, so its body starts below.
+				body := []string{}
+				if st.def.Block.Kind == schema.BlockDelim {
+					body = []string{st.body}
+				}
+				blk = &blockCapture{node: tn, body: body}
 			}
 			nodes = append(nodes[:st.depth-1], tn)
 		}
@@ -98,12 +103,46 @@ func Parse(
 			blk.node.Path(),
 		)
 		blk.node.Block = blk.body
+		// A delimited block that never closed would render a terminator the
+		// input never had, and that text reads back as a different block.
+		if blk.node.Def.Block.Kind == schema.BlockDelim {
+			blk.node.Parent.ReplaceChild(blk.node)
+		}
 	}
 
 	if unknown == Drop && dropped > 0 {
 		d.Add(diag.Warning, "%d nodes dropped as unsupported", dropped)
 	}
 	return cfg
+}
+
+// dropEmptyBlock removes a delimited block whose body is empty. A device accepts
+// the empty form and then omits it from the running configuration, so keeping the
+// node would invent a command the device does not report.
+func dropEmptyBlock(n *schema.Node) bool {
+	if n.Def.Block.Kind != schema.BlockDelim ||
+		strings.Join(n.Block, "\n") != "" {
+		return false
+	}
+	n.Parent.ReplaceChild(n)
+	return true
+}
+
+// blockTail reports text after a closing delimiter. A device ends the block at
+// that delimiter, so the remainder could never have come from a running
+// configuration and no reading of it is safe to guess at.
+func blockTail(d *diag.Diagnostics, st step, n *schema.Node) {
+	if strings.TrimSpace(st.tail) == "" {
+		return
+	}
+	d.AddAt(
+		st.lineNo,
+		diag.Error,
+		"%s: %q follows the closing delimiter %q",
+		n.Path(),
+		strings.TrimSpace(st.tail),
+		n.Def.Block.Term(n.Fields),
+	)
 }
 
 // liveParent returns the nearest stack node that is not an unknown frame.

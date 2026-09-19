@@ -114,6 +114,11 @@ func TestAlphaRoundTrip(t *testing.T) {
 			name: "banner bang delimiter terminates",
 			in:   "banner motd !\nhello\n!\nvlan 10\n",
 		},
+		{
+			// The body runs between the delimiters, so this stays one line.
+			name: "banner closes inline",
+			in:   "banner motd ^ Welcome ^\nvlan 10\n",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, d := e.Import(tc.in)

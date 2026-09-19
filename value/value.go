@@ -82,5 +82,8 @@ func builtins() []Type {
 		{Name: "word", Pattern: `\S+`},
 		{Name: "rest", Pattern: `.+`}, // greedy; lazified when non-terminal
 		{Name: "uint", Pattern: `\d+`},
+		// A block delimiter is one character: a device ends the block at its
+		// next occurrence, so a longer token could not be recognized there.
+		{Name: "delim", Pattern: `\S`},
 	}
 }

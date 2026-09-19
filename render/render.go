@@ -19,12 +19,26 @@ func Render(cfg *schema.Config) string {
 
 func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	def := n.Def
+	// A device omits an empty delimited block, so emitting one would invent a
+	// command that cannot survive a round trip through the device.
+	if def != nil && def.Block.Kind == schema.BlockDelim &&
+		strings.Join(n.Block, "\n") == "" {
+		return
+	}
 	indent := strings.Repeat(indentUnit, depth)
 	b.WriteString(indent)
 	if def != nil {
 		b.WriteString(def.Render(n.Fields))
 	} else {
 		b.WriteString(n.Text)
+	}
+	// The body runs from the opener's delimiter to the next one, so joining it
+	// reproduces the source whether it spans one line or many.
+	if def != nil && def.Block.Kind == schema.BlockDelim {
+		b.WriteString(strings.Join(n.Block, "\n"))
+		b.WriteString(def.Block.Term(n.Fields))
+		b.WriteByte('\n')
+		return // Block nodes have no children or section-exit tokens.
 	}
 	b.WriteByte('\n')
 	// Preserve raw block bodies at column zero and append the terminator.

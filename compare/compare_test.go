@@ -220,7 +220,7 @@ func TestRenderNoSectionExitToken(t *testing.T) {
 
 func TestRenderBlockBody(t *testing.T) {
 	s := schema.New()
-	s.Node("banner motd {{ delim:word }}").
+	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
 	res, d := remediate.Diff(
 		mustParse(t, s, "banner motd ^\nhello\n^\n"),
@@ -234,5 +234,41 @@ func TestRenderBlockBody(t *testing.T) {
 		"+ banner motd ^\n" +
 		"+ world\n" +
 		"+ ^\n"
+	assert.Equal(t, want, Render(res.Changes))
+}
+
+func TestRenderInlineBlock(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("banner motd {{ delim:delim }}").
+		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
+	res, d := remediate.Diff(
+		mustParse(t, s, "banner motd ^ hello ^\n"),
+		mustParse(t, s, "banner motd ^ world ^\n"),
+		remediate.Options{Cycle: remediate.Break},
+	)
+	require.False(t, d.HasErrors(), d.String())
+	want := "- banner motd ^ hello ^\n" +
+		"+ banner motd ^ world ^\n"
+	assert.Equal(t, want, Render(res.Changes))
+}
+
+// A nested node takes its candidates from the parent definition, so the change
+// log must reach the one-line form through the tree, not the schema roots.
+func TestRenderInlineBlockNested(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	sec := s.Node("line {{ name:word }}").Card(schema.ZeroToN)
+	sec.Child("banner exec {{ delim:delim }}").
+		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
+	res, d := remediate.Diff(
+		mustParse(t, s, "line vty\n  banner exec ^ hello ^\n"),
+		mustParse(t, s, "line vty\n  banner exec ^ world ^\n"),
+		remediate.Options{Cycle: remediate.Break},
+	)
+	require.False(t, d.HasErrors(), d.String())
+	want := "  line vty\n" +
+		"-   banner exec ^ hello ^\n" +
+		"+   banner exec ^ world ^\n"
 	assert.Equal(t, want, Render(res.Changes))
 }

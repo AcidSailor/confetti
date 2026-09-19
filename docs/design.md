@@ -348,23 +348,33 @@ retain the source line and report diagnostics.
   input is not always byte-identical after rendering. Rollback therefore
   restores canonical parsed running configuration, not original bytes. Lines
   dropped by a `parse.Drop` import cannot be restored.
-- **A `BlockDelim` block can close on its opening line.** The parser removes
-  trailing terminators while the remaining text matches the same definition
-  and delimiter against all candidates at that level. Repeated removal keeps
-  canonical output idempotent. Terminators within the remaining text stay
-  literal.
+- **A `BlockDelim` block runs from its delimiter to the next one.** The opener
+  matches a prefix of the line. Its delimiter capture must end the template,
+  because everything after the delimiter is body text, and must be a type that
+  captures exactly one non-space character: a device ends the block at the
+  delimiter's next occurrence, where a longer token could not be recognized.
+  The built-in `delim` type is that type. The block closes at the
+  next occurrence of that delimiter, whether it falls on the opening line or
+  many lines later, and whether or not it starts its line. A device ends the
+  banner at the same point, so the delimiter can never appear inside the body.
 
-  Inline text stays in the opener's trailing capture and is normalized. The
-  node has an empty `Block` and equals one parsed with the terminator on the
-  next line. Text on separate body lines is stored byte-exact in `Block`, so
-  those nodes differ. Render puts the terminator on a separate line. Inline
-  close requires a trailing text capture and applies only to `BlockDelim`
-  openers.
-- **An invalid inline close reports a Warning and leaves the block open.**
-  The warning requires a trailing terminator, another occurrence before it,
-  and failure to match the shorter text to the same definition and delimiter.
-  A plain opener with only its delimiter does not warn. The warning prevents
-  silent capture of following lines when a later terminator closes the block.
+  `Block` holds the body split on newlines, so it begins and ends with the text
+  beside each delimiter. `banner motd ^ hi ^` gives `[" hi "]` and
+  `banner motd ^\nhi\n^` gives `["", "hi", ""]`. The two are different banners
+  because their text differs; neither is normalized. `render` and `compare`
+  join `Block` between the opener and the terminator, so one line or many comes
+  out of the body alone and needs no round-trip check.
+
+  `BlockUntil` is unchanged: its literal terminator owns its line.
+- **Text after the closing delimiter reports an Error.** A device stops reading
+  at that delimiter, so the remainder could not have come from a running
+  configuration and no reading of it is safe to guess at. The block keeps the
+  body before the delimiter.
+- **An empty delimited body is dropped on parse and omitted on render.** A
+  device accepts `banner motd ^^` and then leaves it out of the running
+  configuration, so keeping the node would invent a command the device does not
+  report. An unterminated delimited block is dropped for the same reason:
+  rendering it would invent a terminator the input never had.
 - **Text transforms never run inside block spans.** Span detection is
   level-aware (`parse.BlockSpans` mirrors the parser's indent walk) and the
   guard protects the union of the raw-text walk and the

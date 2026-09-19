@@ -158,6 +158,23 @@ func TestBannerRemediateAndRollback(t *testing.T) {
 	assert.Equal(t, "banner motd ^\nold\n^\n", render.Render(back.Tree))
 }
 
+// A remediation tree renders through the same block path as an imported one.
+func TestInlineBannerRemediateAndRollback(t *testing.T) {
+	e := Engine()
+	run, d1 := e.Import("banner motd ^ old ^\nvlan 10\n")
+	require.False(t, d1.HasErrors(), d1.String())
+	intd, d2 := e.Import("banner motd ^ new ^\nvlan 10\n")
+	require.False(t, d2.HasErrors(), d2.String())
+
+	res, d := e.Remediate(run, intd)
+	require.False(t, d.HasErrors())
+	assert.Equal(t, "banner motd ^ new ^\n", render.Render(res.Tree))
+
+	back, bd := e.Rollback(run, intd)
+	require.False(t, bd.HasErrors())
+	assert.Equal(t, "banner motd ^ old ^\n", render.Render(back.Tree))
+}
+
 func TestRemediateAlphaPhysicalPortReset(t *testing.T) {
 	e := Engine()
 	running, d := e.Import("interface Ethernet1/1\n  description X\n")

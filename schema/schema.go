@@ -487,12 +487,31 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 	return n
 }
 
-// BlockDelim opens a raw block terminated by a non-empty captured argument and excludes child nodes.
+// BlockDelim opens a raw block that runs from its captured delimiter to the next
+// occurrence of that delimiter, and excludes child nodes. The body carries every
+// character between the two delimiters, so the delimiter must close the template:
+// text after it belongs to the block, not to the command.
 func (n *Def) BlockDelim(arg string) *Def {
 	// Reject empty terminators because they close at the first blank line and bypass block protection.
 	n.mustNonEmptyArg("BlockDelim", arg)
+	n.mustTrailingArg("BlockDelim", arg)
 	n.setBlock(BlockStrategy{Kind: BlockDelim, Arg: arg})
 	return n
+}
+
+// mustTrailingArg panics unless arg ends the template and captures one character.
+func (n *Def) mustTrailingArg(setter, arg string) {
+	toks := n.spec.tokens
+	if last := toks[len(toks)-1]; last.kind != capToken || last.text != arg {
+		panic("schema: " + setter + " arg " + arg +
+			" must end the template: " + n.Template)
+	}
+	// A device ends the block at the delimiter's next occurrence, so a
+	// multi-character token could not be recognized there.
+	if !n.spec.oneCharArgs[arg] {
+		panic("schema: " + setter + " arg " + arg +
+			" must capture exactly one character: " + n.Template)
+	}
 }
 
 // BlockUntil opens a raw block terminated by a non-empty literal line and excludes child nodes.
@@ -967,6 +986,13 @@ func (n *Def) MatchLine(
 // Render produces the config line by substituting field values into the template.
 func (n *Def) Render(f map[string]string) string { return n.spec.Render(f) }
 
+// NormalizeLine collapses surrounding and internal whitespace to single spaces.
+// Parsing applies it before matching, so a line that differs from its
+// normalized form cannot bind the same fields again.
+func NormalizeLine(line string) string {
+	return strings.Join(strings.Fields(line), " ")
+}
+
 // matchOrderCache stores one candidate slice and its stable specificity order for concurrent reuse.
 type matchOrderCache struct {
 	src     []*Def // The candidates used to compute ordered.
@@ -978,8 +1004,39 @@ func MatchChild(
 	candidates []*Def,
 	line string,
 ) (*Def, map[string]string, bool) {
+	for _, c := range orderedCandidates(candidates) {
+		if f, ok := c.spec.Match(line); ok {
+			return c, f, true
+		}
+	}
+	return nil, nil, false
+}
+
+// MatchChildOpener matches like MatchChild but lets a BlockDelim definition match
+// a prefix, because its delimiter is followed by block body text. It returns the
+// offset in line where the body begins.
+func MatchChildOpener(
+	candidates []*Def,
+	line string,
+) (*Def, map[string]string, int, bool) {
+	for _, c := range orderedCandidates(candidates) {
+		if c.Block.Kind == BlockDelim {
+			if f, end, ok := c.spec.MatchPrefix(line); ok {
+				return c, f, end, true
+			}
+			continue
+		}
+		if f, ok := c.spec.Match(line); ok {
+			return c, f, len(line), true
+		}
+	}
+	return nil, nil, 0, false
+}
+
+// orderedCandidates returns candidates in descending literal specificity, caching the order.
+func orderedCandidates(candidates []*Def) []*Def {
 	if len(candidates) == 0 {
-		return nil, nil, false
+		return nil
 	}
 	lead := candidates[0]
 	memo := lead.matchOrder.Load()
@@ -991,12 +1048,7 @@ func MatchChild(
 		memo = &matchOrderCache{src: candidates, ordered: ordered}
 		lead.matchOrder.Store(memo)
 	}
-	for _, c := range memo.ordered {
-		if f, ok := c.spec.Match(line); ok {
-			return c, f, true
-		}
-	}
-	return nil, nil, false
+	return memo.ordered
 }
 
 // BindsDef reports whether MatchChild selects want and returns its captured fields.
