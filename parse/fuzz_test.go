@@ -1,6 +1,8 @@
 package parse
 
 import (
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/acidsailor/confetti/diag"
@@ -23,6 +25,10 @@ func FuzzParse(f *testing.F) {
 	// The trailing capture permits inline close.
 	s.Node("banner login {{ delim:word }}{{ msg:text }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
+	// A nested block takes its candidates from the parent definition.
+	vty := s.Node("line {{ name:word }}").Card(schema.ZeroToN)
+	vty.Child("banner exec {{ delim:word }}{{ msg:text }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
 
 	seeds := []string{
 		"",
@@ -40,6 +46,10 @@ func FuzzParse(f *testing.F) {
 		"banner login ^ a ^ b ^\n",
 		"banner login ^ hi ^ ^\n",
 		"banner login ^\nhi\n^\n",
+		"line vty\n  banner exec ^ hi ^\n",
+		"line vty\n  banner exec ^ hi\n^\n",
+		"line vty\n  banner exec ^\n^\n",
+		"line vty\n  banner exec ^ a ^ b ^\n",
 	}
 	for _, sd := range seeds {
 		f.Add(sd)
@@ -67,7 +77,8 @@ func FuzzParse(f *testing.F) {
 				t.Fatalf("Render not deterministic for %q", in)
 			}
 			rd := diag.New()
-			again := render.Render(Parse(s, first, unknown, rd))
+			back := Parse(s, first, unknown, rd)
+			again := render.Render(back)
 			if again != first {
 				t.Fatalf(
 					"render not idempotent for %q: %q then %q",
@@ -76,6 +87,59 @@ func FuzzParse(f *testing.F) {
 					again,
 				)
 			}
+			// Rendering a clean parse must not invent problems of its own.
+			if !d.HasErrors() && rd.HasErrors() {
+				t.Fatalf(
+					"render of %q introduced errors: %s",
+					in,
+					rd.String(),
+				)
+			}
+			// Idempotent text is not enough: the tree must survive too.
+			sameTree(t, in, cfg.Root, back.Root)
 		}
 	})
+}
+
+// sameTree fails unless both subtrees carry the same definitions, text, fields, and bodies.
+func sameTree(t *testing.T, in string, want, got *schema.Node) {
+	t.Helper()
+	if want.Def != got.Def || want.Text != got.Text {
+		t.Fatalf(
+			"round trip changed a node for %q: %q -> %q",
+			in,
+			want.Text,
+			got.Text,
+		)
+	}
+	if !maps.Equal(want.Fields, got.Fields) {
+		t.Fatalf(
+			"round trip changed fields of %q for %q: %v -> %v",
+			want.Text,
+			in,
+			want.Fields,
+			got.Fields,
+		)
+	}
+	if !slices.Equal(want.Block, got.Block) {
+		t.Fatalf(
+			"round trip changed the body of %q for %q: %q -> %q",
+			want.Text,
+			in,
+			want.Block,
+			got.Block,
+		)
+	}
+	if len(want.Children) != len(got.Children) {
+		t.Fatalf(
+			"round trip changed the children of %q for %q: %d -> %d",
+			want.Text,
+			in,
+			len(want.Children),
+			len(got.Children),
+		)
+	}
+	for i, c := range want.Children {
+		sameTree(t, in, c, got.Children[i])
+	}
 }

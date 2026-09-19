@@ -114,11 +114,19 @@ func TestRenderBlockInline(t *testing.T) {
 			cfg2 := parse.Parse(s, out, parse.Reject, d2)
 			assert.Empty(t, d2.String())
 			assert.Equal(t, out, Render(cfg2))
-			require.Len(t, cfg2.Root.Children, len(cfg.Root.Children))
-			for i, n := range cfg.Root.Children {
-				assert.True(t, n.SameValue(cfg2.Root.Children[i]))
-			}
+			assertSameTree(t, cfg.Root, cfg2.Root)
 		})
+	}
+}
+
+// assertSameTree compares captured fields too; SameValue stops at the rendered text.
+func assertSameTree(t *testing.T, want, got *schema.Node) {
+	t.Helper()
+	assert.True(t, want.SameValue(got), want.Text)
+	assert.Equal(t, want.Fields, got.Fields, want.Text)
+	require.Len(t, got.Children, len(want.Children), want.Text)
+	for i, c := range want.Children {
+		assertSameTree(t, c, got.Children[i])
 	}
 }
 
@@ -146,6 +154,8 @@ func TestRenderBlockUntilStaysMultiLine(t *testing.T) {
 }
 
 func TestRenderBlockInlineMultiCharDelimiter(t *testing.T) {
+	// A literal space separates the captures: adjacent to a text capture the
+	// delimiter is lazy and would bind "E" rather than "EOF".
 	s := schema.New()
 	s.Node("banner motd {{ delim:word }} {{ msg:rest }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")

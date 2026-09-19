@@ -114,6 +114,21 @@ func TestAlphaRoundTrip(t *testing.T) {
 			name: "banner bang delimiter terminates",
 			in:   "banner motd !\nhello\n!\nvlan 10\n",
 		},
+		{
+			// The trailing capture closes the block, so render writes one line.
+			name: "banner exec closes inline",
+			in:   "banner exec ^ Welcome\n^\nvlan 10\n",
+			want: "banner exec ^ Welcome ^\nvlan 10\n",
+		},
+		{
+			name: "banner exec already inline",
+			in:   "banner exec ^ Welcome ^\nvlan 10\n",
+		},
+		{
+			// Body lines keep the terminator on its own line.
+			name: "banner exec with a body stays multi-line",
+			in:   "banner exec ^ Welcome\nsecond line\n^\nvlan 10\n",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, d := e.Import(tc.in)

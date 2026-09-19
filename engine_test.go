@@ -223,6 +223,10 @@ func TestEngineImportTextTransformAfterInlineBlockClose(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "banner motd ^ secret", inline.Root.Children[0].Text)
 	assert.Equal(t, "hostname REDACTED", inline.Root.Children[1].Text)
+	// Render returns the one-line form through the public engine path.
+	out, rd := e.Render(inline)
+	require.False(t, rd.HasErrors(), rd.String())
+	assert.Equal(t, "banner motd ^ secret ^\nhostname REDACTED\n", out)
 
 	multi, md := e.Import("banner motd ^\nhostname secret\n^\n")
 	require.False(t, md.HasErrors(), md.String())

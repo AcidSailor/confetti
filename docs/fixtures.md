@@ -57,8 +57,9 @@ Unverified behavior and fixture limits:
 - `Baseline()` models VLAN 1 and the default VRF as device-provided, and
   `vrf member default` as their referrer. The device behavior was not
   confirmed on a lab image.
-- Single-line banners (`banner motd ^text^`) require a trailing text capture,
-  which the fixture template does not have.
+- Single-line banners (`banner motd ^text^`) require a trailing text capture.
+  `banner motd` deliberately omits one and always renders multi-line;
+  `banner exec` has one and closes inline. The pair covers both paths.
 - The device checked on 2026-09-08 omits empty banners (`banner motd ^^`)
   from its running configuration. Empty inline blocks are parser test cases.
 

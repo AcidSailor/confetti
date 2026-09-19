@@ -54,28 +54,85 @@ func TestInlineBlockRejectsOpenerEndingWithTerminator(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// The one-line form must bind the node's definition against all siblings, in either declaration order.
+// A more specific sibling claims the one-line form even though the opener binds this definition.
 func TestInlineBlockRejectsDifferentDef(t *testing.T) {
-	for _, generalFirst := range []bool{true, false} {
+	s := textSchema(t)
+	s.Node("banner motd {{ delim:word }}{{ first:text }}").BlockDelim("delim")
+	s.Node("banner motd {{ delim:word }} hello ^").BlockDelim("delim")
+	n := inlineNode(t, s, "banner motd ^ hello")
+	require.Equal(
+		t,
+		"banner motd {{ delim:word }}{{ first:text }}",
+		n.Def.Template,
+	)
+	_, ok := n.InlineBlock()
+	assert.False(t, ok)
+}
+
+// Declaration order alone decides an equal-specificity tie, so it decides whether
+// the one-line form is safe. The competitor matches only the closed line, so the
+// opener binds this definition in both orders.
+func TestInlineBlockEqualSpecificityFollowsDeclarationOrder(t *testing.T) {
+	for _, competitorFirst := range []bool{true, false} {
 		s := textSchema(t)
-		if generalFirst {
-			s.Node("banner motd {{ delim:word }}{{ first:text }}").
-				BlockDelim("delim")
-		}
-		s.Node("banner motd {{ delim:word }} hello ^").BlockDelim("delim")
-		if !generalFirst {
-			s.Node("banner motd {{ delim:word }}{{ first:text }}").
-				BlockDelim("delim")
-		}
-		n := inlineNode(t, s, "banner motd ^ hello")
-		require.Equal(
+		require.NoError(
 			t,
-			"banner motd {{ delim:word }}{{ first:text }}",
-			n.Def.Template,
+			s.Registry.Register(value.Type{Name: "caret", Pattern: `.*\^`}),
 		)
-		_, ok := n.InlineBlock()
-		assert.False(t, ok)
+		competitor := func() {
+			s.Node("banner motd {{ delim:word }}{{ closed:caret }}").
+				BlockDelim("delim")
+		}
+		if competitorFirst {
+			competitor()
+		}
+		def := s.Node("banner motd {{ delim:word }}{{ first:text }}").
+			BlockDelim("delim")
+		if !competitorFirst {
+			competitor()
+		}
+		require.Equal(t, s.Roots[0].spec.litLen, s.Roots[1].spec.litLen)
+
+		n := inlineNode(t, s, "banner motd ^ hello")
+		require.Same(t, def, n.Def)
+		line, ok := n.InlineBlock()
+		if competitorFirst {
+			// The closed line would bind the competitor, so it stays multi-line.
+			assert.False(t, ok)
+			continue
+		}
+		assert.True(t, ok)
+		assert.Equal(t, "banner motd ^ hello ^", line)
 	}
+}
+
+// An empty terminator strips nothing, so it would never converge.
+func TestInlineClosePanicsWithoutBlockDelim(t *testing.T) {
+	s := textSchema(t)
+	def := s.Node("hostname {{ name:word }}")
+	assert.Panics(t, func() {
+		InlineClose(s.Roots, def, "hostname sw1", "")
+	})
+}
+
+// Fields built outside the parser can hold spacing that parsing would collapse.
+func TestInlineBlockRejectsNonNormalizedFields(t *testing.T) {
+	s := textSchema(t)
+	s.Node("banner motd {{ delim:word }}{{ first:text }}").BlockDelim("delim")
+	n := inlineNode(t, s, "banner motd ^ hi")
+	n.Fields["first"] = "  hi"
+	_, ok := n.InlineBlock()
+	assert.False(t, ok)
+}
+
+// A delimiter field emptied outside the parser degrades instead of panicking.
+func TestInlineBlockRejectsEmptyTerminator(t *testing.T) {
+	s := textSchema(t)
+	s.Node("banner motd {{ delim:word }}{{ first:text }}").BlockDelim("delim")
+	n := inlineNode(t, s, "banner motd ^ hi")
+	n.Fields["delim"] = ""
+	_, ok := n.InlineBlock()
+	assert.False(t, ok)
 }
 
 func TestInlineBlockDetachedNestedNodeFallsBack(t *testing.T) {

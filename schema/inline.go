@@ -5,12 +5,24 @@ import (
 	"strings"
 )
 
-// InlineClose removes trailing terminators while preserving the matched definition and delimiter.
+// InlineClose repeatedly removes a trailing terminator while the remaining text
+// still binds def among candidates with the same delimiter. It returns the
+// remaining text, its captured fields, and whether anything was removed; on
+// false the text is unchanged and fields is nil.
+//
+// candidates must hold every definition at the level that owns def, because the
+// match runs through MatchChild. def must declare a BlockDelim block and term
+// must be its terminator for the full line: an empty terminator would strip
+// nothing and never converge.
 func InlineClose(
 	candidates []*Def,
 	def *Def,
 	txt, term string,
 ) (string, map[string]string, bool) {
+	if def.Block.Kind != BlockDelim || term == "" {
+		panic("schema: InlineClose requires a BlockDelim definition " +
+			"and a non-empty terminator: " + def.Template)
+	}
 	var fields map[string]string
 	closed := false
 	// Repeated removal keeps canonical output idempotent.
@@ -46,8 +58,15 @@ func cutTerm(
 }
 
 // InlineBlock returns the one-line form of a BlockDelim node with an empty body.
-// It reports false unless parsing that line among the node's siblings closes the
-// block inline and restores the same opener and fields.
+// It reports false unless that line, matched against every definition candidate
+// at the node's level, binds this definition and closes inline to the same
+// opener and fields.
+//
+// The candidates come from the parent's definition, so a node must sit in the
+// tree it will be rendered from. A node whose parent carries no definition is
+// checked against the schema roots, which makes a detached or orphaned nested
+// node fall back to the multi-line form rather than emit a line that would bind
+// a different definition.
 func (n *Node) InlineBlock() (string, bool) {
 	def := n.Def
 	if def == nil || def.Block.Kind != BlockDelim || len(n.Block) > 0 {
@@ -59,7 +78,14 @@ func (n *Node) InlineBlock() (string, bool) {
 	}
 	opener := def.Render(n.Fields)
 	term := def.Block.Term(n.Fields)
+	if term == "" {
+		return "", false
+	}
 	line := opener + " " + term
+	// Parsing normalizes first, so a line it would rewrite cannot round-trip.
+	if NormalizeLine(line) != line {
+		return "", false
+	}
 	fields, ok := BindsDef(candidates, def, line)
 	if !ok || def.Block.Term(fields) != term {
 		return "", false

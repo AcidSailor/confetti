@@ -360,11 +360,15 @@ retain the source line and report diagnostics.
   those nodes differ. Inline close requires a trailing text capture and
   applies only to `BlockDelim` openers.
 
-  `render` and `compare` write an empty-body `BlockDelim` node on one line
-  (`banner motd ^ hi ^`) through `Node.InlineBlock`. The one-line form is used
-  only if it binds the same definition against all siblings and inline close
-  restores the same opener and fields. Otherwise the terminator keeps its own
-  line. Nodes with body lines always render multi-line.
+  `render` and `compare` write a `BlockDelim` node with an empty `Block` on one
+  line (`banner motd ^ hi ^`; the inline text lives in the opener's trailing
+  capture) through `Node.InlineBlock`. The one-line form is used only if it
+  binds the same definition against all candidates at that level and inline
+  close restores the same opener and fields. The candidates come from the
+  parent definition, so a detached node falls back to the multi-line form.
+  Fields that parsing would renormalize also fall back. Otherwise the
+  terminator keeps its own line. Nodes with body lines always render
+  multi-line.
 - **An invalid inline close reports a Warning and leaves the block open.**
   The warning requires a trailing terminator, another occurrence before it,
   and failure to match the shorter text to the same definition and delimiter.

@@ -6,7 +6,14 @@
 //
 // MatchChild matches a configuration line against definitions at one tree
 // level. Declaration order breaks ties between equally specific matches and
-// therefore affects schema behavior.
+// therefore affects schema behavior. NormalizeLine collapses whitespace the way
+// parsing does, so both sides agree on what a line means.
+//
+// Node.InlineBlock decides whether an empty BlockDelim body can close on its
+// opening line; render and compare share it so their output agrees. It confirms
+// the decision with InlineClose, which strips trailing terminators while the
+// remaining text still binds the same definition among all candidates at the
+// level.
 //
 // Keyed siblings with the same Kind and key pair as one entity. Unkeyed,
 // single-occupancy siblings pair by Kind alone, except toggle members and

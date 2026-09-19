@@ -21,7 +21,8 @@ func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	def := n.Def
 	indent := strings.Repeat(indentUnit, depth)
 	b.WriteString(indent)
-	// An empty BlockDelim body closes on the opening line when that form parses back to the same node.
+	// An empty BlockDelim body closes on the opening line when re-parsing that
+	// line restores the same definition and fields.
 	if line, ok := n.InlineBlock(); ok {
 		b.WriteString(line)
 		b.WriteByte('\n')

@@ -39,11 +39,18 @@ func Schema() *schema.Schema {
 	rmap.Child("set metric {{ metric:uint }}").
 		Card(schema.ZeroToOne).MarkIdempotent()
 
-	// Inline banners require a trailing text capture.
+	// This template has no trailing text capture, so its banners never close
+	// or render inline.
 	s.Node("banner motd {{ delim:word }}").
 		Card(schema.ZeroToOne).MarkIdempotent().
 		BlockDelim("delim").
 		NegateAs("no banner motd")
+
+	// The trailing capture lets this banner close and render on one line.
+	s.Node("banner exec {{ delim:word }} {{ msg:rest }}").
+		Card(schema.ZeroToOne).MarkIdempotent().
+		BlockDelim("delim").
+		NegateAs("no banner exec")
 
 	// Declare physical interfaces first so equal-specificity Ethernet names use the documented reset form.
 	phys := s.Node("interface {{ name:ethport }}").Card(schema.ZeroToN).

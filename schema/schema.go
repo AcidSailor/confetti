@@ -967,6 +967,13 @@ func (n *Def) MatchLine(
 // Render produces the config line by substituting field values into the template.
 func (n *Def) Render(f map[string]string) string { return n.spec.Render(f) }
 
+// NormalizeLine collapses surrounding and internal whitespace to single spaces.
+// Parsing applies it before matching, so a line that differs from its
+// normalized form cannot bind the same fields again.
+func NormalizeLine(line string) string {
+	return strings.Join(strings.Fields(line), " ")
+}
+
 // matchOrderCache stores one candidate slice and its stable specificity order for concurrent reuse.
 type matchOrderCache struct {
 	src     []*Def // The candidates used to compute ordered.

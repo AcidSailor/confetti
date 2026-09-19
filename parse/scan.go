@@ -140,6 +140,7 @@ func countIndent(line string) int {
 }
 
 // normalize trims and collapses internal whitespace to single spaces.
+// normalize shares schema's primitive so inline-close checks cannot drift from parsing.
 func normalize(line string) string {
-	return strings.Join(strings.Fields(line), " ")
+	return schema.NormalizeLine(line)
 }
