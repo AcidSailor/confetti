@@ -223,6 +223,11 @@ func (e *Engine) Compare(
 	running, intended *schema.Config,
 ) (string, *diag.Diagnostics) {
 	res, d := remediate.Diff(running, intended, e.diffOptions())
+	// compare omits the same block shapes render does and has no diagnostic
+	// channel of its own, so a node a transform or merge resolver built would
+	// otherwise drop out of the change view with nothing said about it.
+	validate.BlockBodies(running, d)
+	validate.BlockBodies(intended, d)
 	return compare.Render(res.Changes), d
 }
 
