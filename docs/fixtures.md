@@ -63,9 +63,10 @@ Unverified behavior and fixture limits:
 - The device checked on 2026-09-08 omits empty banners (`banner motd ^^`)
   from its running configuration, so confetti drops an empty delimited block on
   parse with a Warning and omits it on render.
-- Whether a device echoes a one-line banner back in one-line form was not
-  confirmed. The two forms are different banners, so a device that reformats
-  one makes remediation report a change on every cycle.
+- A device is expected to echo a one-line banner back in one-line form. This
+  was not confirmed on a lab image. It matters because the two forms are
+  different banners: a device that reformatted one would make remediation
+  report a change on every cycle.
 
 ## beta (OcNOS lineage)
 
