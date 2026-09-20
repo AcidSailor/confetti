@@ -281,9 +281,7 @@ func TestParseBlockClosesOnOpeningLine(t *testing.T) {
 	}
 }
 
-// A device ends the banner at the second delimiter, so trailing text is an
-// error. The severity decides whether Import rejects the configuration, so it is
-// asserted with the message.
+// Trailing text is an Error; the body ends at the second delimiter.
 func TestParseBlockTextAfterTerminator(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(oneLineBlockSchema(), "banner motd ^ a ^ b ^\n", Reject, d)
@@ -296,8 +294,7 @@ func TestParseBlockTextAfterTerminator(t *testing.T) {
 	assert.Equal(t, []string{" a "}, cfg.Root.Children[0].Block)
 }
 
-// The terminator can close on a later line, and trailing text there is the same
-// error. Without this the whole multi-line tail path goes unasserted.
+// Trailing text is also an Error when the delimiter closes on a later line.
 func TestParseBlockTextAfterTerminatorOnBodyLine(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(
@@ -318,8 +315,7 @@ func TestParseBlockTextAfterTerminatorOnBodyLine(t *testing.T) {
 	assert.Equal(t, "hostname sw1", cfg.Root.Children[1].Text)
 }
 
-// Whitespace after the closing delimiter cannot change how a device reads the
-// line, so it is dropped without a diagnostic.
+// Whitespace after the closing delimiter is ignored.
 func TestParseBlockWhitespaceAfterTerminatorIsSilent(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(oneLineBlockSchema(), "banner motd ^ hi ^   \n", Reject, d)
@@ -327,8 +323,7 @@ func TestParseBlockWhitespaceAfterTerminatorIsSilent(t *testing.T) {
 	assert.Equal(t, []string{" hi "}, cfg.Root.Children[0].Block)
 }
 
-// A device accepts the empty form and then omits it from its configuration.
-// The drop is reported, or a caller cannot tell it from input without a banner.
+// Dropping an empty block must warn and preserve the following command.
 func TestParseBlockEmptyInlineIsDropped(t *testing.T) {
 	s := oneLineBlockSchema()
 	d := diag.New()
@@ -344,8 +339,6 @@ func TestParseBlockEmptyInlineIsDropped(t *testing.T) {
 	assert.Equal(t, "hostname sw1", cfg.Root.Children[0].Text)
 }
 
-// An ordinary block reports nothing at all; a spurious warning on the common
-// path would otherwise go unnoticed.
 func TestParseBlockPlainOpenerIsSilent(t *testing.T) {
 	d := diag.New()
 	Parse(oneLineBlockSchema(), "banner motd ^\nhello\n^\n", Reject, d)
@@ -407,15 +400,14 @@ func TestParseBlockUntilOpenerWithTerminatorInText(t *testing.T) {
 		Reject,
 		d,
 	)
-	// Only BlockDelim closes on its opener, even when the head re-binds.
+	// BlockUntil requires its terminator on a separate line.
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "certificate quit quit", cfg.Root.Children[0].Text)
 	assert.Equal(t, []string{"MIIB"}, cfg.Root.Children[0].Block)
 }
 
-// Each one-line form renders to a fixed text and reports fixed diagnostics.
-// Asserting only idempotence would pass vacuously for the forms that render to
-// nothing, and would hide the ones that now report an Error.
+// Check exact output and diagnostics: idempotence alone also passes when a
+// block is incorrectly dropped.
 func TestParseBlockOneLineForms(t *testing.T) {
 	cases := []struct{ name, in, want, diags string }{
 		{

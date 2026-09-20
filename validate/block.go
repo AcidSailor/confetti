@@ -10,10 +10,9 @@ import (
 
 // BlockBodies reports delimited blocks that cannot be rendered faithfully.
 //
-// Parse cannot produce either shape, so a node that carries one was assembled by
-// a caller, a tree transform, or a merge resolver. Both render to text that does
-// not read back as the node it came from, and render reports nothing, so without
-// this check the defect surfaces only as remediation that never converges.
+// Empty bodies and bodies containing their delimiter cannot survive a round
+// trip. Parse prevents both, but callers, transforms, and merge resolvers can
+// construct them. This check provides the diagnostics that renderers cannot.
 func BlockBodies(cfg *schema.Config, d *diag.Diagnostics) {
 	schema.Walk(cfg, func(n *schema.Node) {
 		def := n.Def
@@ -29,10 +28,8 @@ func BlockBodies(cfg *schema.Config, d *diag.Diagnostics) {
 			)
 			return
 		}
-		// A device closes the block at the delimiter's next occurrence, so a body
-		// carrying the delimiter renders as a shorter block plus stray text.
-		// BlockDelim guarantees a single-rune delimiter, so it cannot straddle
-		// the newlines Block is split on and each entry can be tested alone.
+		// A delimiter in the body would close the block early. It is one
+		// non-space rune, so each body line can be checked separately.
 		term := def.Block.Term(n.Fields)
 		if slices.ContainsFunc(n.Block, func(l string) bool {
 			return strings.Contains(l, term)

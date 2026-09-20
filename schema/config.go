@@ -44,10 +44,10 @@ type Node struct {
 	Line       int               // A 1-based source line, or zero when absent.
 	Op         Op                // The remediation operation.
 	// Block holds the raw body split on newlines, or nil for an ordinary node.
-	// A BlockUntil body is whole lines. A BlockDelim body is the text between
-	// the two delimiters, so its first and last entries are the text beside
-	// each one and a one-line block has exactly one entry. It never contains
-	// the delimiter, and it is never empty; validate.BlockBodies reports both.
+	// BlockUntil stores whole lines. BlockDelim stores text between delimiters,
+	// including text beside each delimiter; a one-line body has one entry.
+	// A valid delimited body is non-empty and contains no delimiter.
+	// validate.BlockBodies reports violations.
 	Block []string
 
 	// Parent and Children are maintained by AddChild, ReplaceChild, and InsertChildBefore.
@@ -60,28 +60,22 @@ func NewNode(text string) *Node {
 	return &Node{Text: text}
 }
 
-// EmptyDelimBody reports whether a delimited block carries no body, without
-// building it. A device accepts the empty form and then omits it from its
-// running configuration, so parse drops such a node, render and compare emit
-// nothing for one, and validate.BlockBodies reports one that a caller built.
+// EmptyDelimBody reports whether joining n.Block with newlines would be empty.
+// Parse drops these blocks; render and compare omit them, and
+// validate.BlockBodies reports them in caller-built trees.
 func EmptyDelimBody(n *Node) bool {
 	return len(n.Block) == 0 || len(n.Block) == 1 && n.Block[0] == ""
 }
 
-// DelimLines returns the text lines of a delimited block: the canonically
-// rendered opener, which ends with the delimiter, followed by the body and a
-// re-emitted closing delimiter, split wherever the body carries a newline. The
-// first line belongs at the node's depth and the rest at column zero, so a
-// one-line and a multi-line block differ only in how many lines come back.
+// DelimLines returns the canonical opener, raw body, and closing delimiter,
+// split on newlines. Indent the first line to the node's depth and write the
+// rest at column zero.
 //
-// It returns nil for an empty body. Render and compare both emit from this, so
-// neither restates where a block's text comes from.
+// n must have a BlockDelim definition. An empty body returns nil.
 func DelimLines(n *Node) []string {
 	if EmptyDelimBody(n) {
 		return nil
 	}
-	// Only a BlockDelim node reaches here, and its kind comes from its
-	// definition, so the definition is what renders the opener and the terminator.
 	body := strings.Join(n.Block, "\n")
 	return strings.Split(
 		n.Def.Render(n.Fields)+body+n.Def.Block.Term(n.Fields),

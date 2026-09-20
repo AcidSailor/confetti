@@ -9,8 +9,7 @@ import (
 	"github.com/acidsailor/confetti/value"
 )
 
-// delimType registers pat as a value type and returns a def that uses it as the
-// trailing capture, so a caller can assert only whether BlockDelim accepts it.
+// delimType returns a builder call to test whether BlockDelim accepts pat.
 func delimType(t *testing.T, pat string) func() {
 	t.Helper()
 	s := New()
@@ -26,14 +25,11 @@ func builtinDelimPattern(t *testing.T) string {
 	return vt.Pattern
 }
 
-// The delimiter bound is derived from regexp/syntax rather than sampled, so it
-// has to hold across the construct space, not just for the built-in pattern.
+// Check the delimiter bound across regexp constructs, including Unicode.
 func TestBlockDelimAcceptsOneNonSpaceRune(t *testing.T) {
 	for _, pat := range []string{
 		`[!@#^]`, `[a-z]`, `\d`, `\pL`, `\p{Greek}`, `(?:a|b)`,
 		`[[:punct:]]`, `x{1,1}`, `(?i)q`, `é`, `\x41`, `[\x{1F600}]`,
-		// Read the built-in live rather than copying it, so this case keeps
-		// certifying the pattern BlockDelim callers actually get.
 		builtinDelimPattern(t),
 	} {
 		t.Run(pat, func(t *testing.T) {
@@ -58,8 +54,7 @@ func TestBlockDelimRejectsOtherPatterns(t *testing.T) {
 		"no-break space":    `[\x{00a0}^]`,
 		"ideographic space": `[\x{3000}^]`,
 		"line separator":    `[\x{2028}^]`,
-		// Go's \s and \S are ASCII-only, so \S admits every rune above that
-		// NormalizeLine folds away; such a delimiter could never be captured.
+		// Go's \S admits Unicode whitespace that NormalizeLine removes.
 		"bare \\S is ascii-only": `\S`,
 		"negated \\s keeps \\v":  `[^\s\p{Z}]`,
 	}
@@ -70,8 +65,7 @@ func TestBlockDelimRejectsOtherPatterns(t *testing.T) {
 	}
 }
 
-// The body starts where the delimiter ends, so a template cannot continue past
-// it. Without this the trailing-position panic goes unexercised.
+// The body starts after the delimiter, so the template must end there.
 func TestBlockDelimArgMustEndTemplate(t *testing.T) {
 	s := New()
 	assert.Panics(t, func() {
@@ -109,16 +103,13 @@ func TestBlockDelimGuardsBothCallOrders(t *testing.T) {
 	})
 }
 
-// A block opener matches a prefix, which is more permissive than an anchored
-// match. The text it keeps is the node's identity, so it must still bind the
-// definition that produced it or the node is re-read as a different command.
+// A retained opener prefix must bind the same definition when parsed again.
 func TestMatchChildOpenerRejectsPrefixASiblingClaims(t *testing.T) {
 	s := New()
 	s.Node("banner motd {{ x:word }}").Card(ZeroToN)
 	s.Node("banner motd {{ d:delim }}").Card(ZeroToOne).BlockDelim("d")
 
-	// "banner motd ^" binds the word definition, so the block definition must
-	// not claim the opener and leave a node that re-reads as the other one.
+	// "banner motd ^" binds the word definition, so reject the block prefix.
 	_, _, _, ok := MatchChildOpener(s.Roots, "banner motd ^ hi ^")
 	assert.False(t, ok)
 

@@ -73,9 +73,7 @@ func inlineSchema() *schema.Schema {
 }
 
 func TestRenderBlockInline(t *testing.T) {
-	// Every form renders back byte-exact: the body is the text between the two
-	// delimiters, so its line breaks are part of the banner. Each input is
-	// therefore its own expected output and the case carries one copy of it.
+	// Canonical input must round-trip exactly, including body spaces and newlines.
 	cases := []struct{ name, in string }{
 		{
 			"one line",
@@ -117,7 +115,7 @@ func TestRenderBlockInline(t *testing.T) {
 	}
 }
 
-// assertSameTree compares captured fields too; SameValue stops at the rendered text.
+// assertSameTree also checks fields and children, which SameValue does not compare.
 func assertSameTree(t *testing.T, want, got *schema.Node) {
 	t.Helper()
 	assert.True(t, want.SameValue(got), want.Text)
@@ -152,11 +150,7 @@ func TestRenderBlockUntilStaysMultiLine(t *testing.T) {
 	assert.Equal(t, in, Render(cfg))
 }
 
-// A delimiter longer than one character could not be recognized where the
-// device ends the block, so the schema refuses it.
-// bannerNode builds a delimited-block node directly, as a tree transform or a
-// downstream package would. Parse cannot produce an empty body, so this is the
-// only way to reach render's guard for it.
+// bannerNode builds a block directly to test bodies the parser would drop.
 func bannerNode(body []string) *schema.Config {
 	s := schema.New()
 	def := s.Node("banner motd {{ d:delim }}").
@@ -167,9 +161,7 @@ func bannerNode(body []string) *schema.Config {
 	return cfg
 }
 
-// A device omits the empty form, so rendering an opener and terminator would
-// invent a command it never reports. validate.BlockBodies is what reports the
-// node; render only has to not emit it.
+// Empty blocks produce no text; validate.BlockBodies reports them separately.
 func TestRenderOmitsEmptyDelimitedBlock(t *testing.T) {
 	for name, body := range map[string][]string{
 		"nil":            nil,

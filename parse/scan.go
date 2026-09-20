@@ -35,7 +35,7 @@ type step struct {
 	fields     map[string]string
 	opensBlock bool   // the definition declares a block
 	body       string // raw block text this line contributes, before any terminator
-	closed     bool   // this line contributes body text before a delimiter that closes here
+	closed     bool   // a BlockDelim closes on this line; body may be empty
 	tail       string // text after the terminator, which cannot be part of the block
 }
 
@@ -134,9 +134,7 @@ func (sc *scanner) bodyLine(raw string) step {
 // splitAtTerm cuts text at the first terminator, reporting the body before it and the text after.
 func splitAtTerm(text, term string) (body string, closed bool, tail string) {
 	if term == "" {
-		// strings.Cut on "" closes immediately and turns the whole line into a
-		// reported tail. BlockDelim's builder makes an empty delimiter
-		// unreachable; say so rather than degrade into that shape.
+		// BlockDelim forbids empty delimiters; strings.Cut would close immediately.
 		panic("parse: empty block terminator (schema.BlockDelim rejects one)")
 	}
 	before, after, ok := strings.Cut(text, term)
@@ -146,9 +144,8 @@ func splitAtTerm(text, term string) (body string, closed bool, tail string) {
 	return before, true, after
 }
 
-// rawOffset maps an offset in a normalized line back to the raw line it came
-// from. It walks runes and uses the same space test as NormalizeLine, so a
-// non-ASCII space such as U+0085 cannot desynchronize the two.
+// rawOffset maps a normalized byte offset to the raw line. It must use the
+// same Unicode whitespace rules as NormalizeLine to locate the body correctly.
 func rawOffset(raw, norm string, end int) int {
 	i, n := skipSpace(raw, 0), 0
 	for n < end && i < len(raw) {
@@ -162,10 +159,7 @@ func rawOffset(raw, norm string, end int) int {
 		n += w
 	}
 	if n < end {
-		// norm came from NormalizeLine(raw), so the walk must consume end bytes
-		// of it. Returning a truncated offset here would open a block on body
-		// text the opener never had and surface three layers later as an
-		// unrelated message.
+		// norm is NormalizeLine(raw); a partial offset would misplace the body.
 		panic("parse: rawOffset desynchronized from schema.NormalizeLine")
 	}
 	return i

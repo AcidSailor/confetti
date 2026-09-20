@@ -63,9 +63,7 @@ func renderChange(b *strings.Builder, c remediate.Change, depth int) {
 // writeTree writes a signed node and its complete subtree.
 func writeTree(b *strings.Builder, sign string, n *schema.Node, depth int) {
 	if def := n.Def; def != nil && def.Block.Kind == schema.BlockDelim {
-		// schema.DelimLines is what render emits from too, so the two cannot
-		// disagree about where a block's text comes from or about dropping the
-		// empty body a device would not report.
+		// Share block formatting and empty-body omission with render.
 		lines := schema.DelimLines(n)
 		if lines == nil {
 			return

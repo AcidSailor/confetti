@@ -95,22 +95,16 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 		return nil, fmt.Errorf("compiling %q: %w", tmpl, err)
 	}
 	m.re, m.prefixRe = re, prefixRe
-	// Both regexps are built from the same source, so a capture has the same
-	// subexpression index in each and neither matcher has to resolve it by name.
+	// Both regexps use the same capture indices; resolve names once.
 	for name := range m.argTypes {
 		m.argGroups[name] = re.SubexpIndex(name)
 	}
 	return m, nil
 }
 
-// oneNonSpaceRune reports whether the value type bound to arg matches exactly
-// one non-space rune, which is what a block delimiter must be. maxRunes is only
-// an upper bound, so the empty test supplies the lower one, and the space test
-// covers every rune NormalizeLine folds away. An uncompilable pattern answers
-// false, so a caller that requires the property rejects the arg.
-//
-// Only BlockDelim asks, so this is derived on demand rather than for every
-// capture arg of every template.
+// oneNonSpaceRune checks BlockDelim's capture constraint on demand. maxRunes
+// supplies the upper bound; the empty-match check supplies the lower bound.
+// Whitespace and invalid patterns are rejected.
 func (m *matchSpec) oneNonSpaceRune(arg string, reg *value.Registry) bool {
 	vt, ok := reg.Get(m.argTypes[arg])
 	if !ok {
@@ -125,9 +119,8 @@ func (m *matchSpec) oneNonSpaceRune(arg string, reg *value.Registry) bool {
 }
 
 // matchesSpace reports whether an anchored pattern can match a single
-// whitespace rune. NormalizeLine folds every unicode.IsSpace rune to a plain
-// separator before matching, so such a rune can never reach a capture: a
-// delimiter type that admits one would compile but never bind a line.
+// whitespace rune. These runes cannot serve as delimiters because
+// NormalizeLine trims or collapses them before matching.
 func matchesSpace(anchored *regexp.Regexp) bool {
 	for _, c := range spaceRunes {
 		if anchored.MatchString(string(c)) {
@@ -137,8 +130,7 @@ func matchesSpace(anchored *regexp.Regexp) bool {
 	return false
 }
 
-// spaceRunes lists every rune NormalizeLine folds away, enumerated once rather
-// than per pattern tested.
+// spaceRunes lists the Unicode whitespace recognized by NormalizeLine.
 var spaceRunes = func() []rune {
 	var out []rune
 	for _, r := range unicode.White_Space.R16 {
@@ -154,9 +146,9 @@ var spaceRunes = func() []rune {
 	return out
 }()
 
-// maxRunes returns an upper bound on the match length of pattern in runes, or
-// -1 when unbounded, unparsable, or not worth bounding. Every failure answers
-// -1, so a caller that requires a bound degrades to rejecting the pattern.
+// maxRunes returns an upper bound on the pattern's match length in runes.
+// It returns -1 for invalid, unbounded, or unsupported patterns so callers
+// requiring a bound reject them.
 func maxRunes(pattern string) int {
 	re, err := syntax.Parse(pattern, syntax.Perl)
 	if err != nil {
@@ -261,16 +253,13 @@ func (m *matchSpec) Match(line string) (map[string]string, bool) {
 	return fields, ok
 }
 
-// MatchPrefix matches line from its start without requiring the spec to consume
-// all of it, and returns the captured fields and the byte offset in line where
-// the match ends. It populates every arg, as Match does, so the shape of a
-// node's fields does not depend on which matcher bound it.
+// MatchPrefix matches from the start of line and returns the captured fields
+// and the byte offset where the match ends. Like Match, it includes every arg.
 func (m *matchSpec) MatchPrefix(line string) (map[string]string, int, bool) {
 	return m.matchWith(m.prefixRe, line)
 }
 
 // matchWith binds every capture against re and reports where the match ends.
-// Both matchers share it so the field shape cannot depend on which one ran.
 func (m *matchSpec) matchWith(
 	re *regexp.Regexp,
 	line string,

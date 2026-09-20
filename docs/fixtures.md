@@ -57,16 +57,14 @@ Unverified behavior and fixture limits:
 - `Baseline()` models VLAN 1 and the default VRF as device-provided, and
   `vrf member default` as their referrer. The device behavior was not
   confirmed on a lab image.
-- Single-line banners (`banner motd ^text^`) need no special template: the
-  body runs from the one-character delimiter to its next occurrence, on one
-  line or many.
+- The banner template supports one-line and multi-line bodies, ending at the
+  next occurrence of the captured delimiter.
 - The device checked on 2026-09-08 omits empty banners (`banner motd ^^`)
   from its running configuration, so confetti drops an empty delimited block on
   parse with a Warning and omits it on render.
-- A device is expected to echo a one-line banner back in one-line form. This
-  was not confirmed on a lab image. It matters because the two forms are
-  different banners: a device that reformatted one would make remediation
-  report a change on every cycle.
+- One-line banner output is unverified on a lab image. If the device prints
+  it as multiple lines, the body differs and remediation reports a change
+  on every cycle.
 
 ## beta (OcNOS lineage)
 

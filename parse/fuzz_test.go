@@ -22,15 +22,13 @@ func FuzzParse(f *testing.F) {
 	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
 	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
-	// A second block definition at the same level, so candidate ordering and
-	// terminator state are exercised rather than assumed.
+	// Sibling blocks exercise candidate ordering and terminator state.
 	s.Node("banner login {{ delim:delim }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
-	// A capture before the delimiter: the opener regexp has no end anchor, so
-	// the preceding capture binds differently than it would anchored.
+	// Exercise a capture before the delimiter in a prefix match.
 	s.Node("banner custom {{ kind:word }} {{ delim:delim }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
-	// A literal terminator owns its line, which is the other block strategy.
+	// BlockUntil requires a separate terminator line.
 	s.Node("certificate {{ name:word }}").
 		Card(schema.ZeroToN).BlockUntil("quit")
 	// A nested block takes its candidates from the parent definition.
@@ -102,12 +100,11 @@ func FuzzParse(f *testing.F) {
 					again,
 				)
 			}
-			// Rejected input has no canonical form, so both round-trip
-			// promises apply only to input that parsed cleanly.
+			// Error-free parsing must preserve the tree and introduce no errors
+			// on a round trip. Text idempotence above also covers rejected input.
 			if d.HasErrors() {
 				continue
 			}
-			// Rendering a clean parse must not invent problems of its own.
 			if rd.HasErrors() {
 				t.Fatalf(
 					"render of %q introduced errors: %s",
@@ -115,7 +112,6 @@ func FuzzParse(f *testing.F) {
 					rd.String(),
 				)
 			}
-			// Idempotent text is not enough: the tree must survive too.
 			sameTree(t, in, cfg.Root, back.Root)
 		}
 	})

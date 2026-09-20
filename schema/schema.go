@@ -490,25 +490,21 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 	return n
 }
 
-// Block guards must hold for either call order, so the two checks that enforce
-// each one share its message.
+// Paired builder guards use the same message in either call order.
 const (
 	blockWithSectionExit = "schema: block node cannot have a SectionExit token: "
 	listWithBlock        = "schema: list node cannot open a block: "
 )
 
-// BlockDelim opens a raw block that runs from its captured delimiter to the next
-// occurrence of that delimiter, and excludes child nodes. The body carries every
-// character between the two delimiters, so the delimiter must close the template:
-// text after it belongs to the block, not to the command.
+// BlockDelim opens a raw block from the captured delimiter to its next
+// occurrence, preserving all text between them. Block nodes cannot have children.
 //
 // BlockDelim panics unless arg is the last token of the template and its value
-// type matches exactly one non-space rune. The built-in "delim" type is such a
-// type. A device ends the block at the delimiter's next occurrence, where a
-// longer token could not be recognized, and NormalizeLine folds whitespace away
-// before matching, so a whitespace delimiter could never be captured.
+// type matches exactly one rune excluding Unicode whitespace. Use the built-in
+// "delim" type. Text after arg belongs to the body; whitespace cannot be a
+// delimiter because NormalizeLine trims or collapses it before matching.
 func (n *Def) BlockDelim(arg string) *Def {
-	// Reject empty terminators because they close at the first blank line and bypass block protection.
+	// Empty delimiters would close immediately and bypass block protection.
 	n.mustNonEmptyArg("BlockDelim", arg)
 	n.mustDelimArg(arg)
 	n.setBlock(BlockStrategy{Kind: BlockDelim, Arg: arg})
@@ -1040,14 +1036,12 @@ func MatchChild(
 	return nil, nil, false
 }
 
-// MatchChildOpener matches like MatchChild but lets a BlockDelim definition match
-// a prefix, because its delimiter is followed by block body text. It returns the
-// offset in line where the body begins.
+// MatchChildOpener matches like MatchChild, allowing BlockDelim definitions to
+// match a prefix ending at the delimiter. It returns the match's byte end offset.
 //
-// A prefix match is more permissive than an anchored one, so the opener text it
-// selects is checked against every candidate again: the text becomes the node's
-// identity, and a node whose own text binds a different definition would be
-// re-read as that other definition and cancel its own remediation.
+// The retained prefix must bind the same definition through MatchChild against
+// all candidates. Otherwise, parsing the node again could change its identity
+// and cancel its remediation.
 func MatchChildOpener(
 	candidates []*Def,
 	line string,

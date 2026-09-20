@@ -10,9 +10,7 @@ import (
 	"github.com/acidsailor/confetti/schema"
 )
 
-// bannerTree builds a delimited-block node directly, the way a downstream
-// package, a tree transform, or a merge resolver would. Parse cannot produce
-// these bodies, so this is the only path that reaches BlockBodies.
+// bannerTree builds blocks directly, allowing bodies the parser would reject.
 func bannerTree(body []string) *schema.Config {
 	s := schema.New()
 	def := s.Node("banner motd {{ d:delim }}").
@@ -38,8 +36,7 @@ func TestBlockBodiesRejectsEmptyBody(t *testing.T) {
 	}
 }
 
-// Render would emit this body verbatim between two delimiters, and a device
-// would close the block at the first one it met inside it.
+// A delimiter in the body would close the rendered block early.
 func TestBlockBodiesRejectsDelimiterInBody(t *testing.T) {
 	d := diag.New()
 	BlockBodies(bannerTree([]string{" a ^ b "}), d)
@@ -61,8 +58,7 @@ func TestBlockBodiesAcceptsParsedShapes(t *testing.T) {
 	}
 }
 
-// CommitCheck is the gate Remediate runs on an intended tree, so the rule has to
-// fire there and not only through the standalone helper.
+// Remediate validates its intended tree through CommitCheck.
 func TestCommitCheckReportsEmptyDelimitedBody(t *testing.T) {
 	cfg := bannerTree(nil)
 	d := diag.New()

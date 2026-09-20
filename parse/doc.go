@@ -11,12 +11,10 @@
 //
 // A BlockDelim block runs from its captured one-character delimiter to the next
 // occurrence of that delimiter, on the opening line or any later one. Block
-// holds the body split on newlines, so it carries the text beside each
-// delimiter and is never normalized. Non-blank text after the closing delimiter
-// reports an Error and is dropped; a whitespace-only remainder is dropped
-// silently, because it cannot change how a device reads the line. An empty body
-// is dropped with a Warning, and a block that never closed is dropped with an
-// Error, because a device omits the first and never reports the second.
+// holds the body split on newlines, including text beside either delimiter.
+// The body is never normalized. Non-blank text after the closing delimiter is
+// dropped with an Error; trailing whitespace is ignored. Empty delimited blocks
+// are dropped with a Warning and unterminated ones with an Error.
 //
 // A Fold change is atomic for each line. Each synthesized node matches its
 // rendered text against all definitions at the level with schema.MatchChild.

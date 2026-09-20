@@ -73,10 +73,9 @@ func Parse(
 			case st.closed:
 				tn = closeBlock(d, st, tn, []string{st.body})
 			case st.opensBlock:
-				// A literal terminator owns its line, so its body starts below.
-				// A BlockUntil node keeps a non-nil empty body so an empty block
-				// differs from a non-block node; an empty BlockDelim body is
-				// dropped instead.
+				// BlockUntil starts below the opener; a non-nil empty body
+				// distinguishes it from an ordinary node. BlockDelim starts
+				// on the opener line and drops empty bodies at close.
 				body := []string{}
 				if st.def.Block.Kind == schema.BlockDelim {
 					body = []string{st.body}
@@ -97,10 +96,8 @@ func Parse(
 		msg := "%s: block not terminated before end of input"
 		args := []any{blk.node.Path()}
 		if blk.node.Def.Block.Kind == schema.BlockDelim {
-			// A delimited block that never closed would render a terminator the
-			// input never had, and that text reads back as a different block.
-			// Say so, because the same sentence otherwise covers a BlockUntil
-			// block that is kept.
+			// Drop the block to avoid rendering a terminator absent from the input.
+			// The diagnostic distinguishes this from BlockUntil, which is kept.
 			msg += "; the command and its %d captured lines were dropped"
 			args = append(args, len(blk.body))
 			blk.node.Parent.ReplaceChild(blk.node)
@@ -116,10 +113,8 @@ func Parse(
 	return cfg
 }
 
-// closeBlock finishes a block node with the body captured for it: it reports
-// any text after the closing delimiter and drops a delimited block that has no
-// body. It returns the node, or nil when the drop detached it, so both callers
-// store one value back over the node instead of repeating the stack repair.
+// closeBlock stores the body, reports trailing text, and drops empty delimited
+// blocks. It returns the node or nil if dropped; callers must update the stack.
 func closeBlock(
 	d *diag.Diagnostics,
 	st step,
@@ -134,11 +129,9 @@ func closeBlock(
 	return n
 }
 
-// dropEmptyBlock removes a delimited block whose body is empty and reports
-// whether it removed the node. A device accepts the empty form and then omits it
-// from the running configuration, so keeping the node would invent a command the
-// device does not report. The drop is reported, because a caller cannot
-// otherwise tell it from input that never carried the block at all.
+// dropEmptyBlock warns and removes an empty delimited block, matching the
+// observed device behavior documented in docs/fixtures.md. It reports whether
+// the node was removed.
 func dropEmptyBlock(d *diag.Diagnostics, lineNo int, n *schema.Node) bool {
 	if n.Def.Block.Kind != schema.BlockDelim || !schema.EmptyDelimBody(n) {
 		return false
@@ -153,11 +146,8 @@ func dropEmptyBlock(d *diag.Diagnostics, lineNo int, n *schema.Node) bool {
 	return true
 }
 
-// blockTail reports text after a closing delimiter and drops it. A device ends
-// the block at that delimiter, so the remainder could never have come from a
-// running configuration and no reading of it is safe to guess at. A
-// whitespace-only remainder is dropped without a diagnostic, because it cannot
-// change how a device reads the line.
+// blockTail reports discarded text after the closing delimiter. Whitespace is
+// ignored; other text is an Error and is not parsed as a separate command.
 func blockTail(d *diag.Diagnostics, st step, n *schema.Node) {
 	if strings.TrimSpace(st.tail) == "" {
 		return

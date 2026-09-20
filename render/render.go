@@ -20,11 +20,8 @@ func Render(cfg *schema.Config) string {
 func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	def := n.Def
 	if def != nil && def.Block.Kind == schema.BlockDelim {
-		// schema.DelimLines carries the whole shape: nil for an empty body,
-		// which a device omits from its running configuration so emitting one
-		// would invent a command (validate.BlockBodies reports it, because
-		// Render has no diagnostic channel), otherwise the opener followed by
-		// the body lines at column zero.
+		// DelimLines omits empty bodies; validate.BlockBodies reports them.
+		// Indent only the opener to preserve raw body lines.
 		lines := schema.DelimLines(n)
 		if lines == nil {
 			return
