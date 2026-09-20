@@ -10,8 +10,8 @@ import (
 func TestBuiltinsAreStructuralOnly(t *testing.T) {
 	r := NewRegistry()
 	// Require only the parser's structural types; schemas register domain types.
-	assert.Len(t, r.types, 3)
-	for _, name := range []string{"word", "rest", "uint"} {
+	assert.Len(t, r.types, 4)
+	for _, name := range []string{"word", "rest", "uint", "delim"} {
 		_, ok := r.Get(name)
 		assert.True(t, ok, "structural builtin %q should exist", name)
 	}

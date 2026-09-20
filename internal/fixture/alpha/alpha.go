@@ -39,8 +39,7 @@ func Schema() *schema.Schema {
 	rmap.Child("set metric {{ metric:uint }}").
 		Card(schema.ZeroToOne).MarkIdempotent()
 
-	// Inline banners require a trailing text capture.
-	s.Node("banner motd {{ delim:word }}").
+	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).MarkIdempotent().
 		BlockDelim("delim").
 		NegateAs("no banner motd")

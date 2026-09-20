@@ -380,7 +380,7 @@ func TestDiffSchemaMismatch(t *testing.T) {
 func bannerSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
-	s.Node("banner motd {{ delim:word }}").
+	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).MarkIdempotent().
 		BlockDelim("delim").NegateAs("no banner motd")
 	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")

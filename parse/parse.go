@@ -41,9 +41,14 @@ func Parse(
 		switch st.kind {
 		case stepBlank:
 		case stepBody:
-			blk.body = append(blk.body, line)
+			blk.body = append(blk.body, st.body)
 		case stepBlockEnd:
-			blk.node.Block = blk.body
+			if st.closed {
+				blk.body = append(blk.body, st.body)
+			}
+			// The block node is the top of the stack; storing the result there
+			// keeps a deeper line from attaching to a node closeBlock detached.
+			nodes[len(nodes)-1] = closeBlock(d, st, blk.node, blk.body)
 			blk = nil
 		case stepUnknown:
 			if unknown == Reject {
@@ -59,26 +64,23 @@ func Parse(
 			}
 			nodes = append(nodes[:st.depth-1], nil)
 		case stepMatched:
-			if st.nearClose {
-				// Warn before treating following lines as block content.
-				d.AddAt(
-					st.lineNo,
-					diag.Warning,
-					"%q ends with block terminator %q but the text before it does not bind the same command; opening a multi-line block",
-					st.txt,
-					st.def.Block.Term(st.fields),
-				)
-			}
 			tn := liveParent(
 				nodes[:st.depth-1],
 			).AddChild(schema.NewNode(st.txt))
 			tn.Def, tn.Fields, tn.RealIndent = st.def, st.fields, st.indent
 			tn.Line = st.lineNo
-			// A non-nil empty body distinguishes an empty block from a non-block node.
-			if st.closesBlock {
-				tn.Block = []string{}
-			} else if st.opensBlock {
-				blk = &blockCapture{node: tn, body: []string{}}
+			switch {
+			case st.closed:
+				tn = closeBlock(d, st, tn, []string{st.body})
+			case st.opensBlock:
+				// BlockUntil starts below the opener; a non-nil empty body
+				// distinguishes it from an ordinary node. BlockDelim starts
+				// on the opener line and drops empty bodies at close.
+				body := []string{}
+				if st.def.Block.Kind == schema.BlockDelim {
+					body = []string{st.body}
+				}
+				blk = &blockCapture{node: tn, body: body}
 			}
 			nodes = append(nodes[:st.depth-1], tn)
 		}
@@ -91,19 +93,73 @@ func Parse(
 			blk.body = blk.body[:n-1]
 		}
 		// Unterminated blocks consume the remaining input and always report an Error.
-		d.AddAt(
-			blk.node.Line,
-			diag.Error,
-			"%s: block not terminated before end of input",
-			blk.node.Path(),
-		)
-		blk.node.Block = blk.body
+		msg := "%s: block not terminated before end of input"
+		args := []any{blk.node.Path()}
+		if blk.node.Def.Block.Kind == schema.BlockDelim {
+			// Drop the block to avoid rendering a terminator absent from the input.
+			// The diagnostic distinguishes this from BlockUntil, which is kept.
+			msg += "; the command and its %d captured lines were dropped"
+			args = append(args, len(blk.body))
+			blk.node.Parent.ReplaceChild(blk.node)
+		} else {
+			blk.node.Block = blk.body
+		}
+		d.AddAt(blk.node.Line, diag.Error, msg, args...)
 	}
 
 	if unknown == Drop && dropped > 0 {
 		d.Add(diag.Warning, "%d nodes dropped as unsupported", dropped)
 	}
 	return cfg
+}
+
+// closeBlock stores the body, reports trailing text, and drops empty delimited
+// blocks. It returns the node or nil if dropped; callers must update the stack.
+func closeBlock(
+	d *diag.Diagnostics,
+	st step,
+	n *schema.Node,
+	body []string,
+) *schema.Node {
+	n.Block = body
+	blockTail(d, st, n)
+	if dropEmptyBlock(d, st.lineNo, n) {
+		return nil
+	}
+	return n
+}
+
+// dropEmptyBlock warns and removes an empty delimited block, matching the
+// observed device behavior documented in docs/fixtures.md. It reports whether
+// the node was removed.
+func dropEmptyBlock(d *diag.Diagnostics, lineNo int, n *schema.Node) bool {
+	if n.Def.Block.Kind != schema.BlockDelim || !schema.EmptyDelimBody(n) {
+		return false
+	}
+	d.AddAt(
+		lineNo,
+		diag.Warning,
+		"%s: empty delimited block dropped; a device omits it from its running configuration",
+		n.Path(),
+	)
+	n.Parent.ReplaceChild(n)
+	return true
+}
+
+// blockTail reports discarded text after the closing delimiter. Whitespace is
+// ignored; other text is an Error and is not parsed as a separate command.
+func blockTail(d *diag.Diagnostics, st step, n *schema.Node) {
+	if strings.TrimSpace(st.tail) == "" {
+		return
+	}
+	d.AddAt(
+		st.lineNo,
+		diag.Error,
+		"%s: %q follows the closing delimiter %q and was dropped",
+		n.Path(),
+		strings.TrimSpace(st.tail),
+		n.Def.Block.Term(n.Fields),
+	)
 }
 
 // liveParent returns the nearest stack node that is not an unknown frame.

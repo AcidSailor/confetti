@@ -19,6 +19,20 @@ func Render(cfg *schema.Config) string {
 
 func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	def := n.Def
+	if def != nil && def.Block.Kind == schema.BlockDelim {
+		// DelimLines omits empty bodies; validate.BlockBodies reports them.
+		// Indent only the opener to preserve raw body lines.
+		lines := schema.DelimLines(n)
+		if lines == nil {
+			return
+		}
+		b.WriteString(strings.Repeat(indentUnit, depth))
+		for _, l := range lines {
+			b.WriteString(l)
+			b.WriteByte('\n')
+		}
+		return // setBlock forbids children and a section-exit token on a block.
+	}
 	indent := strings.Repeat(indentUnit, depth)
 	b.WriteString(indent)
 	if def != nil {
@@ -35,7 +49,7 @@ func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 		}
 		b.WriteString(def.Block.Term(n.Fields))
 		b.WriteByte('\n')
-		return // Block nodes have no children or section-exit tokens.
+		return // setBlock forbids children and a section-exit token on a block.
 	}
 	for _, c := range n.Children {
 		renderNode(b, c, depth+1)

@@ -1,0 +1,68 @@
+package validate
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/acidsailor/confetti/diag"
+	"github.com/acidsailor/confetti/schema"
+)
+
+// bannerTree builds blocks directly, allowing bodies the parser would reject.
+func bannerTree(body []string) *schema.Config {
+	s := schema.New()
+	def := s.Node("banner motd {{ d:delim }}").
+		Card(schema.ZeroToOne).BlockDelim("d")
+	cfg := schema.NewConfig(s)
+	n := cfg.Root.AddChild(schema.NewNode("banner motd ^"))
+	n.Def, n.Fields, n.Block = def, map[string]string{"d": "^"}, body
+	return cfg
+}
+
+func TestBlockBodiesRejectsEmptyBody(t *testing.T) {
+	for name, body := range map[string][]string{
+		"nil":            nil,
+		"empty slice":    {},
+		"one empty line": {""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := diag.New()
+			BlockBodies(bannerTree(body), d)
+			require.True(t, d.HasErrors(), d.String())
+			assert.Contains(t, d.String(), "delimited block has no body")
+		})
+	}
+}
+
+// A delimiter in the body would close the rendered block early.
+func TestBlockBodiesRejectsDelimiterInBody(t *testing.T) {
+	d := diag.New()
+	BlockBodies(bannerTree([]string{" a ^ b "}), d)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "contains its own delimiter")
+}
+
+func TestBlockBodiesAcceptsParsedShapes(t *testing.T) {
+	for name, body := range map[string][]string{
+		"one line":   {" hi "},
+		"multi line": {"", "hi", ""},
+		"blank body": {"", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := diag.New()
+			BlockBodies(bannerTree(body), d)
+			assert.Empty(t, d.Items, d.String())
+		})
+	}
+}
+
+// Remediate validates its intended tree through CommitCheck.
+func TestCommitCheckReportsEmptyDelimitedBody(t *testing.T) {
+	cfg := bannerTree(nil)
+	d := diag.New()
+	CommitCheck(cfg, nil, d)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Contains(t, d.String(), "delimited block has no body")
+}

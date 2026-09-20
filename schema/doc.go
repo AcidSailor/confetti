@@ -6,7 +6,14 @@
 //
 // MatchChild matches a configuration line against definitions at one tree
 // level. Declaration order breaks ties between equally specific matches and
-// therefore affects schema behavior.
+// therefore affects schema behavior. Apply NormalizeLine before matching to
+// trim and collapse whitespace as the parser does.
+//
+// MatchChildOpener lets a BlockDelim definition match a prefix ending at its
+// delimiter. It checks that prefix with MatchChild to preserve the definition
+// when the node is parsed again. BlockDelim requires its argument to end the
+// template and match exactly one non-space rune, as the built-in "delim" type
+// does. Invalid declarations panic.
 //
 // Keyed siblings with the same Kind and key pair as one entity. Unkeyed,
 // single-occupancy siblings pair by Kind alone, except toggle members and

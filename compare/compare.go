@@ -62,6 +62,19 @@ func renderChange(b *strings.Builder, c remediate.Change, depth int) {
 
 // writeTree writes a signed node and its complete subtree.
 func writeTree(b *strings.Builder, sign string, n *schema.Node, depth int) {
+	if def := n.Def; def != nil && def.Block.Kind == schema.BlockDelim {
+		// Share block formatting and empty-body omission with render.
+		lines := schema.DelimLines(n)
+		if lines == nil {
+			return
+		}
+		writeLine(b, sign, depth, lines[0])
+		for _, l := range lines[1:] {
+			// Body lines keep column zero after the sign.
+			writeLine(b, sign, 0, l)
+		}
+		return
+	}
 	writeLine(b, sign, depth, lineText(n))
 	if def := n.Def; def != nil && def.Block.Kind != schema.BlockNone {
 		// Preserve the block body at column zero after the sign.

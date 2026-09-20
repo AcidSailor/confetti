@@ -58,6 +58,7 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 	schema.Walk(cfg, c.recordConfig)
 	schema.Walk(cfg, c.checkRelations)
 	schema.Walk(cfg, c.checkExclusive)
+	BlockBodies(cfg, d)
 }
 
 // recordBaseline marks a device-provided node and indexes what it declares.

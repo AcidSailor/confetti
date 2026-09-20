@@ -445,6 +445,9 @@ func (n *Def) ClearOnRemove() *Def {
 func (n *Def) SectionExit(
 	tok string,
 ) *Def {
+	if n.Block.Kind != BlockNone {
+		panic(blockWithSectionExit + n.Template)
+	}
 	n.SectionExitToken = tok
 	return n
 }
@@ -487,12 +490,40 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 	return n
 }
 
-// BlockDelim opens a raw block terminated by a non-empty captured argument and excludes child nodes.
+// Paired builder guards use the same message in either call order.
+const (
+	blockWithSectionExit = "schema: block node cannot have a SectionExit token: "
+	listWithBlock        = "schema: list node cannot open a block: "
+)
+
+// BlockDelim opens a raw block from the captured delimiter to its next
+// occurrence, preserving all text between them. Block nodes cannot have children.
+//
+// BlockDelim panics unless arg is the last token of the template and its value
+// type matches exactly one rune excluding Unicode whitespace. Use the built-in
+// "delim" type. Text after arg belongs to the body; whitespace cannot be a
+// delimiter because NormalizeLine trims or collapses it before matching.
 func (n *Def) BlockDelim(arg string) *Def {
-	// Reject empty terminators because they close at the first blank line and bypass block protection.
+	// Empty delimiters would close immediately and bypass block protection.
 	n.mustNonEmptyArg("BlockDelim", arg)
+	n.mustDelimArg(arg)
 	n.setBlock(BlockStrategy{Kind: BlockDelim, Arg: arg})
 	return n
+}
+
+// mustDelimArg panics unless arg ends the template and its value type matches
+// exactly one non-space rune.
+func (n *Def) mustDelimArg(arg string) {
+	toks := n.spec.tokens
+	if last := toks[len(toks)-1]; last.kind != capToken || last.text != arg {
+		panic("schema: BlockDelim arg " + arg +
+			" must end the template: " + n.Template)
+	}
+	if !n.spec.oneNonSpaceRune(arg, n.Schema.Registry) {
+		panic("schema: BlockDelim arg " + arg +
+			` must capture exactly one non-space character (the built-in "delim" type does): ` +
+			n.Template)
+	}
 }
 
 // BlockUntil opens a raw block terminated by a non-empty literal line and excludes child nodes.
@@ -516,6 +547,14 @@ func (n *Def) setBlock(b BlockStrategy) {
 	}
 	if n.ListContinuation != nil || n.MembersKind != "" {
 		panic("schema: fold-only list node cannot open a block: " + n.Template)
+	}
+	if n.ListSpec.Arg != "" {
+		panic(listWithBlock + n.Template)
+	}
+	// Render and compare return after a block body, so a section-exit token on a
+	// block node would be silently discarded.
+	if n.SectionExitToken != "" {
+		panic(blockWithSectionExit + n.Template)
 	}
 	n.Block = b
 }
@@ -697,6 +736,9 @@ func (n *Def) List(arg, elemType string) *Def {
 	}
 	if n.EmptyOnRemove {
 		panic("schema: list node cannot be ClearOnRemove: " + n.Template)
+	}
+	if n.Block.Kind != BlockNone {
+		panic(listWithBlock + n.Template)
 	}
 	n.ListSpec.Arg, n.ListSpec.Elem = arg, elemType
 	n.Idempotent = true
@@ -967,6 +1009,14 @@ func (n *Def) MatchLine(
 // Render produces the config line by substituting field values into the template.
 func (n *Def) Render(f map[string]string) string { return n.spec.Render(f) }
 
+// NormalizeLine trims surrounding whitespace and collapses internal runs to
+// single spaces. Parse applies it before matching, so every other caller of
+// MatchChild must apply it too: an un-normalized line does not match a template
+// written with single spaces.
+func NormalizeLine(line string) string {
+	return strings.Join(strings.Fields(line), " ")
+}
+
 // matchOrderCache stores one candidate slice and its stable specificity order for concurrent reuse.
 type matchOrderCache struct {
 	src     []*Def // The candidates used to compute ordered.
@@ -978,8 +1028,47 @@ func MatchChild(
 	candidates []*Def,
 	line string,
 ) (*Def, map[string]string, bool) {
+	for _, c := range orderedCandidates(candidates) {
+		if f, ok := c.spec.Match(line); ok {
+			return c, f, true
+		}
+	}
+	return nil, nil, false
+}
+
+// MatchChildOpener matches like MatchChild, allowing BlockDelim definitions to
+// match a prefix ending at the delimiter. It returns the match's byte end offset.
+//
+// The retained prefix must bind the same definition through MatchChild against
+// all candidates. Otherwise, parsing the node again could change its identity
+// and cancel its remediation.
+func MatchChildOpener(
+	candidates []*Def,
+	line string,
+) (*Def, map[string]string, int, bool) {
+	for _, c := range orderedCandidates(candidates) {
+		if c.Block.Kind == BlockDelim {
+			f, end, ok := c.spec.MatchPrefix(line)
+			if !ok {
+				continue
+			}
+			if bound, _, ok := MatchChild(candidates, line[:end]); !ok ||
+				bound != c {
+				continue
+			}
+			return c, f, end, true
+		}
+		if f, ok := c.spec.Match(line); ok {
+			return c, f, len(line), true
+		}
+	}
+	return nil, nil, 0, false
+}
+
+// orderedCandidates returns candidates in descending literal specificity, caching the order.
+func orderedCandidates(candidates []*Def) []*Def {
 	if len(candidates) == 0 {
-		return nil, nil, false
+		return nil
 	}
 	lead := candidates[0]
 	memo := lead.matchOrder.Load()
@@ -991,12 +1080,7 @@ func MatchChild(
 		memo = &matchOrderCache{src: candidates, ordered: ordered}
 		lead.matchOrder.Store(memo)
 	}
-	for _, c := range memo.ordered {
-		if f, ok := c.spec.Match(line); ok {
-			return c, f, true
-		}
-	}
-	return nil, nil, false
+	return memo.ordered
 }
 
 // BindsDef reports whether MatchChild selects want and returns its captured fields.

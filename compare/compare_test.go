@@ -220,7 +220,7 @@ func TestRenderNoSectionExitToken(t *testing.T) {
 
 func TestRenderBlockBody(t *testing.T) {
 	s := schema.New()
-	s.Node("banner motd {{ delim:word }}").
+	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
 	res, d := remediate.Diff(
 		mustParse(t, s, "banner motd ^\nhello\n^\n"),
@@ -235,4 +235,75 @@ func TestRenderBlockBody(t *testing.T) {
 		"+ world\n" +
 		"+ ^\n"
 	assert.Equal(t, want, Render(res.Changes))
+}
+
+func TestRenderOneLineBlock(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("banner motd {{ delim:delim }}").
+		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
+	res, d := remediate.Diff(
+		mustParse(t, s, "banner motd ^ hello ^\n"),
+		mustParse(t, s, "banner motd ^ world ^\n"),
+		remediate.Options{Cycle: remediate.Break},
+	)
+	require.False(t, d.HasErrors(), d.String())
+	want := "- banner motd ^ hello ^\n" +
+		"+ banner motd ^ world ^\n"
+	assert.Equal(t, want, Render(res.Changes))
+}
+
+// Nested blocks retain their section context and indentation in the change log.
+func TestRenderOneLineBlockNested(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	sec := s.Node("line {{ name:word }}").Card(schema.ZeroToN)
+	sec.Child("banner exec {{ delim:delim }}").
+		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
+	res, d := remediate.Diff(
+		mustParse(t, s, "line vty\n  banner exec ^ hello ^\n"),
+		mustParse(t, s, "line vty\n  banner exec ^ world ^\n"),
+		remediate.Options{Cycle: remediate.Break},
+	)
+	require.False(t, d.HasErrors(), d.String())
+	want := "  line vty\n" +
+		"-   banner exec ^ hello ^\n" +
+		"+   banner exec ^ world ^\n"
+	assert.Equal(t, want, Render(res.Changes))
+}
+
+// Changing body spaces to newlines must appear in the diff.
+func TestRenderBlockOneLineVersusMultiLine(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("banner motd {{ delim:delim }}").
+		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
+	res, d := remediate.Diff(
+		mustParse(t, s, "banner motd ^ hi ^\n"),
+		mustParse(t, s, "banner motd ^\nhi\n^\n"),
+		remediate.Options{Cycle: remediate.Break},
+	)
+	require.False(t, d.HasErrors(), d.String())
+	require.Len(t, res.Changes, 1)
+	assert.Equal(t, graph.Modify, res.Changes[0].Action)
+	want := "- banner motd ^ hi ^\n" +
+		"+ banner motd ^\n" +
+		"+ hi\n" +
+		"+ ^\n"
+	assert.Equal(t, want, Render(res.Changes))
+}
+
+// Hand-built empty blocks must not produce a bare sign in the change log.
+// validate.BlockBodies reports the invalid node separately.
+func TestRenderSkipsEmptyDelimitedBlock(t *testing.T) {
+	s := schema.New()
+	def := s.Node("banner motd {{ d:delim }}").
+		Card(schema.ZeroToOne).BlockDelim("d")
+	cfg := schema.NewConfig(s)
+	n := cfg.Root.AddChild(schema.NewNode("banner motd ^"))
+	n.Def, n.Fields = def, map[string]string{"d": "^"}
+
+	assert.Equal(t, "", Render([]remediate.Change{
+		{Action: graph.Add, Intended: n},
+	}))
 }

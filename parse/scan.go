@@ -2,6 +2,8 @@ package parse
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/acidsailor/confetti/schema"
 )
@@ -17,29 +19,31 @@ type stepKind int
 const (
 	stepBlank    stepKind = iota // whitespace-only line
 	stepBody                     // inside an open raw block, not the terminator
-	stepBlockEnd                 // the terminator line of an open raw block
+	stepBlockEnd                 // the terminator of an open raw block appears on this line
 	stepUnknown                  // no schema candidate matched
 	stepMatched                  // a schema candidate matched
 )
 
 // step reports how the scanner classified one input line.
 type step struct {
-	kind        stepKind
-	lineNo      int // 1-based
-	txt         string
-	indent      int
-	depth       int // stack depth after this line, including the root frame
-	def         *schema.Def
-	fields      map[string]string
-	opensBlock  bool // the definition declares a block
-	closesBlock bool // the block closes on this line with an empty body
-	nearClose   bool // an invalid inline close leaves the block open
+	kind       stepKind
+	lineNo     int // 1-based
+	txt        string
+	indent     int
+	depth      int // stack depth after this line, including the root frame
+	def        *schema.Def
+	fields     map[string]string
+	opensBlock bool   // the definition declares a block
+	body       string // raw block text this line contributes, before any terminator
+	closed     bool   // a BlockDelim closes on this line; body may be empty
+	tail       string // text after the terminator, which cannot be part of the block
 }
 
 // scanner drives the indent-stack walk that Parse and BlockSpans must perform identically.
 type scanner struct {
 	stack  []frame
 	term   string // A non-empty value identifies an open raw block.
+	delim  bool   // The open block ends at the next delimiter, not at a whole line.
 	lineNo int
 }
 
@@ -54,15 +58,10 @@ func (sc *scanner) inBlock() bool { return sc.term != "" }
 func (sc *scanner) line(raw string) step {
 	sc.lineNo++
 	if sc.term != "" {
-		// Terminator comparison ignores trailing whitespace only.
-		if strings.TrimRight(raw, " \t\r") == sc.term {
-			sc.term = ""
-			return step{kind: stepBlockEnd, lineNo: sc.lineNo}
-		}
-		return step{kind: stepBody, lineNo: sc.lineNo}
+		return sc.bodyLine(raw)
 	}
 	indent := countIndent(raw)
-	txt := normalize(raw)
+	txt := schema.NormalizeLine(raw)
 	if txt == "" {
 		return step{kind: stepBlank, lineNo: sc.lineNo}
 	}
@@ -71,7 +70,7 @@ func (sc *scanner) line(raw string) step {
 		sc.stack = sc.stack[:len(sc.stack)-1]
 	}
 	top := &sc.stack[len(sc.stack)-1]
-	def, fields, ok := schema.MatchChild(top.children, txt)
+	def, fields, end, ok := schema.MatchChildOpener(top.children, txt)
 	if !ok {
 		// Isolate deeper lines under this unknown block.
 		sc.stack = append(sc.stack, frame{indent: indent})
@@ -83,80 +82,99 @@ func (sc *scanner) line(raw string) step {
 			depth:  len(sc.stack),
 		}
 	}
-	opens := def.Block.Kind != schema.BlockNone
-	closes, near := false, false
-	if opens {
-		term := def.Block.Term(fields)
-		if def.Block.Kind == schema.BlockDelim {
-			if head, f, ok := inlineClose(top.children, def, txt, term); ok {
-				txt, fields, closes = head, f, true
-			} else {
-				near = carriesTerm(txt, term)
-			}
+	st := step{
+		kind:       stepMatched,
+		lineNo:     sc.lineNo,
+		txt:        txt[:end],
+		indent:     indent,
+		def:        def,
+		fields:     fields,
+		opensBlock: def.Block.Kind != schema.BlockNone,
+	}
+	if def.Block.Kind == schema.BlockDelim {
+		// Body text keeps its original spacing, so measure it against the raw line.
+		rest := raw[rawOffset(raw, txt, end):]
+		st.body, st.closed, st.tail = splitAtTerm(rest, def.Block.Term(fields))
+		if !st.closed {
+			sc.term, sc.delim = def.Block.Term(fields), true
 		}
-		if !closes {
-			sc.term = term
-		}
+	} else if st.opensBlock {
+		sc.term, sc.delim = def.Block.Term(fields), false
 	}
 	sc.stack = append(sc.stack, frame{indent: indent, children: def.Children})
-	return step{
-		kind:        stepMatched,
-		lineNo:      sc.lineNo,
-		txt:         txt,
-		indent:      indent,
-		depth:       len(sc.stack),
-		def:         def,
-		fields:      fields,
-		opensBlock:  opens,
-		closesBlock: closes,
-		nearClose:   near,
-	}
+	st.depth = len(sc.stack)
+	return st
 }
 
-// inlineClose removes trailing terminators while preserving the matched definition and delimiter.
-func inlineClose(
-	candidates []*schema.Def,
-	def *schema.Def,
-	txt, term string,
-) (string, map[string]string, bool) {
-	var fields map[string]string
-	closed := false
-	// Repeated removal keeps canonical output idempotent.
-	for {
-		head, f, ok := cutTerm(candidates, def, txt, term)
-		if !ok {
-			return txt, fields, closed
+// bodyLine classifies a line inside an open raw block.
+func (sc *scanner) bodyLine(raw string) step {
+	st := step{lineNo: sc.lineNo, kind: stepBody, body: raw}
+	if !sc.delim {
+		// A literal terminator owns its line; only trailing whitespace is ignored.
+		if strings.TrimRight(raw, " \t\r") == sc.term {
+			sc.term = ""
+			return step{kind: stepBlockEnd, lineNo: sc.lineNo}
 		}
-		txt, fields, closed = head, f, true
+		return st
+	}
+	body, closed, tail := splitAtTerm(raw, sc.term)
+	if !closed {
+		return st
+	}
+	sc.term = ""
+	return step{
+		kind:   stepBlockEnd,
+		lineNo: sc.lineNo,
+		body:   body,
+		closed: true,
+		tail:   tail,
 	}
 }
 
-// cutTerm removes one trailing terminator if the remaining text binds the same definition and delimiter.
-func cutTerm(
-	candidates []*schema.Def,
-	def *schema.Def,
-	txt, term string,
-) (string, map[string]string, bool) {
-	head, ok := strings.CutSuffix(txt, term)
+// splitAtTerm cuts text at the first terminator, reporting the body before it and the text after.
+func splitAtTerm(text, term string) (body string, closed bool, tail string) {
+	if term == "" {
+		// BlockDelim forbids empty delimiters; strings.Cut would close immediately.
+		panic("parse: empty block terminator (schema.BlockDelim rejects one)")
+	}
+	before, after, ok := strings.Cut(text, term)
 	if !ok {
-		return "", nil, false
+		return text, false, ""
 	}
-	head = strings.TrimRight(head, " ")
-	// The remaining text must still contain the captured delimiter.
-	if !strings.Contains(head, term) {
-		return "", nil, false
-	}
-	fields, ok := schema.BindsDef(candidates, def, head)
-	if !ok || def.Block.Term(fields) != term {
-		return "", nil, false
-	}
-	return head, fields, true
+	return before, true, after
 }
 
-// carriesTerm reports whether a trailing terminator has another occurrence before it.
-func carriesTerm(txt, term string) bool {
-	head, ok := strings.CutSuffix(txt, term)
-	return ok && strings.Contains(head, term)
+// rawOffset maps a normalized byte offset to the raw line. It must use the
+// same Unicode whitespace rules as NormalizeLine to locate the body correctly.
+func rawOffset(raw, norm string, end int) int {
+	i, n := skipSpace(raw, 0), 0
+	for n < end && i < len(raw) {
+		if norm[n] == ' ' {
+			i = skipSpace(raw, i)
+			n++
+			continue
+		}
+		_, w := utf8.DecodeRuneInString(raw[i:])
+		i += w
+		n += w
+	}
+	if n < end {
+		// norm is NormalizeLine(raw); a partial offset would misplace the body.
+		panic("parse: rawOffset desynchronized from schema.NormalizeLine")
+	}
+	return i
+}
+
+// skipSpace returns the offset of the first non-space rune at or after i.
+func skipSpace(s string, i int) int {
+	for i < len(s) {
+		r, w := utf8.DecodeRuneInString(s[i:])
+		if !unicode.IsSpace(r) {
+			break
+		}
+		i += w
+	}
+	return i
 }
 
 func countIndent(line string) int {
@@ -172,9 +190,4 @@ func countIndent(line string) int {
 		}
 	}
 	return n
-}
-
-// normalize trims and collapses internal whitespace to single spaces.
-func normalize(line string) string {
-	return strings.Join(strings.Fields(line), " ")
 }

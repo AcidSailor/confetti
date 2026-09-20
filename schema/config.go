@@ -43,7 +43,12 @@ type Node struct {
 	RealIndent int               // Raw parsed indentation column.
 	Line       int               // A 1-based source line, or zero when absent.
 	Op         Op                // The remediation operation.
-	Block      []string          // Raw block body lines, or nil for ordinary nodes.
+	// Block holds the raw body split on newlines, or nil for an ordinary node.
+	// BlockUntil stores whole lines. BlockDelim stores text between delimiters,
+	// including text beside each delimiter; a one-line body has one entry.
+	// A valid delimited body is non-empty and contains no delimiter.
+	// validate.BlockBodies reports violations.
+	Block []string
 
 	// Parent and Children are maintained by AddChild, ReplaceChild, and InsertChildBefore.
 	Parent   *Node
@@ -53,6 +58,29 @@ type Node struct {
 // NewNode creates an unmatched node with the given text.
 func NewNode(text string) *Node {
 	return &Node{Text: text}
+}
+
+// EmptyDelimBody reports whether joining n.Block with newlines would be empty.
+// Parse drops these blocks; render and compare omit them, and
+// validate.BlockBodies reports them in caller-built trees.
+func EmptyDelimBody(n *Node) bool {
+	return len(n.Block) == 0 || len(n.Block) == 1 && n.Block[0] == ""
+}
+
+// DelimLines returns the canonical opener, raw body, and closing delimiter,
+// split on newlines. Indent the first line to the node's depth and write the
+// rest at column zero.
+//
+// n must have a BlockDelim definition. An empty body returns nil.
+func DelimLines(n *Node) []string {
+	if EmptyDelimBody(n) {
+		return nil
+	}
+	body := strings.Join(n.Block, "\n")
+	return strings.Split(
+		n.Def.Render(n.Fields)+body+n.Def.Block.Term(n.Fields),
+		"\n",
+	)
 }
 
 // CloneValue deep-copies value state into an unparented node without children, operation, indentation, or source line.

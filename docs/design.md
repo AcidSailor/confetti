@@ -22,7 +22,7 @@ connections or vendor-specific logic.
 confetti (root)   Engine options and pipelines
 ├── schema        grammar and config tree (Def templates, kinds/keys/refs,
 │                 strategies, MatchChild, Node, Config, op tags)
-├── value         value-type registry (builtins: word, rest, uint)
+├── value         value-type registry (builtins: word, rest, uint, delim)
 ├── parse         text → tree (indent stack, block capture, BlockSpans) and
 │                 the import fold (Respell → ListContinues → Members)
 ├── validate      ImportCheck (values, cardinality, dup keys, toggles,
@@ -59,7 +59,7 @@ Layering rules:
 - **Keep each capability in a leaf package at the lowest layer that owns it.**
   Limit changes to the packages that need them.
 - Core ships no platforms. Domain value types (`ifname`, `ipv4`, `vlan`,
-  `asn`) are platform data. The built-in types are `word`, `rest`, and `uint`.
+  `asn`) are platform data. Built-in types are `word`, `rest`, `uint`, and `delim`.
   `word` is required as the default for untyped captures.
 - Prefer limited duplication until three uses justify a shared abstraction.
   Shared identity logic belongs in `internal/ident`. Shared IPv4 and numeric
@@ -77,10 +77,11 @@ CommitCheck: schema relations and exclusive names over an assembled tree,
            with baseline objects as extra targets and name holders
            (exclusions stay sibling-scoped)
            → custom validators (WithCommitChecks)
-Render:    user tree transforms → render → text transforms (outside blocks)
+Render:    user tree transforms → BlockBodies → render
+           → text transforms (outside blocks)
 Remediate: CommitCheck(intended) + Diff(running, intended)
 Rollback:  CommitCheck(running)  + Diff(intended, running)
-Compare:   Diff + compare.Render; no commit check
+Compare:   Diff + BlockBodies on both inputs + compare.Render; no commit check
 Merge:     fold parts left-to-right; no commit check
 ```
 
@@ -140,6 +141,8 @@ retain the source line and report diagnostics.
   overlaps resolve by declaration order. Therefore, declaration order is part
   of schema behavior. Examples include the physical-port definition before
   the general definition and the canonical section before membership syntax.
+  `MatchChildOpener` also checks a `BlockDelim` prefix against all candidates
+  with `MatchChild`. It rejects the prefix if it binds a different definition.
 - **Represent platform-specific behavior as schema data or hooks, not core code.**
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
   `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
@@ -315,7 +318,9 @@ retain the source line and report diagnostics.
 
 - **Any code path that assigns a definition and text to a node must pass the
   rendered text to `schema.MatchChild` with all candidates at that level. The
-  result must bind the intended definition.** Matching only the intended
+  result must bind the intended definition.** `schema.MatchChildOpener` uses
+  the same candidate order and checks the retained opener prefix with
+  `MatchChild`. Matching only the intended
   definition can select a different equal-specificity sibling after parsing,
   produce a different identity, and cancel remediation. Each new fold or
   synthesis path requires a regression test for this condition.
@@ -348,23 +353,34 @@ retain the source line and report diagnostics.
   input is not always byte-identical after rendering. Rollback therefore
   restores canonical parsed running configuration, not original bytes. Lines
   dropped by a `parse.Drop` import cannot be restored.
-- **A `BlockDelim` block can close on its opening line.** The parser removes
-  trailing terminators while the remaining text matches the same definition
-  and delimiter against all candidates at that level. Repeated removal keeps
-  canonical output idempotent. Terminators within the remaining text stay
-  literal.
+- **A `BlockDelim` block closes at the next occurrence of its delimiter.**
+  The opener matches a prefix of the line; the body can start or end mid-line.
+  The delimiter capture must end the template and match exactly one rune,
+  excluding all `unicode.IsSpace` runes. `BlockDelim` checks the pattern with
+  `regexp/syntax` and panics if it fails these constraints. Use the built-in
+  `delim` type: Go's `\S` admits Unicode whitespace that `NormalizeLine`
+  removes before matching.
 
-  Inline text stays in the opener's trailing capture and is normalized. The
-  node has an empty `Block` and equals one parsed with the terminator on the
-  next line. Text on separate body lines is stored byte-exact in `Block`, so
-  those nodes differ. Render puts the terminator on a separate line. Inline
-  close requires a trailing text capture and applies only to `BlockDelim`
-  openers.
-- **An invalid inline close reports a Warning and leaves the block open.**
-  The warning requires a trailing terminator, another occurrence before it,
-  and failure to match the shorter text to the same definition and delimiter.
-  A plain opener with only its delimiter does not warn. The warning prevents
-  silent capture of following lines when a later terminator closes the block.
+  `Block` holds the body split on newlines, including text beside either
+  delimiter. `banner motd ^ hi ^` gives `[" hi "]` and
+  `banner motd ^\nhi\n^` gives `["", "hi", ""]`. Spaces and newlines are part
+  of the body, so these forms differ. `schema.DelimLines` supplies both
+  `render` and `compare` with the opener, body, and closing delimiter.
+
+  A `BlockUntil` terminator occupies a separate line.
+- **Non-blank text after the closing delimiter reports an Error and is
+  dropped.** The parser keeps the body before the delimiter and does not
+  interpret the remainder as another command. Trailing whitespace is ignored.
+- **An empty delimited body is dropped on parse and omitted on render.** A
+  Warning reports the drop, matching the observed empty-banner behavior in
+  `docs/fixtures.md`. An unterminated delimited block is dropped with an Error
+  to avoid rendering a closing delimiter absent from the input.
+- **A valid delimited body is non-empty and contains no delimiter.** Parse
+  enforces this; callers, transforms, and merge resolvers can build invalid
+  nodes. `validate.BlockBodies` reports these nodes through `CommitCheck`,
+  `Engine.Render`, and `Engine.Compare`. The renderers have no diagnostic
+  channel: they omit empty bodies and emit other bodies verbatim, so a body
+  containing its delimiter would parse back as a shorter block.
 - **Text transforms never run inside block spans.** Span detection is
   level-aware (`parse.BlockSpans` mirrors the parser's indent walk) and the
   guard protects the union of the raw-text walk and the

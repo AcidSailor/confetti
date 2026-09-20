@@ -187,6 +187,8 @@ func (e *Engine) commitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 func (e *Engine) Render(cfg *schema.Config) (string, *diag.Diagnostics) {
 	d := diag.New()
 	transform.ApplyTree(e.exportTree, cfg)
+	// Report invalid block bodies after transforms; render has no diagnostics.
+	validate.BlockBodies(cfg, d)
 	out := render.Render(cfg)
 	out = applyTextOutsideBlocks(e.schema, e.exportText, out)
 	return out, d
@@ -219,6 +221,9 @@ func (e *Engine) Compare(
 	running, intended *schema.Config,
 ) (string, *diag.Diagnostics) {
 	res, d := remediate.Diff(running, intended, e.diffOptions())
+	// Check both inputs for invalid block bodies; compare has no diagnostics.
+	validate.BlockBodies(running, d)
+	validate.BlockBodies(intended, d)
 	return compare.Render(res.Changes), d
 }
 

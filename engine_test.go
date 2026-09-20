@@ -184,7 +184,7 @@ func TestEngineExportTextTransformSkipsBlocks(t *testing.T) {
 	// Export rules must not alter raw block bodies or terminators.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
-	s.Node("banner motd {{ delim:word }}").
+	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
 	iface.Child("description {{ text:rest }}").
@@ -205,11 +205,11 @@ func TestEngineExportTextTransformSkipsBlocks(t *testing.T) {
 	assert.Contains(t, out, "description REDACTED")
 }
 
-func TestEngineImportTextTransformAfterInlineBlockClose(t *testing.T) {
+func TestEngineImportTextTransformAfterOneLineBlock(t *testing.T) {
 	// An inline block protects only its opening line from text transforms.
 	s := schema.New()
 	testtypes.Fill(s.Registry)
-	s.Node("banner motd {{ delim:word }}{{ msg:text }}").
+	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
 	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne).MarkIdempotent()
 	sub, err := transform.PerLineSub(`secret`, "REDACTED")
@@ -221,15 +221,21 @@ func TestEngineImportTextTransformAfterInlineBlockClose(t *testing.T) {
 
 	inline, d := e.Import("banner motd ^ secret ^\nhostname secret\n")
 	require.False(t, d.HasErrors(), d.String())
-	assert.Equal(t, "banner motd ^ secret", inline.Root.Children[0].Text)
+	assert.Equal(t, "banner motd ^", inline.Root.Children[0].Text)
+	// Block text is protected from the import transform; the next line is not.
+	assert.Equal(t, []string{" secret "}, inline.Root.Children[0].Block)
 	assert.Equal(t, "hostname REDACTED", inline.Root.Children[1].Text)
+	// Render returns the one-line form through the public engine path.
+	out, rd := e.Render(inline)
+	require.False(t, rd.HasErrors(), rd.String())
+	assert.Equal(t, "banner motd ^ secret ^\nhostname REDACTED\n", out)
 
 	multi, md := e.Import("banner motd ^\nhostname secret\n^\n")
 	require.False(t, md.HasErrors(), md.String())
 	// Block body lines retain their original text.
 	assert.Equal(
 		t,
-		[]string{"hostname secret"},
+		[]string{"", "hostname secret", ""},
 		multi.Root.Children[0].Block,
 	)
 }
@@ -257,7 +263,7 @@ func TestEngineExportTextTransformReachesRemediationArtifact(t *testing.T) {
 func TestImportTextTransformNestedFalseOpenerStaysUnprotected(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
-	s.Node("banner motd {{ delim:word }}").
+	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
 	iface := s.Node("interface {{ name:ifname }}").Card(schema.ZeroToN)
 	iface.Child("description {{ text:rest }}").
@@ -285,7 +291,7 @@ func TestImportNoiseIndentCannotStrandBlockOpener(t *testing.T) {
 	cfg, d := e.Import("!\n banner motd !\nhello\n!\nvlan 10\nvlan 20\n")
 	require.False(t, d.HasErrors(), d.String())
 	require.Len(t, cfg.Root.Children, 3)
-	assert.Equal(t, []string{"hello"}, cfg.Root.Children[0].Block)
+	assert.Equal(t, []string{"", "hello", ""}, cfg.Root.Children[0].Block)
 	assert.Equal(t, "vlan 20", cfg.Root.Children[2].Text)
 }
 
@@ -298,7 +304,7 @@ func TestImportNoiseBeforeTabIndentedOpenerKeepsBody(t *testing.T) {
 	require.Len(t, cfg.Root.Children, 2)
 	assert.Equal(
 		t,
-		[]string{"!!! Authorized !!!", "exit"},
+		[]string{"", "!!! Authorized !!!", "exit", ""},
 		cfg.Root.Children[0].Block,
 	)
 	assert.Equal(t, "vlan 10", cfg.Root.Children[1].Text)
