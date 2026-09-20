@@ -22,9 +22,17 @@ func FuzzParse(f *testing.F) {
 	s.Node("vlan {{ id:vlan }}").Card(schema.ZeroToN).Kind("vlan").Key("id")
 	s.Node("banner motd {{ delim:delim }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
-	// The trailing capture permits inline close.
+	// A second block definition at the same level, so candidate ordering and
+	// terminator state are exercised rather than assumed.
 	s.Node("banner login {{ delim:delim }}").
 		Card(schema.ZeroToOne).BlockDelim("delim")
+	// A capture before the delimiter: the opener regexp has no end anchor, so
+	// the preceding capture binds differently than it would anchored.
+	s.Node("banner custom {{ kind:word }} {{ delim:delim }}").
+		Card(schema.ZeroToOne).BlockDelim("delim")
+	// A literal terminator owns its line, which is the other block strategy.
+	s.Node("certificate {{ name:word }}").
+		Card(schema.ZeroToN).BlockUntil("quit")
 	// A nested block takes its candidates from the parent definition.
 	vty := s.Node("line {{ name:word }}").Card(schema.ZeroToN)
 	vty.Child("banner exec {{ delim:delim }}").
@@ -50,6 +58,13 @@ func FuzzParse(f *testing.F) {
 		"line vty\n  banner exec ^ hi\n^\n",
 		"line vty\n  banner exec ^\n^\n",
 		"line vty\n  banner exec ^ a ^ b ^\n",
+		"banner custom x ^ hi ^\n",
+		"banner custom a b c ^ hi ^\n",
+		"certificate ca1\nMIIB\nquit\n",
+		"certificate ca1\nunterminated\n",
+		"banner motd\u0085^ hi ^\n",
+		"banner motd   ^ hi ^\n",
+		"banner motd ^ hi ^   \n",
 	}
 	for _, sd := range seeds {
 		f.Add(sd)

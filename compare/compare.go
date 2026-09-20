@@ -64,7 +64,7 @@ func renderChange(b *strings.Builder, c remediate.Change, depth int) {
 func writeTree(b *strings.Builder, sign string, n *schema.Node, depth int) {
 	if def := n.Def; def != nil && def.Block.Kind == schema.BlockDelim {
 		// Match render: the body runs between the two delimiters, and an empty
-		// one is a command the device would not report.
+		// body is a command the device would not report.
 		body := strings.Join(n.Block, "\n")
 		if body == "" {
 			return

@@ -205,7 +205,7 @@ func TestEngineExportTextTransformSkipsBlocks(t *testing.T) {
 	assert.Contains(t, out, "description REDACTED")
 }
 
-func TestEngineImportTextTransformAfterInlineBlockClose(t *testing.T) {
+func TestEngineImportTextTransformAfterOneLineBlock(t *testing.T) {
 	// An inline block protects only its opening line from text transforms.
 	s := schema.New()
 	testtypes.Fill(s.Registry)

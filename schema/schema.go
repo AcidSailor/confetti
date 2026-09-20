@@ -445,6 +445,11 @@ func (n *Def) ClearOnRemove() *Def {
 func (n *Def) SectionExit(
 	tok string,
 ) *Def {
+	if n.Block.Kind != BlockNone {
+		panic(
+			"schema: block node cannot have a SectionExit token: " + n.Template,
+		)
+	}
 	n.SectionExitToken = tok
 	return n
 }
@@ -491,6 +496,12 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 // occurrence of that delimiter, and excludes child nodes. The body carries every
 // character between the two delimiters, so the delimiter must close the template:
 // text after it belongs to the block, not to the command.
+//
+// BlockDelim panics unless arg is the last token of the template and its value
+// type matches exactly one non-space rune. The built-in "delim" type is such a
+// type. A device ends the block at the delimiter's next occurrence, where a
+// longer token could not be recognized, and NormalizeLine folds whitespace away
+// before matching, so a whitespace delimiter could never be captured.
 func (n *Def) BlockDelim(arg string) *Def {
 	// Reject empty terminators because they close at the first blank line and bypass block protection.
 	n.mustNonEmptyArg("BlockDelim", arg)
@@ -499,18 +510,18 @@ func (n *Def) BlockDelim(arg string) *Def {
 	return n
 }
 
-// mustTrailingArg panics unless arg ends the template and captures one character.
+// mustTrailingArg panics unless arg ends the template and its value type matches
+// exactly one non-space rune.
 func (n *Def) mustTrailingArg(setter, arg string) {
 	toks := n.spec.tokens
 	if last := toks[len(toks)-1]; last.kind != capToken || last.text != arg {
 		panic("schema: " + setter + " arg " + arg +
 			" must end the template: " + n.Template)
 	}
-	// A device ends the block at the delimiter's next occurrence, so a
-	// multi-character token could not be recognized there.
 	if !n.spec.oneCharArgs[arg] {
 		panic("schema: " + setter + " arg " + arg +
-			" must capture exactly one character: " + n.Template)
+			` must capture exactly one non-space character (the built-in "delim" type does): ` +
+			n.Template)
 	}
 }
 
@@ -535,6 +546,16 @@ func (n *Def) setBlock(b BlockStrategy) {
 	}
 	if n.ListContinuation != nil || n.MembersKind != "" {
 		panic("schema: fold-only list node cannot open a block: " + n.Template)
+	}
+	if n.ListSpec.Arg != "" {
+		panic("schema: list node cannot open a block: " + n.Template)
+	}
+	// Render and compare return after a block body, so a section-exit token on a
+	// block node would be silently discarded.
+	if n.SectionExitToken != "" {
+		panic(
+			"schema: block node cannot have a SectionExit token: " + n.Template,
+		)
 	}
 	n.Block = b
 }
@@ -716,6 +737,9 @@ func (n *Def) List(arg, elemType string) *Def {
 	}
 	if n.EmptyOnRemove {
 		panic("schema: list node cannot be ClearOnRemove: " + n.Template)
+	}
+	if n.Block.Kind != BlockNone {
+		panic("schema: list node cannot open a block: " + n.Template)
 	}
 	n.ListSpec.Arg, n.ListSpec.Elem = arg, elemType
 	n.Idempotent = true
@@ -986,9 +1010,10 @@ func (n *Def) MatchLine(
 // Render produces the config line by substituting field values into the template.
 func (n *Def) Render(f map[string]string) string { return n.spec.Render(f) }
 
-// NormalizeLine collapses surrounding and internal whitespace to single spaces.
-// Parsing applies it before matching, so a line that differs from its
-// normalized form cannot bind the same fields again.
+// NormalizeLine trims surrounding whitespace and collapses internal runs to
+// single spaces. Parse applies it before matching, so every other caller of
+// MatchChild must apply it too: an un-normalized line does not match a template
+// written with single spaces.
 func NormalizeLine(line string) string {
 	return strings.Join(strings.Fields(line), " ")
 }
@@ -1015,16 +1040,26 @@ func MatchChild(
 // MatchChildOpener matches like MatchChild but lets a BlockDelim definition match
 // a prefix, because its delimiter is followed by block body text. It returns the
 // offset in line where the body begins.
+//
+// A prefix match is more permissive than an anchored one, so the opener text it
+// selects is checked against every candidate again: the text becomes the node's
+// identity, and a node whose own text binds a different definition would be
+// re-read as that other definition and cancel its own remediation.
 func MatchChildOpener(
 	candidates []*Def,
 	line string,
 ) (*Def, map[string]string, int, bool) {
 	for _, c := range orderedCandidates(candidates) {
 		if c.Block.Kind == BlockDelim {
-			if f, end, ok := c.spec.MatchPrefix(line); ok {
-				return c, f, end, true
+			f, end, ok := c.spec.MatchPrefix(line)
+			if !ok {
+				continue
 			}
-			continue
+			if bound, _, ok := MatchChild(candidates, line[:end]); !ok ||
+				bound != c {
+				continue
+			}
+			return c, f, end, true
 		}
 		if f, ok := c.spec.Match(line); ok {
 			return c, f, len(line), true

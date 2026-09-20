@@ -11,7 +11,12 @@
 //
 // MatchChildOpener lets a BlockDelim definition match a prefix, because its
 // one-character delimiter is followed by block body text rather than more of
-// the command.
+// the command. It then re-matches the opener text it would keep against every
+// candidate, because a prefix match is more permissive than an anchored one and
+// a node whose own text binds a different definition would be re-read as that
+// other one. BlockDelim panics unless its argument is the template's last token
+// and its value type matches exactly one non-space rune; the built-in "delim"
+// type is such a type.
 //
 // Keyed siblings with the same Kind and key pair as one entity. Unkeyed,
 // single-occupancy siblings pair by Kind alone, except toggle members and

@@ -158,9 +158,43 @@ func TestRenderBlockUntilStaysMultiLine(t *testing.T) {
 
 // A delimiter longer than one character could not be recognized where the
 // device ends the block, so the schema refuses it.
-func TestBlockDelimRejectsMultiCharType(t *testing.T) {
+// bannerNode builds a delimited-block node directly, as a tree transform or a
+// downstream package would. Parse cannot produce an empty body, so this is the
+// only way to reach render's guard for it.
+func bannerNode(body []string) *schema.Config {
 	s := schema.New()
-	assert.Panics(t, func() {
-		s.Node("banner motd {{ delim:word }}").BlockDelim("delim")
-	})
+	def := s.Node("banner motd {{ d:delim }}").
+		Card(schema.ZeroToOne).BlockDelim("d")
+	cfg := schema.NewConfig(s)
+	n := cfg.Root.AddChild(schema.NewNode("banner motd ^"))
+	n.Def, n.Fields, n.Block = def, map[string]string{"d": "^"}, body
+	return cfg
+}
+
+// A device omits the empty form, so rendering an opener and terminator would
+// invent a command it never reports. validate.BlockBodies is what reports the
+// node; render only has to not emit it.
+func TestRenderOmitsEmptyDelimitedBlock(t *testing.T) {
+	for name, body := range map[string][]string{
+		"nil":            nil,
+		"empty slice":    {},
+		"one empty line": {""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, "", Render(bannerNode(body)))
+		})
+	}
+}
+
+func TestRenderKeepsNonEmptyDelimitedBlock(t *testing.T) {
+	assert.Equal(
+		t,
+		"banner motd ^ hi ^\n",
+		Render(bannerNode([]string{" hi "})),
+	)
+	assert.Equal(
+		t,
+		"banner motd ^\nhi\n^\n",
+		Render(bannerNode([]string{"", "hi", ""})),
+	)
 }

@@ -187,6 +187,10 @@ func (e *Engine) commitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 func (e *Engine) Render(cfg *schema.Config) (string, *diag.Diagnostics) {
 	d := diag.New()
 	transform.ApplyTree(e.exportTree, cfg)
+	// render has no diagnostic channel, so check the shapes it cannot represent
+	// here: a transform can produce one, and they would otherwise render silently
+	// to nothing or to text that reads back as a different block.
+	validate.BlockBodies(cfg, d)
 	out := render.Render(cfg)
 	out = applyTextOutsideBlocks(e.schema, e.exportText, out)
 	return out, d

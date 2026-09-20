@@ -237,7 +237,7 @@ func TestRenderBlockBody(t *testing.T) {
 	assert.Equal(t, want, Render(res.Changes))
 }
 
-func TestRenderInlineBlock(t *testing.T) {
+func TestRenderOneLineBlock(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("banner motd {{ delim:delim }}").
@@ -255,7 +255,7 @@ func TestRenderInlineBlock(t *testing.T) {
 
 // A nested node takes its candidates from the parent definition, so the change
 // log must reach the one-line form through the tree, not the schema roots.
-func TestRenderInlineBlockNested(t *testing.T) {
+func TestRenderOneLineBlockNested(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	sec := s.Node("line {{ name:word }}").Card(schema.ZeroToN)
@@ -271,4 +271,43 @@ func TestRenderInlineBlockNested(t *testing.T) {
 		"-   banner exec ^ hello ^\n" +
 		"+   banner exec ^ world ^\n"
 	assert.Equal(t, want, Render(res.Changes))
+}
+
+// The two forms hold different text, so a device echoing a one-line banner back
+// in multi-line form is a real change. This is the operational consequence of
+// dropping the old normalization, and it belongs in the diff.
+func TestRenderBlockOneLineVersusMultiLine(t *testing.T) {
+	s := schema.New()
+	testtypes.Fill(s.Registry)
+	s.Node("banner motd {{ delim:delim }}").
+		Card(schema.ZeroToOne).MarkIdempotent().BlockDelim("delim")
+	res, d := remediate.Diff(
+		mustParse(t, s, "banner motd ^ hi ^\n"),
+		mustParse(t, s, "banner motd ^\nhi\n^\n"),
+		remediate.Options{Cycle: remediate.Break},
+	)
+	require.False(t, d.HasErrors(), d.String())
+	require.Len(t, res.Changes, 1)
+	assert.Equal(t, graph.Modify, res.Changes[0].Action)
+	want := "- banner motd ^ hi ^\n" +
+		"+ banner motd ^\n" +
+		"+ hi\n" +
+		"+ ^\n"
+	assert.Equal(t, want, Render(res.Changes))
+}
+
+// Parse cannot produce an empty delimited body, so compare's guard is only
+// reachable from a hand-built tree. validate.BlockBodies reports the node;
+// compare only has to not write a bare sign line for it.
+func TestRenderSkipsEmptyDelimitedBlock(t *testing.T) {
+	s := schema.New()
+	def := s.Node("banner motd {{ d:delim }}").
+		Card(schema.ZeroToOne).BlockDelim("d")
+	cfg := schema.NewConfig(s)
+	n := cfg.Root.AddChild(schema.NewNode("banner motd ^"))
+	n.Def, n.Fields = def, map[string]string{"d": "^"}
+
+	assert.Equal(t, "", Render([]remediate.Change{
+		{Action: graph.Add, Intended: n},
+	}))
 }

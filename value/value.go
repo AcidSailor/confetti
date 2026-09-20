@@ -82,8 +82,11 @@ func builtins() []Type {
 		{Name: "word", Pattern: `\S+`},
 		{Name: "rest", Pattern: `.+`}, // greedy; lazified when non-terminal
 		{Name: "uint", Pattern: `\d+`},
-		// A block delimiter is one character: a device ends the block at its
-		// next occurrence, so a longer token could not be recognized there.
-		{Name: "delim", Pattern: `\S`},
+		// A block delimiter is one non-space character: a device ends the block
+		// at its next occurrence, so a longer token could not be recognized
+		// there. Use with Def.BlockDelim. The class spells out what \S leaves
+		// out, because \S is ASCII-only while schema.NormalizeLine folds every
+		// unicode.IsSpace rune away before matching.
+		{Name: "delim", Pattern: `[^\t\n\v\f\r \x{0085}\p{Z}]`},
 	}
 }

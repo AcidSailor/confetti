@@ -64,9 +64,9 @@ func TestBlockSpansTerminatorTrailingWhitespace(t *testing.T) {
 	assert.Equal(t, []bool{true, true, true, false}, spans)
 }
 
-func TestBlockSpansInlineCloseMarksOpenerOnly(t *testing.T) {
+func TestBlockSpansOneLineBlockMarksOpenerOnly(t *testing.T) {
 	spans := BlockSpans(
-		inlineBlockSchema(),
+		oneLineBlockSchema(),
 		"banner motd ^ hello ^\nhostname sw1\n",
 	)
 	assert.Equal(t, []bool{true, false, false}, spans)
@@ -75,7 +75,7 @@ func TestBlockSpansInlineCloseMarksOpenerOnly(t *testing.T) {
 // A body line that carries the delimiter closes the block on that line.
 func TestBlockSpansDelimiterInBodyClosesThere(t *testing.T) {
 	spans := BlockSpans(
-		inlineBlockSchema(),
+		oneLineBlockSchema(),
 		"banner motd ^\nbody ^ tail\nhostname sw1\n",
 	)
 	assert.Equal(t, []bool{true, true, false, false}, spans)

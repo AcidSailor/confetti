@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"regexp/syntax"
 	"strings"
+	"unicode"
 
 	"github.com/acidsailor/confetti/value"
 )
@@ -29,7 +30,7 @@ type matchSpec struct {
 	prefixRe    *regexp.Regexp // re without the end anchor, for block openers
 	argTypes    map[string]string
 	emptyArgs   map[string]bool // capture args whose type pattern matches ""
-	oneCharArgs map[string]bool // capture args whose type pattern matches one rune
+	oneCharArgs map[string]bool // capture args whose type matches exactly one non-space rune
 	litLen      int             // total literal length, precomputed for specificity ordering
 }
 
@@ -66,13 +67,18 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 			return nil, fmt.Errorf("unknown value type %q in %q", t.typ, tmpl)
 		}
 		pat := vt.Pattern
-		// Registry.Register already compiled the pattern; failure here only prevents the empty-match flag.
+		// Registry.Register already compiled the pattern; a failure here leaves
+		// both flags false, which makes mustNonEmptyArg permissive and makes
+		// BlockDelim reject the arg.
 		if anchored, err := regexp.Compile("^(?:" + pat + ")$"); err == nil {
 			if anchored.MatchString("") {
 				m.emptyArgs[t.text] = true
 			}
-			// A delimiter must be exactly one non-space character.
-			if maxRunes(pat) == 1 && !anchored.MatchString(" ") {
+			// A delimiter must be exactly one non-space rune. maxRunes is only an
+			// upper bound, so the empty test supplies the lower one, and the space
+			// test covers every rune NormalizeLine folds away.
+			if maxRunes(pat) == 1 && !anchored.MatchString("") &&
+				!matchesSpace(anchored) {
 				m.oneCharArgs[t.text] = true
 			}
 		}
@@ -101,8 +107,31 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 	return m, nil
 }
 
-// maxRunes returns the longest match of pattern in runes, or -1 when unbounded
-// or unparsable. It lets a schema require a capture of exactly one character.
+// matchesSpace reports whether an anchored pattern can match a single
+// whitespace rune. NormalizeLine folds every unicode.IsSpace rune to a plain
+// separator before matching, so such a rune can never reach a capture: a
+// delimiter type that admits one would compile but never bind a line.
+func matchesSpace(anchored *regexp.Regexp) bool {
+	for _, r := range unicode.White_Space.R16 {
+		for c := rune(r.Lo); c <= rune(r.Hi); c += rune(r.Stride) {
+			if anchored.MatchString(string(c)) {
+				return true
+			}
+		}
+	}
+	for _, r := range unicode.White_Space.R32 {
+		for c := rune(r.Lo); c <= rune(r.Hi); c += rune(r.Stride) {
+			if anchored.MatchString(string(c)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// maxRunes returns an upper bound on the match length of pattern in runes, or
+// -1 when unbounded, unparsable, or not worth bounding. Every failure answers
+// -1, so a caller that requires a bound degrades to rejecting the pattern.
 func maxRunes(pattern string) int {
 	re, err := syntax.Parse(pattern, syntax.Perl)
 	if err != nil {
@@ -151,7 +180,7 @@ func maxRunesOf(re *syntax.Regexp) int {
 			return -1
 		}
 		return n * re.Max
-	default: // OpStar, OpPlus, and anything unrecognized are unbounded.
+	default: // OpStar, OpPlus, and anything unrecognized: refuse to bound it.
 		return -1
 	}
 }
@@ -214,7 +243,10 @@ func (m *matchSpec) Match(line string) (map[string]string, bool) {
 	return fields, true
 }
 
-// MatchPrefix returns captured fields and the offset after the match, or false.
+// MatchPrefix matches line from its start without requiring the spec to consume
+// all of it, and returns the captured fields and the byte offset in line where
+// the match ends. It populates every arg, as Match does, so the shape of a
+// node's fields does not depend on which matcher bound it.
 func (m *matchSpec) MatchPrefix(line string) (map[string]string, int, bool) {
 	loc := m.prefixRe.FindStringSubmatchIndex(line)
 	if loc == nil {
@@ -224,6 +256,7 @@ func (m *matchSpec) MatchPrefix(line string) (map[string]string, int, bool) {
 	for name := range m.argTypes {
 		i := m.prefixRe.SubexpIndex(name) * 2
 		if loc[i] < 0 {
+			fields[name] = ""
 			continue
 		}
 		fields[name] = line[loc[i]:loc[i+1]]

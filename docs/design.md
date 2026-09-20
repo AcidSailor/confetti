@@ -140,6 +140,9 @@ retain the source line and report diagnostics.
   overlaps resolve by declaration order. Therefore, declaration order is part
   of schema behavior. Examples include the physical-port definition before
   the general definition and the canonical section before membership syntax.
+  A `BlockDelim` opener matches a prefix, which is more permissive than an
+  anchored match, so it could otherwise claim a line a sibling matches in full.
+  `MatchChildOpener` rejects that case rather than resolving it by order.
 - **Represent platform-specific behavior as schema data or hooks, not core code.**
   `NegateStrategy`, `BlockStrategy`, `ListStrategy`, `Toggles`,
   `OrderHook`, `WithCommitChecks`, and tree transforms keep the engine
@@ -315,7 +318,10 @@ retain the source line and report diagnostics.
 
 - **Any code path that assigns a definition and text to a node must pass the
   rendered text to `schema.MatchChild` with all candidates at that level. The
-  result must bind the intended definition.** Matching only the intended
+  result must bind the intended definition.** A block opener goes through
+  `schema.MatchChildOpener`, which matches a prefix but scans the same
+  candidate set in the same order and then re-checks the opener text it keeps
+  against `MatchChild`, so the rule holds there too. Matching only the intended
   definition can select a different equal-specificity sibling after parsing,
   produce a different identity, and cancel remediation. Each new fold or
   synthesis path requires a regression test for this condition.
@@ -353,7 +359,10 @@ retain the source line and report diagnostics.
   because everything after the delimiter is body text, and must be a type that
   captures exactly one non-space character: a device ends the block at the
   delimiter's next occurrence, where a longer token could not be recognized.
-  The built-in `delim` type is that type. The block closes at the
+  `BlockDelim` panics otherwise. The bound comes from `regexp/syntax`, and
+  "non-space" means every `unicode.IsSpace` rune, because `NormalizeLine` folds
+  all of them away before matching — note that Go's `\S` is ASCII-only and so
+  does not qualify. The built-in `delim` type does. The block closes at the
   next occurrence of that delimiter, whether it falls on the opening line or
   many lines later, and whether or not it starts its line. A device ends the
   banner at the same point, so the delimiter can never appear inside the body.
@@ -366,15 +375,25 @@ retain the source line and report diagnostics.
   out of the body alone and needs no round-trip check.
 
   `BlockUntil` is unchanged: its literal terminator owns its line.
-- **Text after the closing delimiter reports an Error.** A device stops reading
-  at that delimiter, so the remainder could not have come from a running
-  configuration and no reading of it is safe to guess at. The block keeps the
-  body before the delimiter.
+- **Non-blank text after the closing delimiter reports an Error and is
+  dropped.** A device stops reading at that delimiter, so the remainder could
+  not have come from a running configuration and no reading of it is safe to
+  guess at. The block keeps the body before the delimiter. A whitespace-only
+  remainder is dropped without a diagnostic, because it cannot change how a
+  device reads the line.
 - **An empty delimited body is dropped on parse and omitted on render.** A
   device accepts `banner motd ^^` and then leaves it out of the running
   configuration, so keeping the node would invent a command the device does not
-  report. An unterminated delimited block is dropped for the same reason:
-  rendering it would invent a terminator the input never had.
+  report. The drop reports a Warning: without one a caller cannot tell it from
+  input that never carried the block. An unterminated delimited block is
+  dropped with an Error for the same reason: rendering it would invent a
+  terminator the input never had.
+- **A delimited body reaching `render` or `compare` is never empty and never
+  contains its own delimiter.** Parse cannot produce either, so such a node came
+  from a caller, a tree transform, or a merge resolver. Both render to text that
+  reads back as something else, and neither renderer has a diagnostic channel,
+  so `validate.BlockBodies` reports them; `CommitCheck` and `Engine.Render` both
+  run it.
 - **Text transforms never run inside block spans.** Span detection is
   level-aware (`parse.BlockSpans` mirrors the parser's indent walk) and the
   guard protects the union of the raw-text walk and the

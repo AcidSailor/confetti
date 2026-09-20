@@ -20,7 +20,9 @@ func Render(cfg *schema.Config) string {
 func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	def := n.Def
 	// A device omits an empty delimited block, so emitting one would invent a
-	// command that cannot survive a round trip through the device.
+	// command that cannot survive a round trip through the device. A nil Block
+	// on a BlockDelim node is dropped the same way; validate.BlockBodies is what
+	// reports it, because Render has no diagnostic channel.
 	if def != nil && def.Block.Kind == schema.BlockDelim &&
 		strings.Join(n.Block, "\n") == "" {
 		return
@@ -33,12 +35,13 @@ func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 		b.WriteString(n.Text)
 	}
 	// The body runs from the opener's delimiter to the next one, so joining it
-	// reproduces the source whether it spans one line or many.
+	// reproduces the body byte-exact between the two delimiters, on one line or
+	// many. The opener itself is re-rendered canonically.
 	if def != nil && def.Block.Kind == schema.BlockDelim {
 		b.WriteString(strings.Join(n.Block, "\n"))
 		b.WriteString(def.Block.Term(n.Fields))
 		b.WriteByte('\n')
-		return // Block nodes have no children or section-exit tokens.
+		return // setBlock forbids children and a section-exit token on a block.
 	}
 	b.WriteByte('\n')
 	// Preserve raw block bodies at column zero and append the terminator.
@@ -49,7 +52,7 @@ func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 		}
 		b.WriteString(def.Block.Term(n.Fields))
 		b.WriteByte('\n')
-		return // Block nodes have no children or section-exit tokens.
+		return // setBlock forbids children and a section-exit token on a block.
 	}
 	for _, c := range n.Children {
 		renderNode(b, c, depth+1)

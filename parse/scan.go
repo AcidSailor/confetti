@@ -35,7 +35,7 @@ type step struct {
 	fields     map[string]string
 	opensBlock bool   // the definition declares a block
 	body       string // raw block text this line contributes, before any terminator
-	closed     bool   // the terminator appears on this line
+	closed     bool   // this line contributes body text before a delimiter that closes here
 	tail       string // text after the terminator, which cannot be part of the block
 }
 
@@ -133,6 +133,12 @@ func (sc *scanner) bodyLine(raw string) step {
 
 // splitAtTerm cuts text at the first terminator, reporting the body before it and the text after.
 func splitAtTerm(text, term string) (body string, closed bool, tail string) {
+	if term == "" {
+		// strings.Cut on "" closes immediately and turns the whole line into a
+		// reported tail. BlockDelim's builder makes an empty delimiter
+		// unreachable; say so rather than degrade into that shape.
+		panic("parse: empty block terminator (schema.BlockDelim rejects one)")
+	}
 	before, after, ok := strings.Cut(text, term)
 	if !ok {
 		return text, false, ""
@@ -154,6 +160,13 @@ func rawOffset(raw, norm string, end int) int {
 		_, w := utf8.DecodeRuneInString(raw[i:])
 		i += w
 		n += w
+	}
+	if n < end {
+		// norm came from NormalizeLine(raw), so the walk must consume end bytes
+		// of it. Returning a truncated offset here would open a block on body
+		// text the opener never had and surface three layers later as an
+		// unrelated message.
+		panic("parse: rawOffset desynchronized from schema.NormalizeLine")
 	}
 	return i
 }

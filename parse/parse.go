@@ -48,7 +48,11 @@ func Parse(
 			}
 			blockTail(d, st, blk.node)
 			blk.node.Block = blk.body
-			dropEmptyBlock(blk.node)
+			if dropEmptyBlock(d, st.lineNo, blk.node) {
+				// The dropped node is the top of the stack; leaving it there
+				// would attach any deeper line to a detached parent.
+				nodes[len(nodes)-1] = nil
+			}
 			blk = nil
 		case stepUnknown:
 			if unknown == Reject {
@@ -69,16 +73,18 @@ func Parse(
 			).AddChild(schema.NewNode(st.txt))
 			tn.Def, tn.Fields, tn.RealIndent = st.def, st.fields, st.indent
 			tn.Line = st.lineNo
-			// A non-nil body distinguishes an empty block from a non-block node.
 			switch {
 			case st.closed:
 				tn.Block = []string{st.body}
 				blockTail(d, st, tn)
-				if dropEmptyBlock(tn) {
+				if dropEmptyBlock(d, st.lineNo, tn) {
 					tn = nil
 				}
 			case st.opensBlock:
 				// A literal terminator owns its line, so its body starts below.
+				// A BlockUntil node keeps a non-nil empty body so an empty block
+				// differs from a non-block node; an empty BlockDelim body is
+				// dropped instead.
 				body := []string{}
 				if st.def.Block.Kind == schema.BlockDelim {
 					body = []string{st.body}
@@ -95,18 +101,28 @@ func Parse(
 			strings.HasSuffix(text, "\n") {
 			blk.body = blk.body[:n-1]
 		}
-		// Unterminated blocks consume the remaining input and always report an Error.
-		d.AddAt(
-			blk.node.Line,
-			diag.Error,
-			"%s: block not terminated before end of input",
-			blk.node.Path(),
-		)
 		blk.node.Block = blk.body
 		// A delimited block that never closed would render a terminator the
-		// input never had, and that text reads back as a different block.
+		// input never had, and that text reads back as a different block. Say so,
+		// because the same message otherwise covers a BlockUntil block that is
+		// kept.
 		if blk.node.Def.Block.Kind == schema.BlockDelim {
+			d.AddAt(
+				blk.node.Line,
+				diag.Error,
+				"%s: block not terminated before end of input; the command and its %d captured lines were dropped",
+				blk.node.Path(),
+				len(blk.body),
+			)
 			blk.node.Parent.ReplaceChild(blk.node)
+		} else {
+			// Unterminated blocks consume the remaining input and always report an Error.
+			d.AddAt(
+				blk.node.Line,
+				diag.Error,
+				"%s: block not terminated before end of input",
+				blk.node.Path(),
+			)
 		}
 	}
 
@@ -116,21 +132,31 @@ func Parse(
 	return cfg
 }
 
-// dropEmptyBlock removes a delimited block whose body is empty. A device accepts
-// the empty form and then omits it from the running configuration, so keeping the
-// node would invent a command the device does not report.
-func dropEmptyBlock(n *schema.Node) bool {
+// dropEmptyBlock removes a delimited block whose body is empty and reports
+// whether it removed the node. A device accepts the empty form and then omits it
+// from the running configuration, so keeping the node would invent a command the
+// device does not report. The drop is reported, because a caller cannot
+// otherwise tell it from input that never carried the block at all.
+func dropEmptyBlock(d *diag.Diagnostics, lineNo int, n *schema.Node) bool {
 	if n.Def.Block.Kind != schema.BlockDelim ||
 		strings.Join(n.Block, "\n") != "" {
 		return false
 	}
+	d.AddAt(
+		lineNo,
+		diag.Warning,
+		"%s: empty delimited block dropped; a device omits it from its running configuration",
+		n.Path(),
+	)
 	n.Parent.ReplaceChild(n)
 	return true
 }
 
-// blockTail reports text after a closing delimiter. A device ends the block at
-// that delimiter, so the remainder could never have come from a running
-// configuration and no reading of it is safe to guess at.
+// blockTail reports text after a closing delimiter and drops it. A device ends
+// the block at that delimiter, so the remainder could never have come from a
+// running configuration and no reading of it is safe to guess at. A
+// whitespace-only remainder is dropped without a diagnostic, because it cannot
+// change how a device reads the line.
 func blockTail(d *diag.Diagnostics, st step, n *schema.Node) {
 	if strings.TrimSpace(st.tail) == "" {
 		return
@@ -138,7 +164,7 @@ func blockTail(d *diag.Diagnostics, st step, n *schema.Node) {
 	d.AddAt(
 		st.lineNo,
 		diag.Error,
-		"%s: %q follows the closing delimiter %q",
+		"%s: %q follows the closing delimiter %q and was dropped",
 		n.Path(),
 		strings.TrimSpace(st.tail),
 		n.Def.Block.Term(n.Fields),

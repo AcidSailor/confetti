@@ -10,7 +10,6 @@ import (
 	"github.com/acidsailor/confetti/internal/testtypes"
 	"github.com/acidsailor/confetti/render"
 	"github.com/acidsailor/confetti/schema"
-	"github.com/acidsailor/confetti/value"
 )
 
 func miniSchema() *schema.Schema {
@@ -124,7 +123,7 @@ func TestParseBlockUntil(t *testing.T) {
 	assert.Equal(t, []string{"MIIB", "AAAA"}, cfg.Root.Children[0].Block)
 }
 
-func TestParseBlockEmptyBody(t *testing.T) {
+func TestParseBlockNewlineBody(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(
 		blockSchema(),
@@ -187,6 +186,16 @@ func TestParseBlockCRLF(t *testing.T) {
 	require.Len(t, top, 2)
 	assert.Equal(t, []string{"\r", "hello\r", ""}, top[0].Block)
 	assert.Equal(t, "interface eth1", top[1].Text)
+	// The body keeps its carriage returns, but render ends every line it writes
+	// itself with a bare newline, so CRLF input is canonical rather than
+	// byte-exact. Pinned because goldens are byte-exact contracts.
+	out := render.Render(cfg)
+	assert.Equal(t, "banner motd ^\r\nhello\r\n^\ninterface eth1\n", out)
+	assert.Equal(
+		t,
+		out,
+		render.Render(Parse(blockSchema(), out, Reject, diag.New())),
+	)
 }
 
 func TestParseIndentAfterBlockStrict(t *testing.T) {
@@ -227,8 +236,11 @@ func TestParseUnknownDiagCarriesLine(t *testing.T) {
 	assert.Equal(t, 0, ld.Items[1].Line)
 }
 
-// inlineBlockSchema accepts banner text and a terminator on the opening line.
-func inlineBlockSchema() *schema.Schema {
+// oneLineBlockSchema holds a delimited banner alongside a BlockUntil
+// certificate and a plain hostname, so tests can check a block against
+// unrelated siblings. The banner needs no special template to close on its
+// opening line; that follows from the forward scan.
+func oneLineBlockSchema() *schema.Schema {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	s.Node("banner motd {{ delim:delim }}").
@@ -239,7 +251,7 @@ func inlineBlockSchema() *schema.Schema {
 	return s
 }
 
-func TestParseBlockInlineClose(t *testing.T) {
+func TestParseBlockClosesOnOpeningLine(t *testing.T) {
 	cases := []struct{ name, opener, body string }{
 		{
 			"body",
@@ -253,7 +265,7 @@ func TestParseBlockInlineClose(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d := diag.New()
 			cfg := Parse(
-				inlineBlockSchema(),
+				oneLineBlockSchema(),
 				tc.opener+"\nhostname sw1\n",
 				Reject,
 				d,
@@ -269,34 +281,80 @@ func TestParseBlockInlineClose(t *testing.T) {
 	}
 }
 
-// A device ends the banner at the second delimiter, so trailing text is an error.
+// A device ends the banner at the second delimiter, so trailing text is an
+// error. The severity decides whether Import rejects the configuration, so it is
+// asserted with the message.
 func TestParseBlockTextAfterTerminator(t *testing.T) {
 	d := diag.New()
-	cfg := Parse(inlineBlockSchema(), "banner motd ^ a ^ b ^\n", Reject, d)
-	assert.Contains(t, d.String(), "follows the closing delimiter")
+	cfg := Parse(oneLineBlockSchema(), "banner motd ^ a ^ b ^\n", Reject, d)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Equal(
+		t,
+		`1: error: banner motd ^: "b ^" follows the closing delimiter "^" and was dropped`+"\n",
+		d.String(),
+	)
 	assert.Equal(t, []string{" a "}, cfg.Root.Children[0].Block)
 }
 
-// A device accepts the empty form and then omits it from its configuration.
-func TestParseBlockEmptyInlineIsDropped(t *testing.T) {
-	s := schema.New()
-	require.NoError(
-		t,
-		s.Registry.Register(value.Type{Name: "onechar", Pattern: `\S`}),
+// The terminator can close on a later line, and trailing text there is the same
+// error. Without this the whole multi-line tail path goes unasserted.
+func TestParseBlockTextAfterTerminatorOnBodyLine(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(
+		oneLineBlockSchema(),
+		"banner motd ^\nbody ^ junk\nhostname sw1\n",
+		Reject,
+		d,
 	)
-	s.Node("banner motd {{ delim:onechar }}").
-		Card(schema.ZeroToOne).BlockDelim("delim")
-	s.Node("hostname {{ name:word }}").Card(schema.ZeroToOne)
+	require.True(t, d.HasErrors(), d.String())
+	assert.Equal(
+		t,
+		`2: error: banner motd ^: "junk" follows the closing delimiter "^" and was dropped`+"\n",
+		d.String(),
+	)
+	require.Len(t, cfg.Root.Children, 2)
+	assert.Equal(t, []string{"", "body "}, cfg.Root.Children[0].Block)
+	// The tail must not leak into the node that follows it.
+	assert.Equal(t, "hostname sw1", cfg.Root.Children[1].Text)
+}
+
+// Whitespace after the closing delimiter cannot change how a device reads the
+// line, so it is dropped without a diagnostic.
+func TestParseBlockWhitespaceAfterTerminatorIsSilent(t *testing.T) {
+	d := diag.New()
+	cfg := Parse(oneLineBlockSchema(), "banner motd ^ hi ^   \n", Reject, d)
+	assert.Empty(t, d.Items)
+	assert.Equal(t, []string{" hi "}, cfg.Root.Children[0].Block)
+}
+
+// A device accepts the empty form and then omits it from its configuration.
+// The drop is reported, or a caller cannot tell it from input without a banner.
+func TestParseBlockEmptyInlineIsDropped(t *testing.T) {
+	s := oneLineBlockSchema()
 	d := diag.New()
 	cfg := Parse(s, "banner motd ^^\nhostname sw1\n", Reject, d)
 	require.False(t, d.HasErrors(), d.String())
+	assert.Equal(
+		t,
+		"1: warning: banner motd ^: empty delimited block dropped;"+
+			" a device omits it from its running configuration\n",
+		d.String(),
+	)
 	require.Len(t, cfg.Root.Children, 1)
 	assert.Equal(t, "hostname sw1", cfg.Root.Children[0].Text)
 }
 
+// An ordinary block reports nothing at all; a spurious warning on the common
+// path would otherwise go unnoticed.
+func TestParseBlockPlainOpenerIsSilent(t *testing.T) {
+	d := diag.New()
+	Parse(oneLineBlockSchema(), "banner motd ^\nhello\n^\n", Reject, d)
+	assert.Empty(t, d.Items)
+}
+
 // The two forms hold different text, so they are different banners.
 func TestParseBlockInlineDiffersFromMultiLine(t *testing.T) {
-	s := inlineBlockSchema()
+	s := oneLineBlockSchema()
 	one := Parse(s, "banner motd ^ hi ^\n", Reject, diag.New())
 	multi := Parse(s, "banner motd ^\nhi\n^\n", Reject, diag.New())
 	assert.Equal(t, []string{" hi "}, one.Root.Children[0].Block)
@@ -304,10 +362,10 @@ func TestParseBlockInlineDiffersFromMultiLine(t *testing.T) {
 	assert.False(t, one.Root.Children[0].SameValue(multi.Root.Children[0]))
 }
 
-func TestParseBlockInlineCloseMultiLineUnchanged(t *testing.T) {
+func TestParseBlockMultiLineUnchanged(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(
-		inlineBlockSchema(),
+		oneLineBlockSchema(),
 		"banner motd ^ line one\nline two ^\n^\nhostname sw1\n",
 		Reject,
 		d,
@@ -323,7 +381,7 @@ func TestParseBlockInlineCloseMultiLineUnchanged(t *testing.T) {
 
 func TestParseBlockOpenerWithoutTerminatorStaysOpen(t *testing.T) {
 	d := diag.New()
-	Parse(inlineBlockSchema(), "banner motd ^ open\nhostname sw1\n", Reject, d)
+	Parse(oneLineBlockSchema(), "banner motd ^ open\nhostname sw1\n", Reject, d)
 	assert.True(t, d.HasErrors())
 	assert.Contains(t, d.String(), "block not terminated before end of input")
 }
@@ -331,7 +389,7 @@ func TestParseBlockOpenerWithoutTerminatorStaysOpen(t *testing.T) {
 func TestParseBlockUntilOpenerIgnoresTerminator(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(
-		inlineBlockSchema(),
+		oneLineBlockSchema(),
 		"certificate ca quit\nMIIB\nquit\n",
 		Reject,
 		d,
@@ -344,7 +402,7 @@ func TestParseBlockUntilOpenerIgnoresTerminator(t *testing.T) {
 func TestParseBlockUntilOpenerWithTerminatorInText(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(
-		inlineBlockSchema(),
+		oneLineBlockSchema(),
 		"certificate quit quit\nMIIB\nquit\n",
 		Reject,
 		d,
@@ -355,23 +413,120 @@ func TestParseBlockUntilOpenerWithTerminatorInText(t *testing.T) {
 	assert.Equal(t, []string{"MIIB"}, cfg.Root.Children[0].Block)
 }
 
-func TestParseBlockInlineCloseRoundTrips(t *testing.T) {
-	s := inlineBlockSchema()
-	for _, in := range []string{
-		"banner motd ^ Authorized users only. ^\n",
-		"banner motd ^ hi ^ ^\n",
-		"banner motd ^^^\n",
-		"banner motd ^^\n",
-	} {
-		first := render.Render(Parse(s, in, Reject, diag.New()))
-		d := diag.New()
-		second := render.Render(Parse(s, first, Reject, d))
-		require.False(t, d.HasErrors(), "%q: %s", in, d.String())
-		assert.Equal(t, first, second, "render is not idempotent for %q", in)
+// Each one-line form renders to a fixed text and reports fixed diagnostics.
+// Asserting only idempotence would pass vacuously for the forms that render to
+// nothing, and would hide the ones that now report an Error.
+func TestParseBlockOneLineForms(t *testing.T) {
+	cases := []struct{ name, in, want, diags string }{
+		{
+			name: "body",
+			in:   "banner motd ^ Authorized users only. ^\n",
+			want: "banner motd ^ Authorized users only. ^\n",
+		},
+		{
+			name: "third delimiter is trailing text",
+			in:   "banner motd ^ hi ^ ^\n",
+			want: "banner motd ^ hi ^\n",
+			diags: `1: error: banner motd ^: "^" follows the closing` +
+				" delimiter \"^\" and was dropped\n",
+		},
+		{
+			name: "empty body then a stray delimiter",
+			in:   "banner motd ^^^\n",
+			want: "",
+			diags: `1: error: banner motd ^: "^" follows the closing` +
+				" delimiter \"^\" and was dropped\n" +
+				"1: warning: banner motd ^: empty delimited block dropped;" +
+				" a device omits it from its running configuration\n",
+		},
+		{
+			name: "empty body",
+			in:   "banner motd ^^\n",
+			want: "",
+			diags: "1: warning: banner motd ^: empty delimited block dropped;" +
+				" a device omits it from its running configuration\n",
+		},
+	}
+	s := oneLineBlockSchema()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := diag.New()
+			first := render.Render(Parse(s, tc.in, Reject, d))
+			assert.Equal(t, tc.want, first)
+			assert.Equal(t, tc.diags, d.String())
+
+			// Re-parsing the render must be clean and reach the same text.
+			rd := diag.New()
+			second := render.Render(Parse(s, first, Reject, rd))
+			assert.Empty(t, rd.Items, rd.String())
+			assert.Equal(t, first, second)
+		})
 	}
 }
 
-func TestParseBlockInlineCloseNested(t *testing.T) {
+// NormalizeLine folds every unicode.IsSpace rune, so rawOffset must use the
+// same test to find where the body starts on the opener's raw line.
+func TestParseBlockUnicodeSpaceInOpener(t *testing.T) {
+	s := oneLineBlockSchema()
+	for _, sp := range []string{"\u0085", " ", " ", "　"} {
+		t.Run(sp, func(t *testing.T) {
+			in := "banner motd" + sp + "^ hi ^\n"
+			d := diag.New()
+			cfg := Parse(s, in, Reject, d)
+			require.Empty(t, d.Items, d.String())
+			require.Len(t, cfg.Root.Children, 1)
+			assert.Equal(t, []string{" hi "}, cfg.Root.Children[0].Block)
+			assert.Equal(
+				t,
+				"banner motd ^ hi ^\n",
+				render.Render(cfg),
+			)
+		})
+	}
+}
+
+// An empty or unterminated block nested in a section drops only itself.
+func TestParseBlockNestedDrops(t *testing.T) {
+	newSchema := func() *schema.Schema {
+		s := schema.New()
+		testtypes.Fill(s.Registry)
+		iface := s.Node("interface {{ name:word }}").Card(schema.ZeroToN)
+		iface.Child("banner login {{ delim:delim }}").
+			Card(schema.ZeroToOne).BlockDelim("delim")
+		iface.Child("mtu {{ size:uint }}").Card(schema.ZeroToOne)
+		return s
+	}
+	t.Run("empty body keeps its siblings", func(t *testing.T) {
+		d := diag.New()
+		cfg := Parse(
+			newSchema(),
+			"interface eth1\n  banner login ^^\n  mtu 9000\n",
+			Reject,
+			d,
+		)
+		require.False(t, d.HasErrors(), d.String())
+		assert.Contains(t, d.String(), "empty delimited block dropped")
+		kids := cfg.Root.Children[0].Children
+		require.Len(t, kids, 1)
+		assert.Equal(t, "mtu 9000", kids[0].Text)
+	})
+	t.Run("unterminated keeps its section", func(t *testing.T) {
+		d := diag.New()
+		cfg := Parse(
+			newSchema(),
+			"interface eth1\n  banner login ^\nunterminated\n",
+			Reject,
+			d,
+		)
+		assert.True(t, d.HasErrors())
+		assert.Contains(t, d.String(), "captured lines were dropped")
+		require.Len(t, cfg.Root.Children, 1)
+		assert.Equal(t, "interface eth1", cfg.Root.Children[0].Text)
+		assert.Empty(t, cfg.Root.Children[0].Children)
+	})
+}
+
+func TestParseBlockOneLineNested(t *testing.T) {
 	s := schema.New()
 	testtypes.Fill(s.Registry)
 	iface := s.Node("interface {{ name:word }}").Card(schema.ZeroToN)
@@ -392,10 +547,10 @@ func TestParseBlockInlineCloseNested(t *testing.T) {
 	assert.Equal(t, "mtu 9000", kids[1].Text)
 }
 
-func TestParseIndentAfterInlineCloseStrict(t *testing.T) {
+func TestParseIndentAfterOneLineBlockStrict(t *testing.T) {
 	d := diag.New()
 	cfg := Parse(
-		inlineBlockSchema(),
+		oneLineBlockSchema(),
 		"banner motd ^ hi ^\n  hostname sw1\n",
 		Reject,
 		d,

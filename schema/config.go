@@ -43,7 +43,12 @@ type Node struct {
 	RealIndent int               // Raw parsed indentation column.
 	Line       int               // A 1-based source line, or zero when absent.
 	Op         Op                // The remediation operation.
-	Block      []string          // Raw block body lines, or nil for ordinary nodes.
+	// Block holds the raw body split on newlines, or nil for an ordinary node.
+	// A BlockUntil body is whole lines. A BlockDelim body is the text between
+	// the two delimiters, so its first and last entries are the text beside
+	// each one and a one-line block has exactly one entry. It never contains
+	// the delimiter, and it is never empty; validate.BlockBodies reports both.
+	Block []string
 
 	// Parent and Children are maintained by AddChild, ReplaceChild, and InsertChildBefore.
 	Parent   *Node
