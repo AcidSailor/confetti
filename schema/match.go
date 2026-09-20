@@ -25,13 +25,13 @@ type token struct {
 
 // matchSpec compiles a "{{ name:type }}" template for parsing and rendering.
 type matchSpec struct {
-	tokens      []token
-	re          *regexp.Regexp
-	prefixRe    *regexp.Regexp // re without the end anchor, for block openers
-	argTypes    map[string]string
-	emptyArgs   map[string]bool // capture args whose type pattern matches ""
-	oneCharArgs map[string]bool // capture args whose type matches exactly one non-space rune
-	litLen      int             // total literal length, precomputed for specificity ordering
+	tokens    []token
+	re        *regexp.Regexp
+	prefixRe  *regexp.Regexp // re without the end anchor, for block openers
+	argTypes  map[string]string
+	argGroups map[string]int  // capture name to subexpression index, shared by both regexps
+	emptyArgs map[string]bool // capture args whose type pattern matches ""
+	litLen    int             // total literal length, precomputed for specificity ordering
 }
 
 func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
@@ -40,10 +40,10 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 		return nil, err
 	}
 	m := &matchSpec{
-		tokens:      toks,
-		argTypes:    map[string]string{},
-		emptyArgs:   map[string]bool{},
-		oneCharArgs: map[string]bool{},
+		tokens:    toks,
+		argTypes:  map[string]string{},
+		argGroups: map[string]int{},
+		emptyArgs: map[string]bool{},
 	}
 	seen := make(map[string]bool)
 	var b strings.Builder
@@ -67,20 +67,11 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 			return nil, fmt.Errorf("unknown value type %q in %q", t.typ, tmpl)
 		}
 		pat := vt.Pattern
-		// Registry.Register already compiled the pattern; a failure here leaves
-		// both flags false, which makes mustNonEmptyArg permissive and makes
-		// BlockDelim reject the arg.
-		if anchored, err := regexp.Compile("^(?:" + pat + ")$"); err == nil {
-			if anchored.MatchString("") {
-				m.emptyArgs[t.text] = true
-			}
-			// A delimiter must be exactly one non-space rune. maxRunes is only an
-			// upper bound, so the empty test supplies the lower one, and the space
-			// test covers every rune NormalizeLine folds away.
-			if maxRunes(pat) == 1 && !anchored.MatchString("") &&
-				!matchesSpace(anchored) {
-				m.oneCharArgs[t.text] = true
-			}
+		// Registry.Register already compiled the pattern; failure here only
+		// prevents the empty-match flag, which makes mustNonEmptyArg permissive.
+		if anchored, err := regexp.Compile("^(?:" + pat + ")$"); err == nil &&
+			anchored.MatchString("") {
+			m.emptyArgs[t.text] = true
 		}
 		if i != len(toks)-1 {
 			// Make non-terminal captures lazy so a following literal remains matchable.
@@ -104,7 +95,33 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 		return nil, fmt.Errorf("compiling %q: %w", tmpl, err)
 	}
 	m.re, m.prefixRe = re, prefixRe
+	// Both regexps are built from the same source, so a capture has the same
+	// subexpression index in each and neither matcher has to resolve it by name.
+	for name := range m.argTypes {
+		m.argGroups[name] = re.SubexpIndex(name)
+	}
 	return m, nil
+}
+
+// oneNonSpaceRune reports whether the value type bound to arg matches exactly
+// one non-space rune, which is what a block delimiter must be. maxRunes is only
+// an upper bound, so the empty test supplies the lower one, and the space test
+// covers every rune NormalizeLine folds away. An uncompilable pattern answers
+// false, so a caller that requires the property rejects the arg.
+//
+// Only BlockDelim asks, so this is derived on demand rather than for every
+// capture arg of every template.
+func (m *matchSpec) oneNonSpaceRune(arg string, reg *value.Registry) bool {
+	vt, ok := reg.Get(m.argTypes[arg])
+	if !ok {
+		return false
+	}
+	anchored, err := regexp.Compile("^(?:" + vt.Pattern + ")$")
+	if err != nil {
+		return false
+	}
+	return maxRunes(vt.Pattern) == 1 && !anchored.MatchString("") &&
+		!matchesSpace(anchored)
 }
 
 // matchesSpace reports whether an anchored pattern can match a single
@@ -112,22 +129,30 @@ func compileSpec(tmpl string, reg *value.Registry) (*matchSpec, error) {
 // separator before matching, so such a rune can never reach a capture: a
 // delimiter type that admits one would compile but never bind a line.
 func matchesSpace(anchored *regexp.Regexp) bool {
-	for _, r := range unicode.White_Space.R16 {
-		for c := rune(r.Lo); c <= rune(r.Hi); c += rune(r.Stride) {
-			if anchored.MatchString(string(c)) {
-				return true
-			}
-		}
-	}
-	for _, r := range unicode.White_Space.R32 {
-		for c := rune(r.Lo); c <= rune(r.Hi); c += rune(r.Stride) {
-			if anchored.MatchString(string(c)) {
-				return true
-			}
+	for _, c := range spaceRunes {
+		if anchored.MatchString(string(c)) {
+			return true
 		}
 	}
 	return false
 }
+
+// spaceRunes lists every rune NormalizeLine folds away, enumerated once rather
+// than per pattern tested.
+var spaceRunes = func() []rune {
+	var out []rune
+	for _, r := range unicode.White_Space.R16 {
+		for c := rune(r.Lo); c <= rune(r.Hi); c += rune(r.Stride) {
+			out = append(out, c)
+		}
+	}
+	for _, r := range unicode.White_Space.R32 {
+		for c := rune(r.Lo); c <= rune(r.Hi); c += rune(r.Stride) {
+			out = append(out, c)
+		}
+	}
+	return out
+}()
 
 // maxRunes returns an upper bound on the match length of pattern in runes, or
 // -1 when unbounded, unparsable, or not worth bounding. Every failure answers
@@ -232,15 +257,8 @@ func parseTemplate(tmpl string) ([]token, error) {
 
 // Match returns captured fields and true if line matches this spec exactly.
 func (m *matchSpec) Match(line string) (map[string]string, bool) {
-	sm := m.re.FindStringSubmatch(line)
-	if sm == nil {
-		return nil, false
-	}
-	fields := make(map[string]string, len(m.argTypes))
-	for name := range m.argTypes {
-		fields[name] = sm[m.re.SubexpIndex(name)]
-	}
-	return fields, true
+	fields, _, ok := m.matchWith(m.re, line)
+	return fields, ok
 }
 
 // MatchPrefix matches line from its start without requiring the spec to consume
@@ -248,18 +266,28 @@ func (m *matchSpec) Match(line string) (map[string]string, bool) {
 // the match ends. It populates every arg, as Match does, so the shape of a
 // node's fields does not depend on which matcher bound it.
 func (m *matchSpec) MatchPrefix(line string) (map[string]string, int, bool) {
-	loc := m.prefixRe.FindStringSubmatchIndex(line)
+	return m.matchWith(m.prefixRe, line)
+}
+
+// matchWith binds every capture against re and reports where the match ends.
+// Both matchers share it so the field shape cannot depend on which one ran.
+func (m *matchSpec) matchWith(
+	re *regexp.Regexp,
+	line string,
+) (map[string]string, int, bool) {
+	loc := re.FindStringSubmatchIndex(line)
 	if loc == nil {
 		return nil, 0, false
 	}
-	fields := make(map[string]string, len(m.argTypes))
-	for name := range m.argTypes {
-		i := m.prefixRe.SubexpIndex(name) * 2
-		if loc[i] < 0 {
+	fields := make(map[string]string, len(m.argGroups))
+	for name, g := range m.argGroups {
+		// A group that did not participate reports -1; report it as empty so
+		// every arg is present either way.
+		if loc[2*g] < 0 {
 			fields[name] = ""
 			continue
 		}
-		fields[name] = line[loc[i]:loc[i+1]]
+		fields[name] = line[loc[2*g]:loc[2*g+1]]
 	}
 	return fields, loc[1], true
 }

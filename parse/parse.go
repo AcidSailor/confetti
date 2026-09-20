@@ -46,13 +46,9 @@ func Parse(
 			if st.closed {
 				blk.body = append(blk.body, st.body)
 			}
-			blockTail(d, st, blk.node)
-			blk.node.Block = blk.body
-			if dropEmptyBlock(d, st.lineNo, blk.node) {
-				// The dropped node is the top of the stack; leaving it there
-				// would attach any deeper line to a detached parent.
-				nodes[len(nodes)-1] = nil
-			}
+			// The block node is the top of the stack; storing the result there
+			// keeps a deeper line from attaching to a node closeBlock detached.
+			nodes[len(nodes)-1] = closeBlock(d, st, blk.node, blk.body)
 			blk = nil
 		case stepUnknown:
 			if unknown == Reject {
@@ -75,11 +71,7 @@ func Parse(
 			tn.Line = st.lineNo
 			switch {
 			case st.closed:
-				tn.Block = []string{st.body}
-				blockTail(d, st, tn)
-				if dropEmptyBlock(d, st.lineNo, tn) {
-					tn = nil
-				}
+				tn = closeBlock(d, st, tn, []string{st.body})
 			case st.opensBlock:
 				// A literal terminator owns its line, so its body starts below.
 				// A BlockUntil node keeps a non-nil empty body so an empty block
@@ -101,29 +93,21 @@ func Parse(
 			strings.HasSuffix(text, "\n") {
 			blk.body = blk.body[:n-1]
 		}
-		blk.node.Block = blk.body
-		// A delimited block that never closed would render a terminator the
-		// input never had, and that text reads back as a different block. Say so,
-		// because the same message otherwise covers a BlockUntil block that is
-		// kept.
+		// Unterminated blocks consume the remaining input and always report an Error.
+		msg := "%s: block not terminated before end of input"
+		args := []any{blk.node.Path()}
 		if blk.node.Def.Block.Kind == schema.BlockDelim {
-			d.AddAt(
-				blk.node.Line,
-				diag.Error,
-				"%s: block not terminated before end of input; the command and its %d captured lines were dropped",
-				blk.node.Path(),
-				len(blk.body),
-			)
+			// A delimited block that never closed would render a terminator the
+			// input never had, and that text reads back as a different block.
+			// Say so, because the same sentence otherwise covers a BlockUntil
+			// block that is kept.
+			msg += "; the command and its %d captured lines were dropped"
+			args = append(args, len(blk.body))
 			blk.node.Parent.ReplaceChild(blk.node)
 		} else {
-			// Unterminated blocks consume the remaining input and always report an Error.
-			d.AddAt(
-				blk.node.Line,
-				diag.Error,
-				"%s: block not terminated before end of input",
-				blk.node.Path(),
-			)
+			blk.node.Block = blk.body
 		}
+		d.AddAt(blk.node.Line, diag.Error, msg, args...)
 	}
 
 	if unknown == Drop && dropped > 0 {
@@ -132,14 +116,31 @@ func Parse(
 	return cfg
 }
 
+// closeBlock finishes a block node with the body captured for it: it reports
+// any text after the closing delimiter and drops a delimited block that has no
+// body. It returns the node, or nil when the drop detached it, so both callers
+// store one value back over the node instead of repeating the stack repair.
+func closeBlock(
+	d *diag.Diagnostics,
+	st step,
+	n *schema.Node,
+	body []string,
+) *schema.Node {
+	n.Block = body
+	blockTail(d, st, n)
+	if dropEmptyBlock(d, st.lineNo, n) {
+		return nil
+	}
+	return n
+}
+
 // dropEmptyBlock removes a delimited block whose body is empty and reports
 // whether it removed the node. A device accepts the empty form and then omits it
 // from the running configuration, so keeping the node would invent a command the
 // device does not report. The drop is reported, because a caller cannot
 // otherwise tell it from input that never carried the block at all.
 func dropEmptyBlock(d *diag.Diagnostics, lineNo int, n *schema.Node) bool {
-	if n.Def.Block.Kind != schema.BlockDelim ||
-		strings.Join(n.Block, "\n") != "" {
+	if n.Def.Block.Kind != schema.BlockDelim || !schema.EmptyDelimBody(n) {
 		return false
 	}
 	d.AddAt(

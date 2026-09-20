@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/acidsailor/confetti/diag"
@@ -19,8 +20,7 @@ func BlockBodies(cfg *schema.Config, d *diag.Diagnostics) {
 		if def == nil || def.Block.Kind != schema.BlockDelim {
 			return
 		}
-		body := strings.Join(n.Block, "\n")
-		if body == "" {
+		if schema.EmptyDelimBody(n) {
 			d.AddAt(
 				n.Line,
 				diag.Error,
@@ -31,7 +31,12 @@ func BlockBodies(cfg *schema.Config, d *diag.Diagnostics) {
 		}
 		// A device closes the block at the delimiter's next occurrence, so a body
 		// carrying the delimiter renders as a shorter block plus stray text.
-		if term := def.Block.Term(n.Fields); strings.Contains(body, term) {
+		// BlockDelim guarantees a single-rune delimiter, so it cannot straddle
+		// the newlines Block is split on and each entry can be tested alone.
+		term := def.Block.Term(n.Fields)
+		if slices.ContainsFunc(n.Block, func(l string) bool {
+			return strings.Contains(l, term)
+		}) {
 			d.AddAt(
 				n.Line,
 				diag.Error,

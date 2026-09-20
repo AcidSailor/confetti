@@ -79,7 +79,7 @@ func FuzzParse(f *testing.F) {
 			}
 			schema.Walk(cfg, func(n *schema.Node) {
 				_ = n.Path()
-				if got := normalize(n.Text); got != n.Text {
+				if got := schema.NormalizeLine(n.Text); got != n.Text {
 					t.Fatalf(
 						"node text not normalized: %q != %q",
 						n.Text,

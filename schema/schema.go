@@ -446,9 +446,7 @@ func (n *Def) SectionExit(
 	tok string,
 ) *Def {
 	if n.Block.Kind != BlockNone {
-		panic(
-			"schema: block node cannot have a SectionExit token: " + n.Template,
-		)
+		panic(blockWithSectionExit + n.Template)
 	}
 	n.SectionExitToken = tok
 	return n
@@ -492,6 +490,13 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 	return n
 }
 
+// Block guards must hold for either call order, so the two checks that enforce
+// each one share its message.
+const (
+	blockWithSectionExit = "schema: block node cannot have a SectionExit token: "
+	listWithBlock        = "schema: list node cannot open a block: "
+)
+
 // BlockDelim opens a raw block that runs from its captured delimiter to the next
 // occurrence of that delimiter, and excludes child nodes. The body carries every
 // character between the two delimiters, so the delimiter must close the template:
@@ -505,21 +510,21 @@ func (n *Def) Toggles(partners ...*Def) *Def {
 func (n *Def) BlockDelim(arg string) *Def {
 	// Reject empty terminators because they close at the first blank line and bypass block protection.
 	n.mustNonEmptyArg("BlockDelim", arg)
-	n.mustTrailingArg("BlockDelim", arg)
+	n.mustDelimArg(arg)
 	n.setBlock(BlockStrategy{Kind: BlockDelim, Arg: arg})
 	return n
 }
 
-// mustTrailingArg panics unless arg ends the template and its value type matches
+// mustDelimArg panics unless arg ends the template and its value type matches
 // exactly one non-space rune.
-func (n *Def) mustTrailingArg(setter, arg string) {
+func (n *Def) mustDelimArg(arg string) {
 	toks := n.spec.tokens
 	if last := toks[len(toks)-1]; last.kind != capToken || last.text != arg {
-		panic("schema: " + setter + " arg " + arg +
+		panic("schema: BlockDelim arg " + arg +
 			" must end the template: " + n.Template)
 	}
-	if !n.spec.oneCharArgs[arg] {
-		panic("schema: " + setter + " arg " + arg +
+	if !n.spec.oneNonSpaceRune(arg, n.Schema.Registry) {
+		panic("schema: BlockDelim arg " + arg +
 			` must capture exactly one non-space character (the built-in "delim" type does): ` +
 			n.Template)
 	}
@@ -548,14 +553,12 @@ func (n *Def) setBlock(b BlockStrategy) {
 		panic("schema: fold-only list node cannot open a block: " + n.Template)
 	}
 	if n.ListSpec.Arg != "" {
-		panic("schema: list node cannot open a block: " + n.Template)
+		panic(listWithBlock + n.Template)
 	}
 	// Render and compare return after a block body, so a section-exit token on a
 	// block node would be silently discarded.
 	if n.SectionExitToken != "" {
-		panic(
-			"schema: block node cannot have a SectionExit token: " + n.Template,
-		)
+		panic(blockWithSectionExit + n.Template)
 	}
 	n.Block = b
 }
@@ -739,7 +742,7 @@ func (n *Def) List(arg, elemType string) *Def {
 		panic("schema: list node cannot be ClearOnRemove: " + n.Template)
 	}
 	if n.Block.Kind != BlockNone {
-		panic("schema: list node cannot open a block: " + n.Template)
+		panic(listWithBlock + n.Template)
 	}
 	n.ListSpec.Arg, n.ListSpec.Elem = arg, elemType
 	n.Idempotent = true

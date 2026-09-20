@@ -63,18 +63,15 @@ func renderChange(b *strings.Builder, c remediate.Change, depth int) {
 // writeTree writes a signed node and its complete subtree.
 func writeTree(b *strings.Builder, sign string, n *schema.Node, depth int) {
 	if def := n.Def; def != nil && def.Block.Kind == schema.BlockDelim {
-		// Match render: the body runs between the two delimiters, and an empty
-		// body is a command the device would not report.
-		body := strings.Join(n.Block, "\n")
-		if body == "" {
+		// schema.DelimLines is what render emits from too, so the two cannot
+		// disagree about where a block's text comes from or about dropping the
+		// empty body a device would not report.
+		lines := schema.DelimLines(n)
+		if lines == nil {
 			return
 		}
-		term := def.Block.Term(n.Fields)
-		for i, l := range strings.Split(lineText(n)+body+term, "\n") {
-			if i == 0 {
-				writeLine(b, sign, depth, l)
-				continue
-			}
+		writeLine(b, sign, depth, lines[0])
+		for _, l := range lines[1:] {
 			// Body lines keep column zero after the sign.
 			writeLine(b, sign, 0, l)
 		}

@@ -19,13 +19,22 @@ func Render(cfg *schema.Config) string {
 
 func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	def := n.Def
-	// A device omits an empty delimited block, so emitting one would invent a
-	// command that cannot survive a round trip through the device. A nil Block
-	// on a BlockDelim node is dropped the same way; validate.BlockBodies is what
-	// reports it, because Render has no diagnostic channel.
-	if def != nil && def.Block.Kind == schema.BlockDelim &&
-		strings.Join(n.Block, "\n") == "" {
-		return
+	if def != nil && def.Block.Kind == schema.BlockDelim {
+		// schema.DelimLines carries the whole shape: nil for an empty body,
+		// which a device omits from its running configuration so emitting one
+		// would invent a command (validate.BlockBodies reports it, because
+		// Render has no diagnostic channel), otherwise the opener followed by
+		// the body lines at column zero.
+		lines := schema.DelimLines(n)
+		if lines == nil {
+			return
+		}
+		b.WriteString(strings.Repeat(indentUnit, depth))
+		for _, l := range lines {
+			b.WriteString(l)
+			b.WriteByte('\n')
+		}
+		return // setBlock forbids children and a section-exit token on a block.
 	}
 	indent := strings.Repeat(indentUnit, depth)
 	b.WriteString(indent)
@@ -33,15 +42,6 @@ func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 		b.WriteString(def.Render(n.Fields))
 	} else {
 		b.WriteString(n.Text)
-	}
-	// The body runs from the opener's delimiter to the next one, so joining it
-	// reproduces the body byte-exact between the two delimiters, on one line or
-	// many. The opener itself is re-rendered canonically.
-	if def != nil && def.Block.Kind == schema.BlockDelim {
-		b.WriteString(strings.Join(n.Block, "\n"))
-		b.WriteString(def.Block.Term(n.Fields))
-		b.WriteByte('\n')
-		return // setBlock forbids children and a section-exit token on a block.
 	}
 	b.WriteByte('\n')
 	// Preserve raw block bodies at column zero and append the terminator.

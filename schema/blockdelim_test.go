@@ -18,14 +18,23 @@ func delimType(t *testing.T, pat string) func() {
 	return func() { s.Node("banner motd {{ d:d }}").BlockDelim("d") }
 }
 
+// builtinDelimPattern returns the pattern the built-in "delim" type carries.
+func builtinDelimPattern(t *testing.T) string {
+	t.Helper()
+	vt, ok := value.NewRegistry().Get("delim")
+	require.True(t, ok, "the delim value type must be a builtin")
+	return vt.Pattern
+}
+
 // The delimiter bound is derived from regexp/syntax rather than sampled, so it
 // has to hold across the construct space, not just for the built-in pattern.
 func TestBlockDelimAcceptsOneNonSpaceRune(t *testing.T) {
 	for _, pat := range []string{
 		`[!@#^]`, `[a-z]`, `\d`, `\pL`, `\p{Greek}`, `(?:a|b)`,
 		`[[:punct:]]`, `x{1,1}`, `(?i)q`, `é`, `\x41`, `[\x{1F600}]`,
-		// The built-in delim type spells out every unicode.IsSpace rune.
-		`[^\t\n\v\f\r \x{0085}\p{Z}]`,
+		// Read the built-in live rather than copying it, so this case keeps
+		// certifying the pattern BlockDelim callers actually get.
+		builtinDelimPattern(t),
 	} {
 		t.Run(pat, func(t *testing.T) {
 			assert.NotPanics(t, delimType(t, pat))

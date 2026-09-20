@@ -61,7 +61,7 @@ func (sc *scanner) line(raw string) step {
 		return sc.bodyLine(raw)
 	}
 	indent := countIndent(raw)
-	txt := normalize(raw)
+	txt := schema.NormalizeLine(raw)
 	if txt == "" {
 		return step{kind: stepBlank, lineNo: sc.lineNo}
 	}
@@ -196,9 +196,4 @@ func countIndent(line string) int {
 		}
 	}
 	return n
-}
-
-// normalize shares schema's primitive so callers cannot drift from parsing.
-func normalize(line string) string {
-	return schema.NormalizeLine(line)
 }

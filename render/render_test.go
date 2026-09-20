@@ -73,33 +73,29 @@ func inlineSchema() *schema.Schema {
 }
 
 func TestRenderBlockInline(t *testing.T) {
-	// Every form renders back byte-exact: the body is the text between the
-	// two delimiters, so its line breaks are part of the banner.
-	cases := []struct{ name, in, want string }{
+	// Every form renders back byte-exact: the body is the text between the two
+	// delimiters, so its line breaks are part of the banner. Each input is
+	// therefore its own expected output and the case carries one copy of it.
+	cases := []struct{ name, in string }{
 		{
 			"one line",
-			"banner motd # one line banner #\nhostname sw1\n",
 			"banner motd # one line banner #\nhostname sw1\n",
 		},
 		{
 			"terminator on the next line is a different banner",
 			"banner motd # one line banner\n#\nhostname sw1\n",
-			"banner motd # one line banner\n#\nhostname sw1\n",
 		},
-		{"newline body", "banner motd #\n#\n", "banner motd #\n#\n"},
+		{"newline body", "banner motd #\n#\n"},
 		{
 			"nested",
-			"line vty\n  banner exec ^ hi ^\n",
 			"line vty\n  banner exec ^ hi ^\n",
 		},
 		{
 			"body lines",
 			"banner motd # first\nsecond\n#\n",
-			"banner motd # first\nsecond\n#\n",
 		},
 		{
 			"blank body line",
-			"banner motd # first\n\n#\n",
 			"banner motd # first\n\n#\n",
 		},
 	}
@@ -110,7 +106,7 @@ func TestRenderBlockInline(t *testing.T) {
 			cfg := parse.Parse(s, tc.in, parse.Reject, d)
 			require.False(t, d.HasErrors(), d.String())
 			out := Render(cfg)
-			assert.Equal(t, tc.want, out)
+			assert.Equal(t, tc.in, out)
 			// The rendered form parses back to an equal tree without diagnostics.
 			d2 := diag.New()
 			cfg2 := parse.Parse(s, out, parse.Reject, d2)
