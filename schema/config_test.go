@@ -50,19 +50,61 @@ func TestSetTextRetitlesInPlace(t *testing.T) {
 	assert.Equal(t, "new", child.Path())
 }
 
-func TestWalkVisitsAll(t *testing.T) {
-	s := New()
-	cfg := NewConfig(s)
+func TestConfigAllPreOrder(t *testing.T) {
+	cfg := NewConfig(New())
 	iface := cfg.Root.AddChild(NewNode("interface Ethernet1/1"))
+	iface.AddChild(NewNode("description uplink"))
 	iface.AddChild(NewNode("shutdown"))
+	vlan := cfg.Root.AddChild(NewNode("vlan 10"))
+	vlan.AddChild(NewNode("name users"))
 
-	var seen []string
-	Walk(cfg, func(n *Node) { seen = append(seen, n.Text) })
+	var walked, ranged []*Node
+	for _, top := range cfg.Root.Children {
+		top.Walk(func(n *Node) { walked = append(walked, n) })
+	}
+	for n := range cfg.All() {
+		ranged = append(ranged, n)
+	}
+	assert.Equal(t, walked, ranged)
 	assert.Equal(
 		t,
-		[]string{"interface Ethernet1/1", "shutdown"},
-		seen,
+		[]string{
+			"interface Ethernet1/1",
+			"description uplink",
+			"shutdown",
+			"vlan 10",
+			"name users",
+		},
+		texts(ranged),
 	)
+}
+
+func TestConfigAllStopsOnBreak(t *testing.T) {
+	cfg := NewConfig(New())
+	iface := cfg.Root.AddChild(NewNode("interface Ethernet1/1"))
+	iface.AddChild(NewNode("shutdown"))
+	// A later sibling at the break depth and a later top-level node catch
+	// a missed stop at either recursion level.
+	iface.AddChild(NewNode("mtu 9000"))
+	cfg.Root.AddChild(NewNode("vlan 10"))
+
+	var seen []string
+	for n := range cfg.All() {
+		seen = append(seen, n.Text)
+		if n.Text == "shutdown" {
+			break
+		}
+	}
+	assert.Equal(t, []string{"interface Ethernet1/1", "shutdown"}, seen)
+}
+
+func TestConfigAllEmpty(t *testing.T) {
+	var nilCfg *Config
+	for _, cfg := range []*Config{nilCfg, {}, NewConfig(New())} {
+		for range cfg.All() {
+			t.Fatal("unexpected node")
+		}
+	}
 }
 
 func TestNodeWalkCoversSubtreeOnly(t *testing.T) {

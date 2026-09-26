@@ -21,12 +21,12 @@ func TestDiffListDeltaMixed(t *testing.T) {
 		out)
 	// Both delta leaves are OpModify text leaves (def==nil, like negations).
 	var tagged int
-	schema.Walk(res.Tree, func(n *schema.Node) {
+	for n := range res.Tree.All() {
 		if n.Op == schema.OpModify {
 			tagged++
 			assert.Nil(t, n.Def)
 		}
-	})
+	}
 	assert.Equal(t, 2, tagged)
 }
 

@@ -22,7 +22,7 @@ func renderNode(b *strings.Builder, n *schema.Node, depth int) {
 	if def != nil && def.Block.Kind == schema.BlockDelim {
 		// DelimLines omits empty bodies; validate.BlockBodies reports them.
 		// Indent only the opener to preserve raw body lines.
-		lines := schema.DelimLines(n)
+		lines := n.DelimLines()
 		if lines == nil {
 			return
 		}

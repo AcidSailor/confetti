@@ -75,7 +75,7 @@ func FuzzParse(f *testing.F) {
 			if cfg == nil {
 				t.Fatalf("Parse returned nil config for %q", in)
 			}
-			schema.Walk(cfg, func(n *schema.Node) {
+			for n := range cfg.All() {
 				_ = n.Path()
 				if got := schema.NormalizeLine(n.Text); got != n.Text {
 					t.Fatalf(
@@ -84,7 +84,7 @@ func FuzzParse(f *testing.F) {
 						got,
 					)
 				}
-			})
+			}
 			first := render.Render(cfg)
 			if second := render.Render(cfg); first != second {
 				t.Fatalf("Render not deterministic for %q", in)

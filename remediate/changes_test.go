@@ -15,14 +15,13 @@ import (
 // findNode returns a source node for pointer-identity assertions.
 func findNode(t *testing.T, cfg *schema.Config, text string) *schema.Node {
 	t.Helper()
-	var got *schema.Node
-	schema.Walk(cfg, func(n *schema.Node) {
-		if got == nil && n.Text == text {
-			got = n
+	for n := range cfg.All() {
+		if n.Text == text {
+			return n
 		}
-	})
-	require.NotNil(t, got, "node %q not found", text)
-	return got
+	}
+	t.Fatalf("node %q not found", text)
+	return nil
 }
 
 func TestChangesPairSourceNodes(t *testing.T) {

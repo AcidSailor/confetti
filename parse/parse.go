@@ -133,7 +133,7 @@ func closeBlock(
 // observed device behavior documented in docs/fixtures.md. It reports whether
 // the node was removed.
 func dropEmptyBlock(d *diag.Diagnostics, lineNo int, n *schema.Node) bool {
-	if n.Def.Block.Kind != schema.BlockDelim || !schema.EmptyDelimBody(n) {
+	if n.Def.Block.Kind != schema.BlockDelim || !n.EmptyDelimBody() {
 		return false
 	}
 	d.AddAt(

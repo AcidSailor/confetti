@@ -178,7 +178,7 @@ func (e *Engine) commitCheck(cfg *schema.Config, d *diag.Diagnostics) {
 	for _, fn := range e.commitChecks {
 		vd := diag.New()
 		// A clone protects the shared baseline from validator mutations.
-		fn(cfg, schema.CloneConfig(base), vd)
+		fn(cfg, base.Clone(), vd)
 		d.Merge(vd)
 	}
 }
