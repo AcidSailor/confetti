@@ -14,10 +14,10 @@ import (
 // trip. Parse prevents both, but callers, transforms, and merge resolvers can
 // construct them. This check provides the diagnostics that renderers cannot.
 func BlockBodies(cfg *schema.Config, d *diag.Diagnostics) {
-	cfg.Walk(func(n *schema.Node) {
+	for n := range cfg.All() {
 		def := n.Def
 		if def == nil || def.Block.Kind != schema.BlockDelim {
-			return
+			continue
 		}
 		if n.EmptyDelimBody() {
 			d.AddAt(
@@ -26,7 +26,7 @@ func BlockBodies(cfg *schema.Config, d *diag.Diagnostics) {
 				"%s: delimited block has no body; a device omits the empty form, so this node renders to nothing",
 				n.Path(),
 			)
-			return
+			continue
 		}
 		// A delimiter in the body would close the block early. It is one
 		// non-space rune, so each body line can be checked separately.
@@ -42,5 +42,5 @@ func BlockBodies(cfg *schema.Config, d *diag.Diagnostics) {
 				term,
 			)
 		}
-	})
+	}
 }

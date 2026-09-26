@@ -120,7 +120,9 @@ func TestEngineRemediateClean(t *testing.T) {
 // engineOpsByText indexes engine results by operation text.
 func engineOpsByText(res *remediate.Result) map[string]schema.Op {
 	ops := map[string]schema.Op{}
-	res.Tree.Walk(func(n *schema.Node) { ops[n.Text] = n.Op })
+	for n := range res.Tree.All() {
+		ops[n.Text] = n.Op
+	}
 	return ops
 }
 
@@ -253,11 +255,11 @@ func TestCommitCheckPerItemListRef(t *testing.T) {
 
 func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
 	noUsersVlan := func(cfg, _ *schema.Config, d *diag.Diagnostics) {
-		cfg.Walk(func(n *schema.Node) {
+		for n := range cfg.All() {
 			// Bind to the schema definition instead of any node carrying a text field.
 			if n.Parent == nil || n.Parent.Def == nil ||
 				n.Parent.Def.KindName != "vlan" {
-				return
+				continue
 			}
 			if n.Fields["text"] == "USERS" {
 				d.AddAt(
@@ -267,7 +269,7 @@ func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
 					n.Path(),
 				)
 			}
-		})
+		}
 	}
 	e := confetti.New(alpha.Schema(),
 		confetti.WithUnknown(parse.Reject),

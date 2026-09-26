@@ -57,7 +57,9 @@ func TestWalkVisitsAll(t *testing.T) {
 	iface.AddChild(NewNode("shutdown"))
 
 	var seen []string
-	cfg.Walk(func(n *Node) { seen = append(seen, n.Text) })
+	for n := range cfg.All() {
+		seen = append(seen, n.Text)
+	}
 	assert.Equal(
 		t,
 		[]string{"interface Ethernet1/1", "shutdown"},
@@ -65,7 +67,7 @@ func TestWalkVisitsAll(t *testing.T) {
 	)
 }
 
-func TestConfigAllMatchesWalk(t *testing.T) {
+func TestConfigAllPreOrder(t *testing.T) {
 	cfg := NewConfig(New())
 	iface := cfg.Root.AddChild(NewNode("interface Ethernet1/1"))
 	iface.AddChild(NewNode("description uplink"))
@@ -74,12 +76,24 @@ func TestConfigAllMatchesWalk(t *testing.T) {
 	vlan.AddChild(NewNode("name users"))
 
 	var walked, ranged []*Node
-	cfg.Walk(func(n *Node) { walked = append(walked, n) })
+	for _, top := range cfg.Root.Children {
+		top.Walk(func(n *Node) { walked = append(walked, n) })
+	}
 	for n := range cfg.All() {
 		ranged = append(ranged, n)
 	}
 	assert.Equal(t, walked, ranged)
-	assert.Len(t, ranged, 5)
+	assert.Equal(
+		t,
+		[]string{
+			"interface Ethernet1/1",
+			"description uplink",
+			"shutdown",
+			"vlan 10",
+			"name users",
+		},
+		texts(ranged),
+	)
 }
 
 func TestConfigAllStopsOnBreak(t *testing.T) {

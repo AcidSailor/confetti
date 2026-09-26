@@ -33,7 +33,9 @@ func valueCheck(cfg *schema.Config, d *diag.Diagnostics) {
 		argNames: map[*schema.Def][]string{},
 		d:        d,
 	}
-	cfg.Walk(v.checkValues)
+	for n := range cfg.All() {
+		v.checkValues(n)
+	}
 }
 
 // valueChecker validates node values against their registered types.

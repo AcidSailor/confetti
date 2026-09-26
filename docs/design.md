@@ -199,7 +199,7 @@ retain the source line and report diagnostics.
 ### Pairing and diff semantics
 
 - **Remediation output is a new `*schema.Config` of operation-tagged nodes.**
-  The standard renderer produces executable CLI, and `(*schema.Config).Walk` supports
+  The standard renderer produces executable CLI, and `(*schema.Config).All` supports
   inspection. `OpNone` is the zero value because every node has an operation.
   `OpRemove` nodes have no definition: a negated line does not match its
   positive definition, and the missing definition suppresses an incorrect

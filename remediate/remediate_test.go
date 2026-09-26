@@ -46,11 +46,11 @@ func TestDiffModifyIdempotent(t *testing.T) {
 		"interface Ethernet1/1\n  description B\n")
 	assert.Equal(t, "interface Ethernet1/1\n  description B\n", out)
 	var sawModify bool
-	res.Tree.Walk(func(n *schema.Node) {
+	for n := range res.Tree.All() {
 		if n.Op == schema.OpModify && n.Text == "description B" {
 			sawModify = true
 		}
-	})
+	}
 	assert.True(t, sawModify)
 }
 
@@ -158,14 +158,14 @@ func TestDiffFullLineValueIsAddRemoveNotModify(t *testing.T) {
 		schema.OpRemove,
 		ops["no ip address 10.0.0.1 255.255.255.0 secondary"],
 	)
-	res.Tree.Walk(func(n *schema.Node) {
+	for n := range res.Tree.All() {
 		assert.NotEqual(
 			t,
 			schema.OpModify,
 			n.Op,
 			"full-line change must not Modify",
 		)
-	})
+	}
 }
 
 func TestDiffOpTagsAddRemoveSection(t *testing.T) {
@@ -198,7 +198,9 @@ func TestDiffUnmatchedNodeDefensive(t *testing.T) {
 
 func opsByText(res *Result) map[string]schema.Op {
 	ops := map[string]schema.Op{}
-	res.Tree.Walk(func(n *schema.Node) { ops[n.Text] = n.Op })
+	for n := range res.Tree.All() {
+		ops[n.Text] = n.Op
+	}
 	return ops
 }
 

@@ -74,11 +74,11 @@ type fakeTreeTransform struct {
 
 func (f fakeTreeTransform) Apply(cfg *schema.Config) {
 	*f.ran = true
-	cfg.Walk(func(n *schema.Node) {
+	for n := range cfg.All() {
 		if n.Text == f.from {
 			n.Text = f.to
 		}
-	})
+	}
 }
 
 func TestEngineImportTreeTransformRuns(t *testing.T) {
@@ -452,7 +452,9 @@ func TestWithBaselineReachesValidators(t *testing.T) {
 	var seen []string
 	record := func(_, baseline *schema.Config, _ *diag.Diagnostics) {
 		seen = nil
-		baseline.Walk(func(n *schema.Node) { seen = append(seen, n.Text) })
+		for n := range baseline.All() {
+			seen = append(seen, n.Text)
+		}
 	}
 	e := confetti.New(remediateSchema(),
 		confetti.WithBaseline("vlan 1\n"),
@@ -501,7 +503,8 @@ func TestValidatorAlwaysReceivesANonNilBaseline(t *testing.T) {
 	walked := false
 	record := func(_, baseline *schema.Config, _ *diag.Diagnostics) {
 		require.NotNil(t, baseline)
-		baseline.Walk(func(*schema.Node) {})
+		for range baseline.All() {
+		}
 		walked = true
 	}
 	// No WithBaseline: the validator must still be able to walk the baseline.
@@ -546,12 +549,12 @@ func TestCommitCheckReportsSchemaMismatchAndStillChecksTheTree(t *testing.T) {
 type renumberVlan struct{ from, to string }
 
 func (r renumberVlan) Apply(cfg *schema.Config) {
-	cfg.Walk(func(n *schema.Node) {
+	for n := range cfg.All() {
 		if n.Fields["id"] == r.from {
 			n.Fields["id"] = r.to
 			n.Text = "vlan " + r.to
 		}
-	})
+	}
 }
 
 func TestWithBaselineAppliesImportTreeInBothOrders(t *testing.T) {

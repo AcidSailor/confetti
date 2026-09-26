@@ -189,17 +189,7 @@ func (c *Config) Clone() *Config {
 	return out
 }
 
-// Walk visits every real node (excludes the sentinel root) in pre-order; a config without a root has no nodes.
-func (c *Config) Walk(fn func(*Node)) {
-	if c == nil || c.Root == nil {
-		return
-	}
-	for _, n := range c.Root.Children {
-		n.Walk(fn)
-	}
-}
-
-// All yields the same nodes as Walk in the same pre-order and stops when yield returns false.
+// All yields every real node (excludes the sentinel root) in pre-order and stops when yield returns false; a config without a root has no nodes.
 func (c *Config) All() iter.Seq[*Node] {
 	return func(yield func(*Node) bool) {
 		if c == nil || c.Root == nil {

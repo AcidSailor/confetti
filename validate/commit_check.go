@@ -53,11 +53,19 @@ func CommitCheck(cfg, baseline *schema.Config, d *diag.Diagnostics) {
 
 	// Baseline nodes are relation targets and name holders; their own relations are never checked.
 	if baseline != nil {
-		baseline.Walk(c.recordBaseline)
+		for n := range baseline.All() {
+			c.recordBaseline(n)
+		}
 	}
-	cfg.Walk(c.recordConfig)
-	cfg.Walk(c.checkRelations)
-	cfg.Walk(c.checkExclusive)
+	for n := range cfg.All() {
+		c.recordConfig(n)
+	}
+	for n := range cfg.All() {
+		c.checkRelations(n)
+	}
+	for n := range cfg.All() {
+		c.checkExclusive(n)
+	}
 	BlockBodies(cfg, d)
 }
 
