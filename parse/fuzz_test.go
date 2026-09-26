@@ -75,7 +75,7 @@ func FuzzParse(f *testing.F) {
 			if cfg == nil {
 				t.Fatalf("Parse returned nil config for %q", in)
 			}
-			schema.Walk(cfg, func(n *schema.Node) {
+			cfg.Walk(func(n *schema.Node) {
 				_ = n.Path()
 				if got := schema.NormalizeLine(n.Text); got != n.Text {
 					t.Fatalf(

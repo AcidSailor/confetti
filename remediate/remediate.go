@@ -29,7 +29,7 @@ type Result struct {
 // Empty reports whether the remediation contains no change operations.
 func (r *Result) Empty() bool {
 	empty := true
-	schema.Walk(r.Tree, func(n *schema.Node) {
+	r.Tree.Walk(func(n *schema.Node) {
 		if isChange(n) {
 			empty = false
 		}

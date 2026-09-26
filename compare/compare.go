@@ -64,7 +64,7 @@ func renderChange(b *strings.Builder, c remediate.Change, depth int) {
 func writeTree(b *strings.Builder, sign string, n *schema.Node, depth int) {
 	if def := n.Def; def != nil && def.Block.Kind == schema.BlockDelim {
 		// Share block formatting and empty-body omission with render.
-		lines := schema.DelimLines(n)
+		lines := n.DelimLines()
 		if lines == nil {
 			return
 		}

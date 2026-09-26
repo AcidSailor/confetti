@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"iter"
 	"maps"
 	"slices"
 	"strings"
@@ -63,7 +64,7 @@ func NewNode(text string) *Node {
 // EmptyDelimBody reports whether joining n.Block with newlines would be empty.
 // Parse drops these blocks; render and compare omit them, and
 // validate.BlockBodies reports them in caller-built trees.
-func EmptyDelimBody(n *Node) bool {
+func (n *Node) EmptyDelimBody() bool {
 	return len(n.Block) == 0 || len(n.Block) == 1 && n.Block[0] == ""
 }
 
@@ -72,8 +73,8 @@ func EmptyDelimBody(n *Node) bool {
 // rest at column zero.
 //
 // n must have a BlockDelim definition. An empty body returns nil.
-func DelimLines(n *Node) []string {
-	if EmptyDelimBody(n) {
+func (n *Node) DelimLines() []string {
+	if n.EmptyDelimBody() {
 		return nil
 	}
 	body := strings.Join(n.Block, "\n")
@@ -179,8 +180,8 @@ func NewConfig(s *Schema) *Config {
 	return &Config{Schema: s, Root: NewNode("")}
 }
 
-// CloneConfig deep-copies a configuration so a caller cannot mutate the original.
-func CloneConfig(c *Config) *Config {
+// Clone deep-copies a configuration so a caller cannot mutate the original.
+func (c *Config) Clone() *Config {
 	out := NewConfig(c.Schema)
 	for _, ch := range c.Root.Children {
 		out.Root.AddChild(ch.cloneTree())
@@ -189,13 +190,40 @@ func CloneConfig(c *Config) *Config {
 }
 
 // Walk visits every real node (excludes the sentinel root) in pre-order; a config without a root has no nodes.
-func Walk(c *Config, fn func(*Node)) {
+func (c *Config) Walk(fn func(*Node)) {
 	if c == nil || c.Root == nil {
 		return
 	}
 	for _, n := range c.Root.Children {
 		n.Walk(fn)
 	}
+}
+
+// All yields the same nodes as Walk in the same pre-order and stops when yield returns false.
+func (c *Config) All() iter.Seq[*Node] {
+	return func(yield func(*Node) bool) {
+		if c == nil || c.Root == nil {
+			return
+		}
+		for _, n := range c.Root.Children {
+			if !n.all(yield) {
+				return
+			}
+		}
+	}
+}
+
+// all yields n and its descendants in pre-order and reports whether iteration should continue.
+func (n *Node) all(yield func(*Node) bool) bool {
+	if !yield(n) {
+		return false
+	}
+	for _, c := range n.Children {
+		if !c.all(yield) {
+			return false
+		}
+	}
+	return true
 }
 
 // Walk visits n and its descendants in pre-order.

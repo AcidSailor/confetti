@@ -120,7 +120,7 @@ func TestEngineRemediateClean(t *testing.T) {
 // engineOpsByText indexes engine results by operation text.
 func engineOpsByText(res *remediate.Result) map[string]schema.Op {
 	ops := map[string]schema.Op{}
-	schema.Walk(res.Tree, func(n *schema.Node) { ops[n.Text] = n.Op })
+	res.Tree.Walk(func(n *schema.Node) { ops[n.Text] = n.Op })
 	return ops
 }
 
@@ -253,7 +253,7 @@ func TestCommitCheckPerItemListRef(t *testing.T) {
 
 func TestWithCommitChecksRunsOnEveryCommitCheckingPath(t *testing.T) {
 	noUsersVlan := func(cfg, _ *schema.Config, d *diag.Diagnostics) {
-		schema.Walk(cfg, func(n *schema.Node) {
+		cfg.Walk(func(n *schema.Node) {
 			// Bind to the schema definition instead of any node carrying a text field.
 			if n.Parent == nil || n.Parent.Def == nil ||
 				n.Parent.Def.KindName != "vlan" {

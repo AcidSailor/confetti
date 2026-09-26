@@ -16,7 +16,7 @@ import (
 func findNode(t *testing.T, cfg *schema.Config, text string) *schema.Node {
 	t.Helper()
 	var got *schema.Node
-	schema.Walk(cfg, func(n *schema.Node) {
+	cfg.Walk(func(n *schema.Node) {
 		if got == nil && n.Text == text {
 			got = n
 		}

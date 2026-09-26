@@ -14,12 +14,12 @@ import (
 // trip. Parse prevents both, but callers, transforms, and merge resolvers can
 // construct them. This check provides the diagnostics that renderers cannot.
 func BlockBodies(cfg *schema.Config, d *diag.Diagnostics) {
-	schema.Walk(cfg, func(n *schema.Node) {
+	cfg.Walk(func(n *schema.Node) {
 		def := n.Def
 		if def == nil || def.Block.Kind != schema.BlockDelim {
 			return
 		}
-		if schema.EmptyDelimBody(n) {
+		if n.EmptyDelimBody() {
 			d.AddAt(
 				n.Line,
 				diag.Error,

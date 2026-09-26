@@ -199,7 +199,7 @@ retain the source line and report diagnostics.
 ### Pairing and diff semantics
 
 - **Remediation output is a new `*schema.Config` of operation-tagged nodes.**
-  The standard renderer produces executable CLI, and `schema.Walk` supports
+  The standard renderer produces executable CLI, and `(*schema.Config).Walk` supports
   inspection. `OpNone` is the zero value because every node has an operation.
   `OpRemove` nodes have no definition: a negated line does not match its
   positive definition, and the missing definition suppresses an incorrect
@@ -364,7 +364,7 @@ retain the source line and report diagnostics.
   `Block` holds the body split on newlines, including text beside either
   delimiter. `banner motd ^ hi ^` gives `[" hi "]` and
   `banner motd ^\nhi\n^` gives `["", "hi", ""]`. Spaces and newlines are part
-  of the body, so these forms differ. `schema.DelimLines` supplies both
+  of the body, so these forms differ. `(*schema.Node).DelimLines` supplies both
   `render` and `compare` with the opener, body, and closing delimiter.
 
   A `BlockUntil` terminator occupies a separate line.
