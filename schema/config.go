@@ -180,7 +180,8 @@ func NewConfig(s *Schema) *Config {
 	return &Config{Schema: s, Root: NewNode("")}
 }
 
-// Clone deep-copies a configuration so a caller cannot mutate the original.
+// Clone deep-copies the node tree so a caller cannot mutate the original.
+// The copy shares the original's Schema. c must not be nil.
 func (c *Config) Clone() *Config {
 	out := NewConfig(c.Schema)
 	for _, ch := range c.Root.Children {
@@ -189,7 +190,9 @@ func (c *Config) Clone() *Config {
 	return out
 }
 
-// All yields every real node (excludes the sentinel root) in pre-order and stops when yield returns false; a config without a root has no nodes.
+// All yields every real node (excludes the sentinel root) in pre-order and
+// stops when yield returns false. A nil config or one without a root yields
+// no nodes.
 func (c *Config) All() iter.Seq[*Node] {
 	return func(yield func(*Node) bool) {
 		if c == nil || c.Root == nil {
@@ -203,7 +206,8 @@ func (c *Config) All() iter.Seq[*Node] {
 	}
 }
 
-// all yields n and its descendants in pre-order and reports whether iteration should continue.
+// all yields n and its descendants in pre-order and reports whether
+// iteration should continue.
 func (n *Node) all(yield func(*Node) bool) bool {
 	if !yield(n) {
 		return false

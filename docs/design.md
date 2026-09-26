@@ -199,11 +199,11 @@ retain the source line and report diagnostics.
 ### Pairing and diff semantics
 
 - **Remediation output is a new `*schema.Config` of operation-tagged nodes.**
-  The standard renderer produces executable CLI, and `(*schema.Config).All` supports
-  inspection. `OpNone` is the zero value because every node has an operation.
-  `OpRemove` nodes have no definition: a negated line does not match its
-  positive definition, and the missing definition suppresses an incorrect
-  section-exit token on a negated block.
+  The standard renderer produces executable CLI, and
+  `(*schema.Config).All` supports inspection. `OpNone` is the zero value
+  because every node has an operation. `OpRemove` nodes have no definition: a
+  negated line does not match its positive definition, and the missing
+  definition suppresses an incorrect section-exit token on a negated block.
 - **Diff never mutates its inputs.** `Change.Running`/`.Intended` alias the
   caller's trees read-only; the artifact is built from new nodes.
 - **`Diff` is direction-independent, and `Remediate` and `Rollback` use the

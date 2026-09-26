@@ -50,23 +50,6 @@ func TestSetTextRetitlesInPlace(t *testing.T) {
 	assert.Equal(t, "new", child.Path())
 }
 
-func TestWalkVisitsAll(t *testing.T) {
-	s := New()
-	cfg := NewConfig(s)
-	iface := cfg.Root.AddChild(NewNode("interface Ethernet1/1"))
-	iface.AddChild(NewNode("shutdown"))
-
-	var seen []string
-	for n := range cfg.All() {
-		seen = append(seen, n.Text)
-	}
-	assert.Equal(
-		t,
-		[]string{"interface Ethernet1/1", "shutdown"},
-		seen,
-	)
-}
-
 func TestConfigAllPreOrder(t *testing.T) {
 	cfg := NewConfig(New())
 	iface := cfg.Root.AddChild(NewNode("interface Ethernet1/1"))
@@ -100,6 +83,9 @@ func TestConfigAllStopsOnBreak(t *testing.T) {
 	cfg := NewConfig(New())
 	iface := cfg.Root.AddChild(NewNode("interface Ethernet1/1"))
 	iface.AddChild(NewNode("shutdown"))
+	// A later sibling at the break depth and a later top-level node catch
+	// a missed stop at either recursion level.
+	iface.AddChild(NewNode("mtu 9000"))
 	cfg.Root.AddChild(NewNode("vlan 10"))
 
 	var seen []string

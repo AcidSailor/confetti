@@ -330,6 +330,8 @@ func TestDiffSectionHeaderUnchangedNoModify(t *testing.T) {
 	require.False(t, d.HasErrors(), d.String())
 	assert.Equal(t, "vlan 10 name FOO\n  no shutdown\n",
 		render.Render(res.Tree))
+	// The only change sits under an unchanged section header.
+	assert.False(t, res.Empty())
 	require.Len(t, res.Changes, 1)
 	assert.Equal(t, graph.Remove, res.Changes[0].Action)
 }
